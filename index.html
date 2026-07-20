@@ -1,0 +1,1548 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>NIFTY 50 - Open / High / Low Tracker</title>
+    <style>
+      :root {
+        --bg: #0a0e17;
+        --panel: #131a29;
+        --panel2: #171f32;
+        --panel-raised: #1c2438;
+        --line: rgba(255, 255, 255, 0.09);
+        --line-strong: rgba(255, 255, 255, 0.16);
+        --txt: #eef1f8;
+        --muted: #8b96ad;
+        --muted-ink: #aab3c6;
+        --up: #2dd4a7;
+        --down: #fb6a75;
+        --flat: #7c879e;
+        --accent: #5b9dff;
+        --accent-2: #8b7bf0;
+        --chip: rgba(255, 255, 255, 0.06);
+        --radius-sm: 8px;
+        --radius-md: 12px;
+        --radius-lg: 18px;
+        --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.25);
+        --shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+        --rowup: rgba(45, 212, 167, 0.1);
+        --rowdown: rgba(251, 106, 117, 0.11);
+        --select-chevron: #8b96ad;
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --bg: #f2f4f9;
+          --panel: #ffffff;
+          --panel2: #f6f8fc;
+          --panel-raised: #ffffff;
+          --line: rgba(20, 30, 60, 0.09);
+          --line-strong: rgba(20, 30, 60, 0.16);
+          --txt: #141a26;
+          --muted: #66708a;
+          --muted-ink: #4c5570;
+          --up: #0d9b6c;
+          --down: #e0344f;
+          --flat: #6b7488;
+          --accent: #2f6fed;
+          --accent-2: #7c5cf0;
+          --chip: rgba(20, 30, 60, 0.05);
+          --shadow-sm: 0 2px 8px rgba(20, 30, 60, 0.06);
+          --shadow: 0 12px 28px rgba(20, 30, 60, 0.1);
+          --rowup: rgba(13, 155, 108, 0.09);
+          --rowdown: rgba(224, 52, 79, 0.08);
+          --select-chevron: #66708a;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+      }
+      body {
+        background: var(--bg);
+        color: var(--txt);
+        font:
+          14px/1.45 -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          Roboto,
+          Helvetica,
+          Arial,
+          sans-serif;
+        -webkit-font-smoothing: antialiased;
+        padding: 16px 18px 44px;
+        max-width: 100%;
+        margin: 0 auto;
+      }
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 16px;
+        margin: -16px -18px 16px;
+        padding: 14px 18px;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: color-mix(in srgb, var(--bg) 82%, transparent);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        border-bottom: 1px solid var(--line);
+      }
+      h1 {
+        font-size: 19px;
+        margin: 0;
+        font-weight: 750;
+        letter-spacing: 0.1px;
+      }
+      h1 .idx {
+        background: linear-gradient(90deg, var(--accent), var(--accent-2));
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+      .status {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 600;
+        font-size: 12.5px;
+        background: var(--chip);
+        border: 1px solid var(--line);
+        padding: 6px 12px 6px 10px;
+        border-radius: 999px;
+        color: var(--muted-ink);
+      }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--flat);
+        flex: none;
+      }
+      .dot.open {
+        background: var(--up);
+        box-shadow: 0 0 0 3px var(--rowup);
+        animation: pulse 2s infinite;
+      }
+      .dot.closed {
+        background: var(--down);
+        box-shadow: 0 0 0 3px var(--rowdown);
+      }
+      @keyframes pulse {
+        0% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.45;
+        }
+        100% {
+          opacity: 1;
+        }
+      }
+      /* small inline status marker - never rely on row color alone */
+      .dotmark {
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        margin-right: 7px;
+        vertical-align: middle;
+        flex: none;
+      }
+      .dotmark.up {
+        background: var(--up);
+      }
+      .dotmark.down {
+        background: var(--down);
+      }
+      .dotmark.flat {
+        background: var(--flat);
+        opacity: 0.45;
+      }
+      .spacer {
+        flex: 1;
+      }
+
+      /* ---------- tooltip hint: hover/focus any [data-tip] to see a short note.
+         One JS-driven, position:fixed tooltip for the whole page (not a CSS ::after) -
+         a ::after popover has no room to render above elements pinned to the top of an
+         overflow:auto ancestor (e.g. the table's sticky header) and gets silently
+         clipped there, so this needed to escape that clipping everywhere anyway. ---------- */
+      .hint {
+        border-bottom: 1px dotted var(--muted);
+        cursor: help;
+      }
+      thead .hint {
+        border-bottom-color: var(--muted);
+      }
+      #tt {
+        position: fixed;
+        z-index: 100;
+        background: var(--panel-raised);
+        color: var(--txt);
+        border: 1px solid var(--line-strong);
+        box-shadow: var(--shadow);
+        padding: 7px 11px;
+        border-radius: 9px;
+        font-size: 11.5px;
+        font-weight: 500;
+        line-height: 1.4;
+        max-width: 230px;
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        transform: scale(0.92) translateY(3px);
+        transform-origin: 50% calc(100% + 5px);
+        transition:
+          opacity 0.1s ease,
+          transform 0.12s cubic-bezier(0.2, 0.8, 0.2, 1);
+      }
+      #tt.show {
+        opacity: 1;
+        visibility: visible;
+        transform: scale(1) translateY(0);
+      }
+      #tt.flip {
+        transform-origin: 50% -5px;
+      }
+      #tt .tt-arrow {
+        position: absolute;
+        width: 9px;
+        height: 9px;
+        background: var(--panel-raised);
+        border: 1px solid var(--line-strong);
+        transform: rotate(45deg);
+        left: var(--arrow-left, 50%);
+        margin-left: -5px;
+      }
+      #tt:not(.flip) .tt-arrow {
+        bottom: -5.5px;
+        border-top-color: transparent;
+        border-left-color: transparent;
+        border-radius: 0 0 3px 0;
+      }
+      #tt.flip .tt-arrow {
+        top: -5.5px;
+        border-bottom-color: transparent;
+        border-right-color: transparent;
+        border-radius: 3px 0 0 0;
+      }
+
+      button:focus-visible,
+      .field select:focus-visible,
+      th:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        align-items: center;
+        margin-bottom: 16px;
+      }
+      /* a proper form field - caption label above, bordered control below;
+         not a boxed/padded chip wrapping the whole label+control pair */
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+      .field label {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 10.5px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        color: var(--muted);
+      }
+      .field svg {
+        color: var(--muted);
+        flex: none;
+      }
+      .field select {
+        appearance: none;
+        -webkit-appearance: none;
+        background-color: var(--panel);
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238b96ad' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 9px center;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        color: var(--txt);
+        font: inherit;
+        font-weight: 650;
+        font-size: 13px;
+        padding: 6px 27px 6px 9px;
+        cursor: pointer;
+        transition: border-color 0.15s ease;
+      }
+      .field select:hover {
+        border-color: var(--line-strong);
+      }
+      .field select:focus-visible {
+        border-color: var(--accent);
+      }
+      @media (prefers-color-scheme: light) {
+        .field select {
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2366708a' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+        }
+      }
+      .divider {
+        width: 1px;
+        height: 34px;
+        background: var(--line);
+        align-self: flex-end;
+        margin-bottom: 1px;
+      }
+      button {
+        cursor: pointer;
+        font: inherit;
+        font-weight: 600;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--txt);
+        padding: 8px 14px;
+        box-shadow: var(--shadow-sm);
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        transition:
+          background-color 0.15s ease,
+          border-color 0.15s ease,
+          color 0.15s ease,
+          transform 0.15s ease,
+          filter 0.15s ease;
+      }
+      button:hover:not(:disabled):not(.tab) {
+        border-color: var(--line-strong);
+        transform: translateY(-1px);
+        box-shadow: var(--shadow);
+      }
+      button.primary {
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        color: #fff;
+        border-color: transparent;
+        margin-top: auto;
+      }
+      button.primary:hover:not(:disabled) {
+        filter: brightness(1.08);
+      }
+      button.primary:active:not(:disabled) {
+        filter: brightness(0.95);
+      }
+      button:active {
+        transform: translateY(1px);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      #refreshIcon {
+        display: inline-block;
+        transform-box: fill-box;
+        transform-origin: 50% 50%;
+      }
+      #refreshIcon.spin {
+        animation: spin 0.7s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      /* segmented control track - index picker (accent) and status filter (neutral) */
+      .tabs {
+        display: inline-flex;
+        flex-wrap: wrap;
+        gap: 3px;
+        align-items: center;
+        /* in the full-height flex-column layout, block children stretch to full
+           width by default - keep the pill track hugging its own content */
+        align-self: flex-start;
+        background: var(--chip);
+        border: 1px solid var(--line);
+        padding: 4px;
+        border-radius: 999px;
+        margin-bottom: 10px;
+      }
+      p.lbl {
+        color: var(--muted);
+        font-size: 11.5px;
+        margin: -3px 0 12px;
+      }
+      .tabs .lbl {
+        color: var(--muted);
+        font-size: 11.5px;
+        margin-left: 8px;
+        padding-right: 6px;
+      }
+      .tab {
+        border-radius: 999px !important;
+        box-shadow: none !important;
+        padding: 7px 13px !important;
+      }
+      .tab:hover:not(.active):not(:disabled) {
+        background: var(--panel-raised);
+        color: var(--txt);
+        border-color: transparent;
+        transform: none;
+        box-shadow: none !important;
+      }
+      .tab.active {
+        background: var(--panel-raised);
+        color: var(--txt);
+        border-color: transparent;
+        box-shadow: var(--shadow-sm) !important;
+      }
+      .tab .cnt {
+        opacity: 0.6;
+        font-weight: 700;
+        font-size: 11px;
+        margin-left: 3px;
+      }
+      #idxTabs .tab.active {
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        color: #fff;
+      }
+      #idxTabs .tab {
+        font-size: 13px;
+        font-weight: 650;
+      }
+      /* index headline cards - both indices' own points values, always shown,
+         top-right of the controls row beside the Refresh button */
+      .idxcards {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: auto;
+      }
+      .idxcard {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        padding: 8px 13px;
+        min-width: 190px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-sm);
+      }
+      .idxcard-stats {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1px 12px;
+        margin-top: 1px;
+        font-variant-numeric: tabular-nums;
+      }
+      .idxcard-stats span {
+        font-size: 10.5px;
+        color: var(--muted);
+      }
+      .idxcard-stats b {
+        color: var(--txt);
+        font-weight: 650;
+        margin-left: 4px;
+      }
+      .idxcard-name {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .idxcard-row {
+        display: flex;
+        align-items: baseline;
+        gap: 9px;
+      }
+      .idxcard-pts {
+        font-size: 19px;
+        font-weight: 760;
+        letter-spacing: 0.2px;
+      }
+      .idxcard .delta {
+        font-size: 11.5px;
+        padding: 2px 8px;
+      }
+      .idxcard .delta .pc {
+        font-size: 10px;
+      }
+      @media (max-width: 560px) {
+        .idxcards {
+          width: 100%;
+        }
+        .idxcard {
+          flex: 1;
+          min-width: 0;
+        }
+        .idxcard-pts {
+          font-size: 17px;
+        }
+      }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 10px;
+        align-items: center;
+        margin-bottom: 10px;
+        font-size: 12.5px;
+        color: var(--muted);
+      }
+      .badge {
+        background: var(--chip);
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 4px 11px;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+      }
+      .badge.up {
+        color: var(--up);
+      }
+      .badge.down {
+        color: var(--down);
+      }
+      .badge[data-tip] {
+        cursor: help;
+      }
+      .stale {
+        color: #f0a020;
+        font-weight: 600;
+      }
+      .err {
+        color: var(--down);
+        font-weight: 600;
+      }
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 16px;
+        align-items: center;
+        margin-bottom: 14px;
+        padding: 9px 13px;
+        background: var(--chip);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md);
+        font-size: 11.5px;
+        color: var(--muted);
+      }
+      .legend .sw {
+        display: inline-block;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        vertical-align: middle;
+        margin-right: 6px;
+      }
+      .sw.g {
+        background: var(--up);
+      }
+      .sw.r {
+        background: var(--down);
+      }
+      .sw.n {
+        background: var(--flat);
+        opacity: 0.5;
+      }
+      /* the table itself scrolls, both directions; header + first column stay put */
+      .tablewrap {
+        max-height: 72vh;
+        overflow: auto;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow);
+        background: var(--panel);
+        -webkit-overflow-scrolling: touch;
+        transition: opacity 0.2s ease;
+      }
+      .tablewrap.scrolled thead th {
+        box-shadow: 0 6px 12px -6px rgba(0, 0, 0, 0.35);
+      }
+      .tablewrap.loading {
+        opacity: 0.92;
+      }
+      table {
+        border-collapse: separate;
+        border-spacing: 0;
+        width: 100%;
+        /* fill the available width; only fall back to horizontal scroll on
+           genuinely narrow phones where 8 numeric columns can't all fit */
+        min-width: 680px;
+      }
+      thead th {
+        position: sticky;
+        top: 0;
+        background: var(--panel2);
+        z-index: 2;
+        transition: box-shadow 0.2s ease;
+      }
+      th,
+      td {
+        padding: 10px 12px;
+        text-align: right;
+        white-space: nowrap;
+        border-bottom: 1px solid var(--line);
+      }
+      th:first-child,
+      td:first-child {
+        text-align: left;
+        position: sticky;
+        left: 0;
+        background: var(--panel);
+      }
+      thead th:first-child {
+        background: var(--panel2);
+        z-index: 3;
+      } /* top-left corner stays on both axes */
+      th {
+        font-size: 10.5px;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        color: var(--muted);
+        cursor: pointer;
+        user-select: none;
+        font-weight: 700;
+        transition: color 0.15s ease;
+      }
+      th:hover {
+        color: var(--txt);
+      }
+      th .hint {
+        border-bottom-style: dotted;
+      }
+      th .arrow {
+        opacity: 0.3;
+        font-size: 10px;
+        margin-left: 4px;
+      }
+      th.sorted {
+        color: var(--accent);
+      }
+      th.sorted .arrow {
+        opacity: 1;
+        color: var(--accent);
+      }
+      tbody tr.up-row td {
+        background: var(--rowup);
+      }
+      tbody tr.down-row td {
+        background: var(--rowdown);
+      }
+      tbody tr td {
+        transition: background-color 0.12s ease;
+      }
+      tbody tr:hover td {
+        background-color: var(--chip);
+      }
+      tbody tr.up-row:hover td {
+        background-color: color-mix(in srgb, var(--rowup) 70%, var(--chip));
+      }
+      tbody tr.down-row:hover td {
+        background-color: color-mix(in srgb, var(--rowdown) 70%, var(--chip));
+      }
+      tbody tr td:first-child {
+        background: var(--panel);
+      }
+      tbody tr.up-row td:first-child {
+        background: var(--rowup);
+      }
+      tbody tr.down-row td:first-child {
+        background: var(--rowdown);
+      }
+      tbody tr:hover td:first-child {
+        background-color: var(--chip);
+      }
+      tbody tr.up-row:hover td:first-child {
+        background-color: color-mix(in srgb, var(--rowup) 70%, var(--chip));
+      }
+      tbody tr.down-row:hover td:first-child {
+        background-color: color-mix(in srgb, var(--rowdown) 70%, var(--chip));
+      }
+      .sym {
+        font-weight: 700;
+        letter-spacing: 0.1px;
+      }
+      .symwrap {
+        display: inline-flex;
+        align-items: center;
+      }
+      .num {
+        font-variant-numeric: tabular-nums;
+      }
+      .up {
+        color: var(--up);
+      }
+      .down {
+        color: var(--down);
+      }
+      .flat {
+        color: var(--flat);
+      }
+      .delta {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-variant-numeric: tabular-nums;
+        font-weight: 650;
+        white-space: nowrap;
+      }
+      .delta.up {
+        background: var(--rowup);
+        color: var(--up);
+      }
+      .delta.down {
+        background: var(--rowdown);
+        color: var(--down);
+      }
+      .delta.flat {
+        background: var(--chip);
+        color: var(--flat);
+      }
+      .delta .pc {
+        font-size: 11px;
+        font-weight: 550;
+        opacity: 0.85;
+      }
+      tbody tr.loading td {
+        color: var(--muted);
+        text-align: center;
+        padding: 34px;
+      }
+      .spinner {
+        width: 20px;
+        height: 20px;
+        border: 2.5px solid var(--line);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        display: inline-block;
+        vertical-align: middle;
+        margin-right: 8px;
+        animation: spin 0.8s linear infinite;
+      }
+      footer {
+        margin-top: 16px;
+        color: var(--muted);
+        font-size: 11.5px;
+        padding-top: 14px;
+        border-top: 1px solid var(--line);
+      }
+      code {
+        background: var(--chip);
+        border: 1px solid var(--line);
+        padding: 1.5px 7px;
+        border-radius: 6px;
+      }
+      @media (max-width: 560px) {
+        body {
+          padding: 12px 12px 36px;
+        }
+        header {
+          margin: -12px -12px 14px;
+          padding: 12px;
+        }
+        h1 {
+          font-size: 16px;
+        }
+        /* a 999px pill radius on a track that wraps to 2+ rows balloons into an
+           oversized blob (radius clamps to half the now much shorter row height) */
+        .tabs {
+          border-radius: var(--radius-lg);
+        }
+        th,
+        td {
+          padding: 8px 9px;
+          font-size: 12px;
+        }
+      }
+      /* laptop / big screens: lock the whole app to the viewport height so the
+         header, controls, cards, tabs, meta and legend stay put and ONLY the
+         table scrolls (inside its own box). Phones keep normal page scrolling. */
+      @media (min-width: 820px) {
+        html,
+        body {
+          height: 100%;
+        }
+        body {
+          height: 100vh;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          padding-bottom: 16px;
+        }
+        .tablewrap {
+          flex: 1 1 auto;
+          max-height: none; /* let flex give it the remaining height */
+          min-height: 0; /* allow the flex child to shrink & scroll */
+        }
+        footer {
+          flex: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>
+        <span class="idx" id="idxName">NIFTY 50</span> - Open / High / Low
+        Tracker
+      </h1>
+      <div class="spacer"></div>
+      <div class="status">
+        <span id="dot" class="dot"></span><span id="mktText">…</span>
+      </div>
+    </header>
+
+    <div class="controls">
+      <div
+        class="field"
+        data-tip="How often to fetch fresh data while the market is open. Manual refresh always works, even when paused."
+      >
+        <label for="poll">
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="9" />
+            <polyline points="12 7 12 12 15 14" />
+          </svg>
+          <span class="hint">Auto-poll</span>
+        </label>
+        <select id="poll" aria-label="Auto-poll interval in seconds">
+          <option value="1">1s</option>
+          <option value="2">2s</option>
+          <option value="3" selected>3s</option>
+          <option value="4">4s</option>
+          <option value="5">5s</option>
+          <option value="6">6s</option>
+          <option value="7">7s</option>
+          <option value="8">8s</option>
+          <option value="9">9s</option>
+          <option value="10">10s</option>
+        </select>
+      </div>
+      <span class="divider" aria-hidden="true"></span>
+      <div
+        class="field"
+        data-tip="Show all clock times in 12-hour or 24-hour IST."
+      >
+        <label for="tf"><span class="hint">Time</span></label>
+        <select id="tf" aria-label="Clock time format">
+          <option value="24">24h IST</option>
+          <option value="12">12h IST</option>
+        </select>
+      </div>
+      <span class="divider" aria-hidden="true"></span>
+      <button
+        id="refresh"
+        class="primary"
+        data-tip="Fetch new data right now, ignoring the auto-poll timer."
+        aria-label="Refresh now"
+      >
+        <svg
+          id="refreshIcon"
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+          <polyline points="21 3 21 9 15 9" />
+        </svg>
+        Refresh now
+      </button>
+      <div class="spacer" aria-hidden="true"></div>
+      <div class="idxcards" id="idxCards" aria-label="Index levels"></div>
+    </div>
+
+    <div class="tabs" id="idxTabs" role="tablist" aria-label="Index">
+      <button
+        class="tab active"
+        data-index="NIFTY 50"
+        role="tab"
+        aria-selected="true"
+        data-tip="The 50 largest NSE-listed companies by free-float market cap."
+      >
+        Nifty 50
+      </button>
+      <button
+        class="tab"
+        data-index="NIFTY NEXT 50"
+        role="tab"
+        aria-selected="false"
+        data-tip="The next 50 largest companies, just outside the Nifty 50."
+      >
+        Nifty Next 50
+      </button>
+    </div>
+
+    <div class="tabs" id="tabs" role="tablist" aria-label="Filter">
+      <button class="tab active" data-tab="all" role="tab" aria-selected="true">
+        All <b class="cnt">–</b>
+      </button>
+      <button
+        class="tab"
+        data-tab="high"
+        role="tab"
+        aria-selected="false"
+        data-tip="Today's high equals the open price - the stock never traded above its open."
+      >
+        <span class="dotmark down" aria-hidden="true"></span>Open = High
+        <b class="cnt">–</b>
+      </button>
+      <button
+        class="tab"
+        data-tab="low"
+        role="tab"
+        aria-selected="false"
+        data-tip="Today's low equals the open price - the stock never traded below its open."
+      >
+        <span class="dotmark up" aria-hidden="true"></span>Open = Low
+        <b class="cnt">–</b>
+      </button>
+      <button class="tab" data-tab="neutral" role="tab" aria-selected="false">
+        Neutral <b class="cnt">–</b>
+      </button>
+    </div>
+    <p class="lbl">click any column header to sort</p>
+
+    <div class="meta">
+      <span id="updated">Not loaded yet.</span>
+      <span id="adv"></span>
+      <span id="staleMsg"></span>
+    </div>
+
+    <div class="legend">
+      <span
+        ><span class="sw r"></span>Red: <b>Open = High</b> (never traded above
+        open)</span
+      >
+      <span
+        ><span class="sw g"></span>Green: <b>Open = Low</b> (never traded below
+        open)</span
+      >
+      <span><span class="sw n"></span>Default: everything else</span>
+      <span>· Change shows ₹ and %</span>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr id="head"></tr>
+        </thead>
+        <tbody id="body">
+          <tr class="loading">
+            <td colspan="8">
+              <span class="spinner" aria-hidden="true"></span>Loading live data…
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div id="tt" role="tooltip">
+      <span id="ttText"></span>
+      <span class="tt-arrow" aria-hidden="true"></span>
+    </div>
+
+    <footer>
+      Live data via NSE India <code>heatmap-symbols</code> (LTP/High/Low/Close)
+      + <code>market-data-pre-open</code> (Open) + <code>allIndices</code> (index
+      points), proxied by your local
+      <code>server.js</code> (open via <code>http://localhost:8787/</code>).
+      Serves data only during market hours (Mon–Fri 09:15–15:30 IST). Prices in
+      ₹.
+    </footer>
+
+    <script>
+      "use strict";
+      const API = "/api/indices";
+      const INDEX_NAMES = ["NIFTY 50", "NIFTY NEXT 50"];
+      const eq = (a, b) =>
+        a != null &&
+        b != null &&
+        !isNaN(a) &&
+        !isNaN(b) &&
+        Math.round(a * 100) === Math.round(b * 100); // equal to the paisa
+
+      // type: sym | rs (rupee price) | delta (₹ + %) | vol
+      const COLS = [
+        {
+          key: "symbol",
+          label: "Symbol",
+          type: "sym",
+          tip: "NSE trading symbol. Hover a row for its Open→High and Open→Low %.",
+        },
+        {
+          key: "lastPrice",
+          label: "LTP",
+          type: "rs",
+          tip: "Last traded price - the current live price.",
+        },
+        {
+          key: "open",
+          label: "Open",
+          type: "rs",
+          tip: "Official day open (pre-open auction price, frozen at 09:15 IST).",
+        },
+        {
+          key: "dayHigh",
+          label: "High",
+          type: "rs",
+          tip: "Highest traded price so far today.",
+        },
+        {
+          key: "dayLow",
+          label: "Low",
+          type: "rs",
+          tip: "Lowest traded price so far today.",
+        },
+        {
+          key: "prevClose",
+          label: "Prev Close",
+          type: "rs",
+          tip: "Previous trading day's closing price.",
+        },
+        {
+          key: "pChange",
+          label: "Change",
+          type: "delta",
+          rs: "change",
+          pc: "pChange",
+          tip: "₹ and % change vs previous close (not vs today's open).",
+        },
+        {
+          key: "totalTradedVolume",
+          label: "Volume",
+          type: "vol",
+          tip: "Total shares traded today.",
+        },
+      ];
+
+      let sortKey = "pChange",
+        sortDir = -1;
+      let activeTab = "all"; // all | high | low | neutral
+      let activeIndex = "NIFTY 50"; // NIFTY 50 | NIFTY NEXT 50
+      let cache = null, // { "NIFTY 50": {...}, "NIFTY NEXT 50": {...} }
+        lastGoodAt = 0,
+        timer = null;
+
+      // tab filter: high = at day high (green), low = at day low (red), neutral = rest.
+      function tabMatch(r) {
+        return (
+          activeTab === "all" ||
+          (activeTab === "high" && r.colorRank === 1) ||
+          (activeTab === "low" && r.colorRank === -1) ||
+          (activeTab === "neutral" && r.colorRank === 0)
+        );
+      }
+
+      // ---------- formatting ----------
+      function rs(v) {
+        return v == null || isNaN(v)
+          ? "-"
+          : "₹" +
+              v.toLocaleString("en-IN", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              });
+      }
+      function pct(v) {
+        return v == null || isNaN(v)
+          ? "-"
+          : (v > 0 ? "+" : "") + v.toFixed(2) + "%";
+      }
+      function vol(v) {
+        if (v == null || isNaN(v)) return "-";
+        if (v >= 1e7) return (v / 1e7).toFixed(2) + " Cr";
+        if (v >= 1e5) return (v / 1e5).toFixed(2) + " L";
+        if (v >= 1e3) return (v / 1e3).toFixed(1) + " K";
+        return String(v);
+      }
+      function cls(v) {
+        return v > 0 ? "up" : v < 0 ? "down" : "flat";
+      }
+      // index level is points, not rupees - no ₹ prefix
+      function pts(v) {
+        return v == null || isNaN(v)
+          ? "-"
+          : v.toLocaleString("en-IN", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            });
+      }
+
+      // ---------- IST market-hours (correct regardless of viewer timezone) ----------
+      function istParts(d) {
+        const f = new Intl.DateTimeFormat("en-US", {
+          timeZone: "Asia/Kolkata",
+          hour12: false,
+          weekday: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+        const o = {};
+        f.formatToParts(d).forEach((p) => (o[p.type] = p.value));
+        return o;
+      }
+      function isMarketOpen(d) {
+        const p = istParts(d);
+        if (p.weekday === "Sat" || p.weekday === "Sun") return false;
+        const mins = (parseInt(p.hour, 10) % 24) * 60 + parseInt(p.minute, 10);
+        return mins >= 9 * 60 + 15 && mins <= 15 * 60 + 30;
+      }
+      function fmtClock(d) {
+        const h12 = document.getElementById("tf").value === "12";
+        return (
+          new Intl.DateTimeFormat("en-GB", {
+            timeZone: "Asia/Kolkata",
+            hour12: h12,
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          }).format(d) + " IST"
+        );
+      }
+
+      // ---------- transform NSE payload -> rows with ₹ + % diffs + row color ----------
+      function computeRows(payload) {
+        const rows = (payload.data || []).filter(
+          (r) => r.symbol && !INDEX_NAMES.includes(r.symbol),
+        );
+        return rows.map((r) => {
+          const open = +r.open,
+            high = +r.dayHigh,
+            low = +r.dayLow,
+            last = +r.lastPrice;
+          const ok = open > 0; // guard divide-by-zero (pre-market)
+          const ohRs = ok ? high - open : NaN,
+            olRs = ok ? low - open : NaN;
+          const ohPct = ok ? (ohRs / open) * 100 : NaN,
+            olPct = ok ? (olRs / open) * 100 : NaN;
+          // Row color (exact match, no tolerance) - based on Open vs High/Low only
+          // (no current-price check):
+          //   red    when Open = High  (stock never traded above its open today)
+          //   green  when Open = Low   (stock never traded below its open today)
+          //   default otherwise
+          // colorRank stays 1=at-high, -1=at-low for the tab filters.
+          let rowClass = "",
+            colorRank = 0;
+          if (ok) {
+            if (eq(open, high) && !eq(high, low)) {
+              colorRank = 1;
+              rowClass = "down-row";
+            } // open == high -> red
+            else if (eq(open, low) && !eq(high, low)) {
+              colorRank = -1;
+              rowClass = "up-row";
+            } // open == low -> green
+          }
+          return {
+            symbol: r.symbol,
+            open,
+            dayHigh: high,
+            dayLow: low,
+            lastPrice: last,
+            prevClose: r.prevClose != null ? +r.prevClose : NaN,
+            change: r.change != null ? +r.change : NaN,
+            pChange: r.pChange != null ? +r.pChange : NaN,
+            totalTradedVolume:
+              r.totalTradedVolume != null ? +r.totalTradedVolume : NaN,
+            ohRs,
+            olRs,
+            ohPct,
+            olPct,
+            rowClass,
+            colorRank,
+          };
+        });
+      }
+
+      // ---------- render ----------
+      function renderHead() {
+        const tr = document.getElementById("head");
+        tr.innerHTML = "";
+        COLS.forEach((c) => {
+          const th = document.createElement("th");
+          const sorted = c.key === sortKey;
+          th.className = sorted ? "sorted" : "";
+          th.tabIndex = 0;
+          th.setAttribute("role", "columnheader button");
+          th.setAttribute(
+            "aria-sort",
+            sorted ? (sortDir > 0 ? "ascending" : "descending") : "none",
+          );
+          const labelSpan = c.tip
+            ? `<span class="hint" data-tip="${c.tip}">${c.label}</span>`
+            : c.label;
+          th.innerHTML =
+            labelSpan +
+            `<span class="arrow">${sorted ? (sortDir > 0 ? "▲" : "▼") : "↕"}</span>`;
+          const doSort = () => {
+            if (sortKey === c.key) sortDir = -sortDir;
+            else {
+              sortKey = c.key;
+              sortDir = c.type === "sym" ? 1 : -1;
+            }
+            renderHead();
+            renderBody();
+          };
+          th.onclick = doSort;
+          th.onkeydown = (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              doSort();
+            }
+          };
+          tr.appendChild(th);
+        });
+      }
+      function deltaCell(rsVal, pcVal) {
+        const c = cls(pcVal);
+        const absRs = rsVal == null || isNaN(rsVal) ? rsVal : Math.abs(rsVal);
+        return `<span class="delta ${c}">${rs(absRs)}<span class="pc">${pct(pcVal)}</span></span>`;
+      }
+      function renderTabs(all) {
+        const c = {
+          all: all.length,
+          high: all.filter((r) => r.colorRank === 1).length,
+          low: all.filter((r) => r.colorRank === -1).length,
+          neutral: all.filter((r) => r.colorRank === 0).length,
+        };
+        document.querySelectorAll("#tabs .tab").forEach((b) => {
+          const active = b.dataset.tab === activeTab;
+          b.classList.toggle("active", active);
+          b.setAttribute("aria-selected", String(active));
+          const cnt = b.querySelector(".cnt");
+          if (cnt) cnt.textContent = c[b.dataset.tab];
+        });
+      }
+      function renderBody() {
+        const body = document.getElementById("body");
+        const payload = cache && cache[activeIndex];
+        if (!payload) return;
+        const all = computeRows(payload);
+        if (all.length === 0) {
+          renderTabs(all);
+          body.innerHTML = `<tr class="loading"><td colspan="${COLS.length}">NSE returned no constituents for ${activeIndex} - this data is live only during market hours (Mon–Fri 09:15–15:30 IST). The table fills automatically when the market opens.</td></tr>`;
+          return;
+        }
+        renderTabs(all);
+        const rows = all.filter(tabMatch);
+        if (rows.length === 0) {
+          body.innerHTML = `<tr class="loading"><td colspan="${COLS.length}">No stocks currently ${activeTab === "high" ? "at their day high" : activeTab === "low" ? "at their day low" : "in this group"}.</td></tr>`;
+          return;
+        }
+        rows.sort((a, b) => {
+          let x = a[sortKey],
+            y = b[sortKey];
+          if (typeof x === "string") return x.localeCompare(y) * sortDir;
+          if (isNaN(x)) x = -Infinity;
+          if (isNaN(y)) y = -Infinity;
+          if (x !== y) return (x - y) * sortDir;
+          // tie-break by day change % (desc) so grouped rows (e.g. At High/At Low) read sensibly
+          const px = isNaN(a.pChange) ? -Infinity : a.pChange,
+            py = isNaN(b.pChange) ? -Infinity : b.pChange;
+          return py - px;
+        });
+        body.innerHTML = "";
+        for (const r of rows) {
+          const tr = document.createElement("tr");
+          tr.className = r.rowClass;
+          COLS.forEach((c) => {
+            const td = document.createElement("td");
+            if (c.type === "sym") {
+              td.className = "sym";
+              const wrap = document.createElement("span");
+              wrap.className = "symwrap hint";
+              wrap.setAttribute(
+                "data-tip",
+                `Open→High ${pct(r.ohPct)} · Open→Low ${pct(r.olPct)}`,
+              );
+              const dot = document.createElement("span");
+              dot.className =
+                "dotmark " +
+                (r.colorRank === 1
+                  ? "down"
+                  : r.colorRank === -1
+                    ? "up"
+                    : "flat");
+              dot.setAttribute("aria-hidden", "true");
+              wrap.appendChild(dot);
+              wrap.appendChild(document.createTextNode(r.symbol));
+              td.appendChild(wrap);
+            } else if (c.type === "rs") {
+              td.className = "num";
+              td.textContent = rs(r[c.key]);
+            } else if (c.type === "vol") {
+              td.className = "num";
+              td.textContent = vol(r[c.key]);
+            } else if (c.type === "delta") {
+              td.innerHTML = deltaCell(r[c.rs], r[c.pc]);
+            }
+            tr.appendChild(td);
+          });
+          body.appendChild(tr);
+        }
+      }
+      // ---------- index headline cards: BOTH indices' own points values, always
+      // shown side by side (independent of which tab is active) ----------
+      function renderIndexCards() {
+        const host = document.getElementById("idxCards");
+        host.innerHTML = INDEX_NAMES.map((name) => {
+          const lv = cache && cache[name] && cache[name].level;
+          if (!lv || lv.last == null) return "";
+          const c = cls(lv.variation);
+          const absPts =
+            lv.variation == null || isNaN(lv.variation)
+              ? lv.variation
+              : Math.abs(lv.variation);
+          const sign =
+            lv.variation > 0 ? "+" : lv.variation < 0 ? "−" : "";
+          const stats = [
+            ["Open", lv.open],
+            ["High", lv.high],
+            ["Low", lv.low],
+            ["Prev", lv.prevClose],
+          ]
+            .map(([k, v]) => `<span>${k}<b>${pts(v)}</b></span>`)
+            .join("");
+          return (
+            `<div class="idxcard">` +
+            `<span class="idxcard-name">${name}</span>` +
+            `<span class="idxcard-row">` +
+            `<span class="idxcard-pts num">${pts(lv.last)}</span>` +
+            `<span class="delta ${c}">${sign + pts(absPts)}<span class="pc">${pct(lv.pChange)}</span></span>` +
+            `</span>` +
+            `<span class="idxcard-stats">${stats}</span>` +
+            `</div>`
+          );
+        }).join("");
+      }
+
+      // ---------- meta / status ----------
+      function renderMeta() {
+        const upd = document.getElementById("updated"),
+          staleEl = document.getElementById("staleMsg"),
+          advEl = document.getElementById("adv");
+        const payload = cache && cache[activeIndex];
+        if (lastGoodAt) {
+          const secsAgo = Math.round((Date.now() - lastGoodAt) / 1000);
+          upd.textContent =
+            `Updated ${fmtClock(new Date(lastGoodAt))}` +
+            (payload && payload.timestamp
+              ? ` · NSE stamp ${payload.timestamp}`
+              : "");
+          const pollMs = (+document.getElementById("poll").value || 5) * 1000;
+          if (secsAgo * 1000 > 3 * pollMs) {
+            staleEl.className = "stale";
+            staleEl.textContent = `⚠ stale - ${secsAgo}s old`;
+          } else staleEl.textContent = "";
+        }
+        if (payload && payload.advance) {
+          const a = payload.advance;
+          advEl.innerHTML = `<span class="badge up" data-tip="Stocks up more than 0.05% vs previous close.">▲ ${a.advances}</span> <span class="badge down" data-tip="Stocks down more than 0.05% vs previous close.">▼ ${a.declines}</span> <span class="badge" data-tip="Stocks within ±0.05% of previous close.">▬ ${a.unchanged}</span>`;
+        } else {
+          advEl.innerHTML = "";
+        }
+      }
+      function renderMarketStatus() {
+        const open = isMarketOpen(new Date());
+        document.getElementById("dot").className =
+          "dot " + (open ? "open" : "closed");
+        document.getElementById("mktText").textContent = open
+          ? "Market OPEN"
+          : "Market CLOSED";
+        return open;
+      }
+
+      // ---------- fetch (in-memory cache keeps last good on failure) ----------
+      async function refresh() {
+        const btn = document.getElementById("refresh");
+        const tablewrap = document.querySelector(".tablewrap");
+        btn.disabled = true;
+        document.getElementById("refreshIcon").classList.add("spin");
+        tablewrap.classList.add("loading");
+        try {
+          const res = await fetch(API + "?t=" + Date.now(), {
+            cache: "no-store",
+          });
+          const text = await res.text();
+          let json;
+          try {
+            json = JSON.parse(text);
+          } catch (_) {
+            throw new Error(
+              location.protocol === "file:"
+                ? "opened as a file - start the server (./run.sh) and open http://localhost:8787/"
+                : "server didn't return JSON - open via http://localhost:8787/, not the file",
+            );
+          }
+          if (!res.ok || json.error)
+            throw new Error(json.error || "HTTP " + res.status);
+          cache = json;
+          lastGoodAt = Date.now();
+          document.getElementById("staleMsg").textContent = "";
+          renderIndexCards();
+          renderBody();
+          renderMeta();
+        } catch (e) {
+          const staleEl = document.getElementById("staleMsg");
+          staleEl.className = "err";
+          staleEl.textContent =
+            "⚠ fetch failed: " +
+            e.message +
+            (cache ? " (showing last good data)" : "");
+          renderMeta();
+        } finally {
+          btn.disabled = false;
+          document.getElementById("refreshIcon").classList.remove("spin");
+          tablewrap.classList.remove("loading");
+        }
+      }
+
+      // ---------- scheduler: auto-poll only in market hours; manual always allowed ----------
+      function schedule() {
+        if (timer) clearTimeout(timer);
+        const open = renderMarketStatus();
+        const secs = Math.max(
+          1,
+          Math.min(10, +document.getElementById("poll").value || 5),
+        );
+        if (open) refresh();
+        timer = setTimeout(schedule, secs * 1000);
+      }
+
+      // ---------- wire up ----------
+      document.getElementById("refresh").onclick = refresh;
+      document.getElementById("poll").onchange = schedule;
+      document.getElementById("tf").onchange = renderMeta;
+      document.querySelectorAll("#tabs .tab").forEach((b) => {
+        b.onclick = () => {
+          activeTab = b.dataset.tab;
+          renderBody();
+        };
+      });
+      document.querySelectorAll("#idxTabs .tab").forEach((b) => {
+        b.onclick = () => {
+          if (activeIndex === b.dataset.index) return;
+          activeIndex = b.dataset.index;
+          document.querySelectorAll("#idxTabs .tab").forEach((x) => {
+            x.classList.toggle("active", x === b);
+            x.setAttribute("aria-selected", String(x === b));
+          });
+          document.getElementById("idxName").textContent = activeIndex;
+          document.title = activeIndex + " - Open / High / Low Tracker";
+          activeTab = "all";
+          renderBody();
+          renderMeta();
+        };
+      });
+      // ---------- tooltips: one JS-driven, position:fixed tooltip for the whole
+      // page (a CSS ::after popover has no room to render above elements pinned
+      // to the top of an overflow:auto ancestor - e.g. the table's sticky header
+      // - and gets silently clipped there, so this needs to escape that everywhere,
+      // not just inside the table) ----------
+      (function () {
+        const tt = document.getElementById("tt");
+        const ttText = document.getElementById("ttText");
+        let activeEl = null,
+          showTimer = null;
+
+        function place(el) {
+          const r = el.getBoundingClientRect();
+          tt.style.left = "0px";
+          tt.style.top = "0px";
+          tt.classList.remove("flip");
+          const tr = tt.getBoundingClientRect();
+          let left = r.left + r.width / 2 - tr.width / 2;
+          left = Math.max(6, Math.min(left, window.innerWidth - tr.width - 6));
+          let top = r.top - tr.height - 10;
+          let flip = false;
+          if (top < 6) {
+            top = r.bottom + 10; // flip below if no room above
+            flip = true;
+          }
+          tt.classList.toggle("flip", flip);
+          // keep the arrow pointed at the trigger even after the box got clamped sideways
+          const arrowLeft = Math.max(
+            10,
+            Math.min(r.left + r.width / 2 - left, tr.width - 10),
+          );
+          tt.style.setProperty("--arrow-left", arrowLeft + "px");
+          tt.style.left = left + "px";
+          tt.style.top = top + "px";
+        }
+        function show(el) {
+          const text = el.getAttribute("data-tip");
+          if (!text) return;
+          ttText.textContent = text;
+          tt.classList.add("show");
+          place(el);
+        }
+        function hide() {
+          clearTimeout(showTimer);
+          activeEl = null;
+          tt.classList.remove("show");
+        }
+        document.addEventListener("mouseover", (e) => {
+          const el = e.target.closest("[data-tip]");
+          if (!el || el === activeEl) return;
+          clearTimeout(showTimer);
+          activeEl = el;
+          showTimer = setTimeout(() => {
+            if (activeEl === el) show(el);
+          }, 120); // brief delay so tooltips don't flicker while passing over cells
+        });
+        document.addEventListener("mouseout", (e) => {
+          const el = e.target.closest("[data-tip]");
+          if (el && !el.contains(e.relatedTarget)) hide();
+        });
+        document.addEventListener("focusin", (e) => {
+          const el = e.target.closest("[data-tip]");
+          if (el) show(el);
+        });
+        document.addEventListener("focusout", hide);
+
+        const wrap = document.querySelector(".tablewrap");
+        wrap.addEventListener("scroll", () => {
+          hide();
+          wrap.classList.toggle("scrolled", wrap.scrollTop > 0);
+        });
+      })();
+
+      renderHead();
+      renderMarketStatus();
+      refresh();
+      schedule();
+      setInterval(() => {
+        renderMarketStatus();
+        renderMeta();
+      }, 1000);
+    </script>
+  </body>
+</html>
