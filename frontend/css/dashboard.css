@@ -1,0 +1,207 @@
+/* ============================ Revamp layer ============================ */
+      /* ---- app bar ---- */
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        min-width: 0;
+      }
+      .brand-mark {
+        width: 34px;
+        height: 34px;
+        flex: none;
+        display: grid;
+        place-items: center;
+        border-radius: 10px;
+        color: #fff;
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        box-shadow: var(--shadow-sm);
+      }
+      .brand-text {
+        display: flex;
+        flex-direction: column;
+        line-height: 1.18;
+        min-width: 0;
+      }
+      .brand-title {
+        font-size: 15.5px;
+        font-weight: 780;
+        letter-spacing: 0.2px;
+      }
+      .brand-sub {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--muted);
+      }
+      @media (max-width: 560px) {
+        .brand-sub {
+          display: none;
+        }
+      }
+
+      /* ---- KPI strip: index cards are the index selector ---- */
+      .kpis {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+        gap: 12px;
+        margin: 4px 0 16px;
+      }
+      .kpis .idxcard {
+        min-width: 0;
+        cursor: pointer;
+        transition:
+          border-color 0.15s ease,
+          box-shadow 0.15s ease,
+          transform 0.15s ease,
+          background-color 0.15s ease;
+      }
+      .kpis .idxcard:hover {
+        border-color: var(--line-strong);
+        transform: translateY(-1px);
+        box-shadow: var(--shadow);
+      }
+      .kpis .idxcard.active {
+        border-color: transparent;
+        box-shadow:
+          0 0 0 1.5px var(--accent),
+          var(--shadow-sm);
+        background: linear-gradient(
+          180deg,
+          color-mix(in srgb, var(--accent) 9%, var(--panel)),
+          var(--panel)
+        );
+      }
+      .kpis .idxcard.active .idxcard-name {
+        color: var(--accent);
+      }
+
+      /* ---- toolbar ---- */
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 12px 16px;
+        margin-bottom: 14px;
+      }
+      .toolbar .tabs {
+        margin-bottom: 0;
+      }
+      .toolbar-left {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 12px;
+      }
+      .search {
+        position: relative;
+        display: flex;
+        align-items: center;
+      }
+      .search svg.lucide {
+        position: absolute;
+        left: 9px;
+        width: 14px;
+        height: 14px;
+        color: var(--muted);
+        pointer-events: none;
+      }
+      .search input {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        color: var(--txt);
+        font: inherit;
+        font-weight: 600;
+        font-size: 13px;
+        padding: 7px 10px 7px 30px;
+        width: 210px;
+        transition: border-color 0.15s ease;
+      }
+      .search input::placeholder {
+        color: var(--muted);
+        font-weight: 500;
+      }
+      .search input:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      @media (max-width: 560px) {
+        .search input {
+          width: 150px;
+        }
+      }
+      .tools {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-end;
+        gap: 12px;
+      }
+
+      /* ---- table panel ---- */
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+      .panel-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px 14px;
+        padding: 13px 16px;
+        border-bottom: 1px solid var(--line);
+      }
+      .panel-title {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 750;
+        letter-spacing: 0.2px;
+      }
+      .panel-title #idxName {
+        background: linear-gradient(90deg, var(--accent), var(--accent-2));
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+      .panel-meta {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px 10px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .panel-meta .upd {
+        font-variant-numeric: tabular-nums;
+      }
+      /* the panel owns the border/radius/shadow; strip them from nested pieces */
+      .panel .tablewrap {
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+        background: transparent;
+      }
+      .panel .legend {
+        margin: 0;
+        border: 0;
+        border-bottom: 1px solid var(--line);
+        border-radius: 0;
+        background: color-mix(in srgb, var(--panel2) 60%, transparent);
+        padding: 8px 16px;
+        font-size: 11px;
+      }
+      .legend-hint {
+        margin-left: auto;
+        color: var(--muted);
+      }
+      @media (max-width: 640px) {
+        .legend-hint {
+          display: none;
+        }
+      }
+
+      

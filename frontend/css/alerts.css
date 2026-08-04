@@ -1,0 +1,396 @@
+/* ---- alerts view ---- */
+      .alerts-bar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px 16px;
+        margin: 2px 0 18px;
+      }
+      .alerts-head {
+        min-width: 0;
+      }
+      .alerts-title {
+        margin: 0;
+        font-size: 17px;
+        font-weight: 790;
+        letter-spacing: 0.2px;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+      .alerts-title svg.lucide {
+        width: 18px;
+        height: 18px;
+        color: var(--accent);
+      }
+      .alerts-sub {
+        margin: 3px 0 0;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .card-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 0 14px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--line);
+      }
+      .card-head h2 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 750;
+      }
+      .card-head svg.lucide {
+        width: 16px;
+        height: 16px;
+        color: var(--accent);
+      }
+      .card-head .view-toggle {
+        margin-left: auto;
+        display: inline-flex;
+        gap: 3px;
+        background: var(--chip);
+        border: 1px solid var(--line);
+        padding: 3px;
+        border-radius: 999px;
+      }
+      .card-head .view-toggle .vt {
+        padding: 5px 12px !important;
+        font-size: 12px;
+        border-radius: 999px !important;
+        border: none !important;
+        background: transparent;
+        box-shadow: none !important;
+        color: var(--muted);
+      }
+      .card-head .view-toggle .vt.active {
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        color: #fff;
+      }
+      .vt-count {
+        font-size: 10.5px;
+        opacity: 0.8;
+        font-weight: 700;
+      }
+      /* archived rows read muted + a badge */
+      .alert-item.archived {
+        opacity: 0.82;
+      }
+      .ai-archived {
+        font-size: 10.5px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: var(--chip);
+        color: var(--muted);
+        border: 1px solid var(--line);
+      }
+      .form-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+      @media (max-width: 440px) {
+        .form-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .form-actions svg.lucide {
+        width: 14px;
+        height: 14px;
+        margin-right: 6px;
+        vertical-align: -2px;
+      }
+      /* trigger preview as an accent callout */
+      .trigger-preview {
+        background: color-mix(in srgb, var(--accent) 9%, var(--panel2));
+        border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+        color: var(--muted-ink);
+      }
+      /* alert item: left accent stripe by side */
+      .alert-item {
+        border-left: 3px solid var(--line);
+      }
+      .alert-item.side-buy {
+        border-left-color: var(--up);
+      }
+      .alert-item.side-sell {
+        border-left-color: var(--down);
+      }
+
+      .alerts-bar-right {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 12px;
+      }
+      #al-new svg.lucide {
+        width: 15px;
+        height: 15px;
+        margin-right: 6px;
+        vertical-align: -2px;
+      }
+      /* ---- multi-select filter dropdowns + chips ---- */
+      .ms {
+        position: relative;
+      }
+      .ms-btn {
+        background: var(--panel2);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        color: var(--txt);
+        font: inherit;
+        font-weight: 600;
+        font-size: 12.5px;
+        padding: 6px 10px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        justify-content: space-between;
+        text-align: left;
+        min-width: 118px;
+        box-shadow: none;
+      }
+      .ms-btn.active {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .ms-btn svg.lucide {
+        width: 13px;
+        height: 13px;
+        margin: 0;
+      }
+      .ms-count {
+        color: var(--muted);
+        font-weight: 700;
+      }
+      .ms-menu {
+        position: absolute;
+        top: calc(100% + 4px);
+        left: 0;
+        z-index: 40;
+        min-width: 170px;
+        max-height: 260px;
+        overflow: auto;
+        background: var(--panel-raised);
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow);
+        padding: 5px;
+      }
+      .ms-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 8px;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .ms-item:hover {
+        background: var(--chip);
+      }
+      .ms-item input {
+        width: 14px;
+        height: 14px;
+        accent-color: var(--accent);
+        cursor: pointer;
+      }
+      .filter-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 12px;
+      }
+      .fchip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: var(--chip);
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 3px 6px 3px 10px;
+        font-size: 11.5px;
+        font-weight: 600;
+      }
+      .fchip-x {
+        background: none;
+        border: none;
+        box-shadow: none !important;
+        padding: 0 2px !important;
+        margin: 0;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 12px;
+        line-height: 1;
+      }
+      .fchip-x:hover {
+        color: var(--down);
+      }
+      .fchip-clear {
+        background: none;
+        border: none;
+        box-shadow: none !important;
+        color: var(--accent);
+        font-weight: 650;
+        font-size: 11.5px;
+        cursor: pointer;
+        padding: 3px 6px !important;
+      }
+
+      /* ---- create/edit alert modal ---- */
+      #alertModal {
+        position: fixed;
+        inset: 0;
+        z-index: 260;
+        display: none;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 24px 16px;
+        background: rgba(0, 0, 0, 0.55);
+        -webkit-backdrop-filter: blur(3px);
+        backdrop-filter: blur(3px);
+        overflow-y: auto;
+      }
+      #alertModal.show {
+        display: flex;
+      }
+      .am-card {
+        background: var(--panel-raised);
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow);
+        width: min(580px, 96vw);
+        margin: 0 auto auto;
+      }
+      .am-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--line);
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: var(--panel-raised);
+        border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+      }
+      .am-head h2 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 760;
+      }
+      .am-head svg.lucide {
+        color: var(--accent);
+      }
+      .am-close {
+        margin-left: auto;
+        padding: 4px 10px !important;
+        font-size: 15px;
+        line-height: 1;
+        box-shadow: none !important;
+      }
+      #alertModal .alert-form {
+        padding: 16px 18px;
+      }
+
+      /* ---------- alert detail (view) modal ---------- */
+      #alertViewModal {
+        position: fixed;
+        inset: 0;
+        z-index: 255;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 24px 16px;
+        background: rgba(0, 0, 0, 0.55);
+        -webkit-backdrop-filter: blur(3px);
+        backdrop-filter: blur(3px);
+        overflow-y: auto;
+      }
+      #alertViewModal.show {
+        display: flex;
+      }
+      #alertViewModal .sm-card {
+        margin: auto;
+      }
+      .av-badges {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px 8px;
+        margin-top: 8px;
+      }
+      .av-badges .ai-side,
+      .av-badges .ai-status,
+      .av-badges .ai-verify,
+      .av-badges .ai-zone,
+      .av-badges .ai-index {
+        font-size: 10.5px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+        padding: 2px 8px;
+        border-radius: 999px;
+      }
+      .av-badges .ai-status {
+        text-transform: uppercase;
+      }
+      .av-badges .ai-index {
+        color: var(--muted);
+        background: var(--chip);
+        border: 1px solid var(--line);
+      }
+      .av-badges .ai-status,
+      .av-badges .ai-zone {
+        background: var(--chip);
+        color: var(--muted);
+      }
+      .sm-grid .cell.wide {
+        grid-column: 1 / -1;
+      }
+      .sm-grid .cell .v.note {
+        font-weight: 500;
+        text-align: right;
+      }
+      .av-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 12px 16px;
+        border-top: 1px solid var(--line);
+      }
+      .av-readonly {
+        font-size: 12px;
+        color: var(--muted);
+        font-style: italic;
+      }
+      /* alert rows read as clickable (open the detail modal); buttons stay default */
+      .alert-item {
+        cursor: pointer;
+      }
+      .alert-item:hover {
+        border-color: var(--line-strong);
+      }
+      .alert-item .ai-actions button {
+        cursor: pointer;
+      }
+
+      /* keep the table filling the panel (and only the table scrolling) on desktop */
+      @media (min-width: 820px) {
+        .panel {
+          display: flex;
+          flex-direction: column;
+          flex: 1 1 auto;
+          min-height: 0;
+        }
+        .panel .tablewrap {
+          flex: 1 1 auto;
+          min-height: 0;
+        }
+      }
+      

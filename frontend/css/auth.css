@@ -1,0 +1,269 @@
+/* ---------- auth: overlay, user chrome, users modal ---------- */
+      #authOverlay {
+        position: fixed;
+        inset: 0;
+        z-index: 400;
+        display: flex; /* shown until the auth controller hides it */
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        background: var(--bg);
+      }
+      #authOverlay.hidden {
+        display: none;
+      }
+      .auth-card {
+        width: min(400px, 96vw);
+        background: var(--panel-raised);
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow);
+        padding: 22px;
+      }
+      .auth-brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+      .auth-brand .brand-mark {
+        display: inline-flex;
+        width: 40px;
+        height: 40px;
+        align-items: center;
+        justify-content: center;
+        border-radius: 12px;
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        color: #fff;
+      }
+      .auth-card h2 {
+        margin: 0 0 4px;
+        font-size: 16px;
+        font-weight: 780;
+      }
+      .auth-hint,
+      .auth-empty {
+        color: var(--muted);
+        font-size: 12.5px;
+        margin: 0 0 14px;
+      }
+      .auth-card input,
+      .auth-card select,
+      .um-form input,
+      .um-form select {
+        width: 100%;
+        box-sizing: border-box;
+        margin-top: 10px;
+        padding: 10px 12px;
+        font: inherit;
+        color: var(--txt);
+        background: var(--panel2);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md);
+      }
+      .auth-submit {
+        width: 100%;
+        margin-top: 14px;
+        justify-content: center !important;
+      }
+      .auth-err {
+        color: var(--down);
+        font-size: 12.5px;
+        min-height: 16px;
+        margin-top: 8px;
+      }
+      .user-picker {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 6px;
+      }
+      .user-picker .up-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        justify-content: flex-start !important;
+        padding: 11px 14px !important;
+        text-align: left;
+      }
+      .user-picker .up-avatar {
+        width: 26px;
+        height: 26px;
+        border-radius: 999px;
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        color: #fff;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 800;
+        font-size: 12px;
+      }
+      .user-picker .up-role {
+        margin-left: auto;
+        font-size: 10.5px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+      }
+      .picked-user {
+        font-weight: 750;
+        margin: 4px 0 2px;
+      }
+      .auth-back {
+        width: 100%;
+        margin-top: 8px;
+        box-shadow: none !important;
+        background: transparent;
+        color: var(--muted);
+      }
+      /* app-bar user chrome */
+      .usernav {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: 8px;
+      }
+      .usernav .who {
+        font-size: 12px;
+        color: var(--muted-ink);
+        font-weight: 650;
+      }
+      .user-chip {
+        padding: 7px 12px !important;
+        border-radius: 999px !important;
+        box-shadow: none !important;
+        font-size: 12.5px;
+      }
+      .logout-btn {
+        width: 34px;
+        height: 34px;
+        padding: 0 !important;
+        border-radius: 999px !important;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: none !important;
+      }
+      .logout-btn svg.lucide {
+        margin: 0;
+      }
+      /* viewer: hide editor-only controls (server also enforces) */
+      body.role-viewer .needs-editor {
+        display: none !important;
+      }
+      /* users modal */
+      #usersModal {
+        position: fixed;
+        inset: 0;
+        z-index: 320;
+        display: none;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 40px 16px;
+      }
+      #usersModal.show {
+        display: flex;
+      }
+      #usersModal .um-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.55);
+        -webkit-backdrop-filter: blur(3px);
+        backdrop-filter: blur(3px);
+      }
+      .um-card {
+        position: relative;
+        z-index: 1;
+        width: min(560px, 96vw);
+        max-height: 84vh;
+        overflow: auto;
+        background: var(--panel-raised);
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow);
+      }
+      .um-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--line);
+        position: sticky;
+        top: 0;
+        background: var(--panel-raised);
+      }
+      .um-head h2 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 760;
+      }
+      .um-head svg.lucide {
+        color: var(--accent);
+      }
+      .um-spacer {
+        flex: 1;
+      }
+      .um-head #um-close {
+        width: 32px;
+        height: 32px;
+        padding: 0 !important;
+        box-shadow: none !important;
+      }
+      .um-list {
+        padding: 8px;
+      }
+      .um-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 10px;
+        border-radius: var(--radius-md);
+      }
+      .um-row:hover {
+        background: var(--chip);
+      }
+      .um-row .um-name {
+        font-weight: 700;
+        font-size: 13.5px;
+      }
+      .um-row .um-role {
+        font-size: 10.5px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: var(--chip);
+        color: var(--muted);
+        text-transform: uppercase;
+      }
+      .um-row .um-role.admin {
+        color: var(--accent);
+        background: var(--rowup);
+      }
+      .um-row .um-disabled {
+        font-size: 10.5px;
+        color: var(--down);
+        font-weight: 700;
+      }
+      .um-row .um-spacer {
+        flex: 1;
+      }
+      .um-form {
+        padding: 14px 18px 18px;
+        border-top: 1px solid var(--line);
+      }
+      .um-form h3 {
+        margin: 0 0 4px;
+        font-size: 13px;
+        font-weight: 750;
+      }
+      .um-form-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .um-form-actions button {
+        flex: 1;
+        justify-content: center !important;
+      }
+    
