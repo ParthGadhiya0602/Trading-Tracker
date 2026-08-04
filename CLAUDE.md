@@ -6,21 +6,29 @@ index's own live points level. Data is a live market feed (unofficial), market h
 
 ## Architecture
 
+Split into **`backend/`** (Node server) and **`frontend/`** (the static app it serves).
 A pure-browser page can't reach the upstream feed (CORS forbids the needed headers; its
-anti-bot layer blocks any request without a warmed session). So there are two files:
+anti-bot layer blocks any request without a warmed session), hence the local proxy.
 
-- **`server.js`** - Node 18+, **zero dependencies** (built-in `fetch` + hand-rolled
+`config.json`, `alerts.json`, `users.json`, `logs/`, and `package.json`/lockfile live at
+the **repo root**; `backend/*.js` reaches config + runtime data via `..`.
+
+- **`backend/server.js`** - Node 18+, **zero dependencies** (built-in `fetch` + hand-rolled
   cookie jar). Warms an upstream session (cookies + browser headers, rewarm-on-403, 10 min
-  TTL), then serves the page and data same-origin. Startup self-test prints reachability.
-  - `GET /` → `index.html`
+  TTL), serves the app + data same-origin, and gates all `/api/*` behind auth. Startup
+  self-test prints reachability. Serves **`../frontend`** statically (MIME + path-traversal
+  guard; `.js` → `text/javascript` for ES modules).
+  - `GET /` → `frontend/index.html`; `GET /css/*`, `GET /js/*` → static assets.
   - `GET /api/indices` → JSON keyed by index name. Dashboard indices (`DASH_INDICES` =
     `alerts.INDICES`): **NIFTY 50, NIFTY NEXT 50, NIFTY MIDCAP 50, NIFTY MIDCAP 100**
     (full 100).
-- **`index.html`** - vanilla JS + inline CSS dashboard. No build step. Two views
-  (Dashboard / Alerts) via the header toggle. Uses **Lucide** icons from a CDN
-  (`cdn.jsdelivr.net/npm/lucide`) - the only external dependency; `drawIcons()`/
-  `lucide.createIcons()` render them and it degrades gracefully (empty icons) if offline.
-- **`alerts.js`** - alert engine + storage + Telegram sender. `server.js` runs
+- **`frontend/`** - vanilla JS + CSS, **no build step**. `index.html` is markup only +
+  `<link>`s to **`css/{base,components,dashboard,alerts,auth}.css`** + one
+  `<script type="module" src="js/main.js">`. `js/` modules: `main` (entry, imports the
+  rest) → `dashboard.js`, `alerts-ui.js`, `auth-ui.js` (cross-module bridges via `window.*`:
+  `openCreateAlert`, `APP_AUTH`, `__initDash`/`__initAlerts`). Uses **Lucide** from a CDN
+  (`cdn.jsdelivr.net/npm/lucide`) - the only external dep; degrades gracefully if offline.
+- **`backend/alerts.js`** - alert engine + storage + Telegram sender. `server.js` runs
   `alertTick()` on an interval (`ALERT_POLL_SECONDS`, default 5) **only during market
   hours**, calling `alerts.evaluate(payload)` - so alerts fire server-side even with no
   browser tab open.
@@ -40,7 +48,15 @@ anti-bot layer blocks any request without a warmed session). So there are two fi
     `logError(scope, err)` — dated lines `[YYYY-MM-DD HH:MM:SS IST] ERROR [scope] msg` — and
     echoed to the console. Failures never blank the app (in-memory + `alerts.json` stay good).
 
-Run: `node server.js` → open http://localhost:8787/ (`PORT` env var to change port).
+- **`backend/auth.js`** - user accounts (scrypt + per-user salt), in-memory sessions
+  (HttpOnly `sid` cookie, 12h idle), roles **admin/editor/viewer**, login rate-limit; users
+  in Mongo `users` collection or local `users.json`. Server-side gate: every `/api/*`
+  needs a session (login/setup excepted); alert writes need editor/admin; `/api/users*`
+  admin-only; non-GET requires an `X-Requested-With` header (CSRF). First run shows a
+  Create-admin screen. `ALERTS_NO_TICK=1` pauses the eval loop (serve UI/APIs only).
+
+Run: `node backend/server.js` (or `./run.sh`) → open http://localhost:8787/ (`PORT` env
+var to change port).
 
 ## Alerts
 

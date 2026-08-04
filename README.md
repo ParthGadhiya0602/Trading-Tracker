@@ -53,7 +53,7 @@ The data-source endpoints live in `config.json`'s `feed` block (copy `config.exa
 ## How to use
 
 ```bash
-node server.js
+node backend/server.js
 ```
 
 Then open **http://localhost:8787/** in your browser.
@@ -68,7 +68,7 @@ OK [NIFTY 50] - got 50 constituents (stamp: ...)
 To use a different port:
 
 ```bash
-PORT=9000 node server.js     # then open http://localhost:9000/
+PORT=9000 node backend/server.js     # then open http://localhost:9000/
 ```
 
 Stop the server with **Ctrl-C**.
@@ -143,7 +143,7 @@ it appears in both the dashboard and the alert picker.
 
 ### Telegram (optional)
 
-Notifications reach you with no tab open. Create `config.json` next to `server.js`:
+Notifications reach you with no tab open. Create `config.json` at the repo root:
 
 ```json
 {
@@ -184,10 +184,21 @@ APIs only — no fires, no Telegram, no writes); handy for local inspection.
 
 ## Files
 
-- `index.html` - the dashboard + alerts UI (vanilla JS + inline CSS, no build step).
-- `server.js` - the zero-dependency Node proxy, static server, and alert eval loop.
-- `alerts.js` - alert engine, storage (Atlas or `alerts.json`), and Telegram sender.
-- `package.json` - only the optional `mongodb` driver (needed just for Atlas).
+```
+backend/   server.js  · alerts.js · auth.js · config.example.json
+frontend/  index.html · css/{base,components,dashboard,alerts,auth}.css
+           js/{main,dashboard,alerts-ui,auth-ui}.js
+root       package.json · package-lock.json   +  (gitignored) config.json · alerts.json · users.json · logs/
+```
+
+- `backend/server.js` - zero-dependency Node proxy: warms the session, serves `frontend/`
+  statically, gates `/api/*` behind auth, runs the alert eval loop. Run: `node backend/server.js`.
+- `backend/alerts.js` - alert engine, storage (Atlas or `alerts.json`), Telegram sender.
+- `backend/auth.js` - user accounts (scrypt), sessions, roles (admin/editor/viewer).
+- `frontend/index.html` - markup only; loads `css/*` and `js/main.js` (native ES modules,
+  no build step). `js/`: `main` (entry) + `dashboard`, `alerts-ui`, `auth-ui`.
+- `package.json` (root) - only the optional `mongodb` driver (needed just for Atlas).
+- `config.json` (root, gitignored) - `feed` endpoints, `mongo.uri`, `telegram` recipients.
 
 ## Notes / limitations
 
