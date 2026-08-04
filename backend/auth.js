@@ -16,9 +16,10 @@ const path = require("path");
 const crypto = require("crypto");
 
 const HERE = __dirname;
-const STORE_FILE = path.join(HERE, "users.json");
-const CONFIG_FILE = path.join(HERE, "config.json");
-const LOG_DIR = path.join(HERE, "logs");
+const ROOT = path.join(HERE, ".."); // repo root (config + runtime data live here)
+const STORE_FILE = path.join(ROOT, "users.json");
+const CONFIG_FILE = path.join(ROOT, "config.json");
+const LOG_DIR = path.join(ROOT, "logs");
 const LOG_FILE = path.join(LOG_DIR, "alerts-errors.log");
 
 const ROLES = ["admin", "editor", "viewer"];

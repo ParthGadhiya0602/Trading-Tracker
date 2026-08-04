@@ -32,7 +32,7 @@ const HERE = __dirname;
 // Data-source endpoints are NOT hardcoded - they're read from config.json's `feed` block
 // (gitignored), so the upstream source isn't exposed in the committed code. Shape:
 //   { base, indicesEndpoint, referer, warmupPaths: [] }  (see config.example.json)
-const CONFIG_FILE = path.join(HERE, "config.json");
+const CONFIG_FILE = path.join(HERE, "..", "config.json"); // config lives at repo root
 function loadFeedConfig() {
   try {
     const cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
@@ -583,7 +583,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if (url === "/" || url === "/index.html") {
-    const fp = path.join(HERE, "index.html");
+    const fp = path.join(HERE, "..", "index.html"); // index.html at repo root (P2 -> frontend/)
     fs.readFile(fp, (err, buf) => {
       if (err) send(res, 404, "index.html not found", "text/plain");
       else send(res, 200, buf, "text/html; charset=utf-8");

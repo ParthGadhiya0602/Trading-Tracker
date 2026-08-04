@@ -88,4 +88,4 @@ else
 fi
 
 echo "Starting Trading Tracker with $(node -v) ..."
-exec node server.js
+exec node backend/server.js
