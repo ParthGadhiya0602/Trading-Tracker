@@ -152,6 +152,14 @@ Per-index payload shape:
 `{ source, timestamp, marketDataLive, level:{last,variation,pChange,open,high,low,prevClose},
    advance:{advances,declines,unchanged}, data:[{symbol,open,dayHigh,dayLow,lastPrice,prevClose,change,pChange,totalTradedVolume}] }`
 
+**Market state & pre-open** (`marketState()` in `server.js`, mirrored client-side): **pre-open
+09:00–09:15 · open 09:15–15:30 · closed** (IST, Mon–Fri). During **pre-open**, `fetchMarketData()`
+serves `fetchPreopen()` — ONE `key=ALL` call to `feed.preopenEndpoint` filtered per index by the
+cached symbol list, with each stock's **IEP** as `open`=`high`=`low`=`lastPrice` and
+`marketStatus:"Pre-open"` (same payload shape). So `/api/indices` shows a **PRE-OPEN** dashboard
+state and the `alertTick` loop evaluates alerts against IEP before the 09:15 open (the symbol
+cache only refreshes from real `open`-session constituents). Full shape/mapping in `NSE_API.md`.
+
 ## Features / UI
 
 Layout: sticky **app bar** (brand · market status · Dashboard/Alerts switch) → **KPI

@@ -243,6 +243,15 @@
         const mins = (parseInt(p.hour, 10) % 24) * 60 + parseInt(p.minute, 10);
         return mins >= 9 * 60 + 15 && mins <= 15 * 60 + 30;
       }
+      // pre-open 09:00-09:15, open 09:15-15:30, else closed (IST, Mon-Fri)
+      function marketState(d) {
+        const p = istParts(d);
+        if (p.weekday === "Sat" || p.weekday === "Sun") return "closed";
+        const mins = (parseInt(p.hour, 10) % 24) * 60 + parseInt(p.minute, 10);
+        if (mins >= 9 * 60 && mins < 9 * 60 + 15) return "pre-open";
+        if (mins >= 9 * 60 + 15 && mins <= 15 * 60 + 30) return "open";
+        return "closed";
+      }
       function fmtClock(d) {
         const h12 = document.getElementById("tf").value === "12";
         return (
@@ -529,13 +538,16 @@
         }
       }
       function renderMarketStatus() {
-        const open = isMarketOpen(new Date());
+        const st = marketState(new Date());
         document.getElementById("dot").className =
-          "dot " + (open ? "open" : "closed");
-        document.getElementById("mktText").textContent = open
-          ? "Market OPEN"
-          : "Market CLOSED";
-        return open;
+          "dot " + (st === "open" ? "open" : st === "pre-open" ? "preopen" : "closed");
+        document.getElementById("mktText").textContent =
+          st === "open"
+            ? "Market OPEN"
+            : st === "pre-open"
+              ? "PRE-OPEN"
+              : "Market CLOSED";
+        return st !== "closed"; // poll during pre-open + open
       }
 
       // ---------- fetch (in-memory cache keeps last good on failure) ----------

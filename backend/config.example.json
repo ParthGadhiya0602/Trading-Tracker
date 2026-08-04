@@ -9,6 +9,7 @@
   "feed": {
     "base": "https://YOUR_DATA_SOURCE_HOST",
     "indicesEndpoint": "/path/to/indices-api?functionName=SOME_FUNCTION&symbol=",
+    "preopenEndpoint": "/path/to/preopen-api?key=",
     "referer": "/path/used/as/referer-header",
     "warmupPaths": ["/", "/path/that/sets/anti-bot-cookies?symbol=SYMBOL"]
   }

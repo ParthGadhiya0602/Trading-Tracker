@@ -262,8 +262,73 @@ async function fetchAllIndices() {
   return out;
 }
 
-// ---------------- market hours (IST 09:15-15:30, Mon-Fri) ----------------
-function isMarketOpen(d = new Date()) {
+// Pre-open session (09:00-09:15): ONE key=ALL fetch, filtered into each dashboard index by
+// its cached symbol list. IEP (indicative equilibrium price) becomes open=high=low=lastPrice
+// so the dashboard renders the pre-open indicative move vs prev close. Same payload shape as
+// fetchAllIndices so /api/indices can serve it transparently.
+async function fetchPreopen() {
+  requireFeed();
+  if (!FEED.preopenEndpoint) throw new Error("pre-open endpoint not configured");
+  const j = await srcJson(`${BASE}${FEED.preopenEndpoint}ALL`);
+  const rows = (j && j.data) || [];
+  const bySym = new Map();
+  for (const r of rows) {
+    const m = r && r.metadata;
+    if (m && m.symbol) bySym.set(m.symbol, m);
+  }
+  const stamp = (j && j.timestamp) || null;
+  const advance = {
+    advances: num(j.advances) || 0,
+    declines: num(j.declines) || 0,
+    unchanged: num(j.unchanged) || 0,
+  };
+  const out = {};
+  for (const index of DASH_INDICES) {
+    const syms = alerts.symbols()[index] || [];
+    const data = [];
+    for (const sym of syms) {
+      const m = bySym.get(sym);
+      if (!m) continue;
+      const iep = num(m.iep);
+      data.push({
+        symbol: sym,
+        companyName: null,
+        open: iep,
+        dayHigh: iep,
+        dayLow: iep,
+        lastPrice: iep,
+        prevClose: num(m.previousClose),
+        change: num(m.change),
+        pChange: num(m.pChange),
+        totalTradedVolume: num(m.finalQuantity),
+        totalTradedValue: num(m.totalTurnover),
+        yearHigh: num(m.yearHigh),
+        yearLow: num(m.yearLow),
+        nearWKH: null,
+        nearWKL: null,
+        perChange30d: null,
+        perChange365d: null,
+      });
+    }
+    out[index] = {
+      source: "live",
+      timestamp: stamp,
+      marketStatus: "Pre-open",
+      marketDataLive: data.length > 0,
+      level: null,
+      advance,
+      data,
+    };
+  }
+  return out;
+}
+// dashboard/alert data for the current market state (pre-open uses the pre-open feed)
+async function fetchMarketData() {
+  return marketState() === "pre-open" ? fetchPreopen() : fetchAllIndices();
+}
+
+// ---------------- market state (IST, Mon-Fri): pre-open 09:00-09:15, open 09:15-15:30 ----
+function marketState(d = new Date()) {
   const f = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Kolkata",
     hour12: false,
@@ -273,9 +338,14 @@ function isMarketOpen(d = new Date()) {
   });
   const o = {};
   f.formatToParts(d).forEach((p) => (o[p.type] = p.value));
-  if (o.weekday === "Sat" || o.weekday === "Sun") return false;
+  if (o.weekday === "Sat" || o.weekday === "Sun") return "closed";
   const mins = (parseInt(o.hour, 10) % 24) * 60 + parseInt(o.minute, 10);
-  return mins >= 9 * 60 + 15 && mins <= 15 * 60 + 30;
+  if (mins >= 9 * 60 && mins < 9 * 60 + 15) return "pre-open";
+  if (mins >= 9 * 60 + 15 && mins <= 15 * 60 + 30) return "open";
+  return "closed";
+}
+function isMarketOpen(d = new Date()) {
+  return marketState(d) === "open";
 }
 
 // ---------------- alert evaluation loop (server-side; fires with no tab open) ----------------
@@ -296,12 +366,13 @@ function cachePrices(payload) {
   }
 }
 async function alertTick() {
-  if (evaluating || NO_TICK || !isMarketOpen()) return;
+  const st = marketState(); // fire during pre-open (IEP) and the regular session
+  if (evaluating || NO_TICK || (st !== "open" && st !== "pre-open")) return;
   evaluating = true;
   try {
-    const payload = await fetchAllIndices();
+    const payload = await fetchMarketData();
     cachePrices(payload);
-    alerts.updateSymbols(payload);
+    if (st === "open") alerts.updateSymbols(payload); // refresh symbol cache from real constituents only
     alerts.evaluate(payload);
   } catch (_) {
     /* transient network error - try again next tick */
@@ -603,7 +674,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       if (url === "/api/indices") {
-        const data = await fetchAllIndices();
+        const data = await fetchMarketData(); // pre-open feed during 09:00-09:15, else live
         cachePrices(data);
         send(res, 200, JSON.stringify(data), "application/json; charset=utf-8");
         return;

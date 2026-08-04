@@ -148,6 +148,11 @@
         background: var(--down);
         box-shadow: 0 0 0 3px var(--rowdown);
       }
+      .dot.preopen {
+        background: var(--warn);
+        box-shadow: 0 0 0 3px var(--warn-tint);
+        animation: pulse 2s infinite;
+      }
       @keyframes pulse {
         0% {
           opacity: 1;
