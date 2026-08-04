@@ -523,6 +523,36 @@ async function handleAlertsApi(req, res, url, method) {
   return false;
 }
 
+// ---- static file serving (the app shell in ../frontend; public, app self-gates via auth) ----
+const FRONTEND_DIR = path.join(HERE, "..", "frontend");
+const MIME = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8", // mandatory type or browsers reject ES modules
+  ".mjs": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".png": "image/png",
+  ".webmanifest": "application/manifest+json",
+  ".woff2": "font/woff2",
+  ".map": "application/json; charset=utf-8",
+};
+function serveStatic(res, urlPath) {
+  let rel = decodeURIComponent(urlPath);
+  if (rel === "/" || rel === "") rel = "/index.html";
+  const full = path.normalize(path.join(FRONTEND_DIR, rel));
+  // path-traversal guard: must resolve inside FRONTEND_DIR
+  if (full !== FRONTEND_DIR && !full.startsWith(FRONTEND_DIR + path.sep)) {
+    send(res, 404, "Not found", "text/plain");
+    return;
+  }
+  fs.readFile(full, (err, buf) => {
+    if (err) send(res, 404, "Not found", "text/plain");
+    else send(res, 200, buf, MIME[path.extname(full)] || "application/octet-stream");
+  });
+}
+
 const server = http.createServer(async (req, res) => {
   const url = (req.url || "/").split("?")[0];
   const method = req.method || "GET";
@@ -582,15 +612,8 @@ const server = http.createServer(async (req, res) => {
     }
     return;
   }
-  if (url === "/" || url === "/index.html") {
-    const fp = path.join(HERE, "..", "index.html"); // index.html at repo root (P2 -> frontend/)
-    fs.readFile(fp, (err, buf) => {
-      if (err) send(res, 404, "index.html not found", "text/plain");
-      else send(res, 200, buf, "text/html; charset=utf-8");
-    });
-    return;
-  }
-  send(res, 404, "Not found", "text/plain");
+  // everything else -> static assets from ../frontend (index.html, css/*, js/*)
+  serveStatic(res, url);
 });
 
 async function main() {
