@@ -318,7 +318,9 @@
         box-shadow: var(--shadow-sm);
         display: inline-flex;
         align-items: center;
+        justify-content: flex-end; /* align button content (icon + text) to the right */
         gap: 7px;
+        text-align: right;
         transition:
           background-color 0.15s ease,
           border-color 0.15s ease,
@@ -678,6 +680,151 @@
       .symwrap {
         display: inline-flex;
         align-items: center;
+        cursor: pointer;
+        border-radius: 5px;
+        padding: 1px 3px;
+        margin: -1px -3px;
+        transition: background-color 0.12s ease;
+      }
+      .symwrap:hover,
+      .symwrap:focus-visible {
+        background: var(--chip);
+        outline: none;
+      }
+      .copytip {
+        position: fixed;
+        z-index: 300;
+        background: var(--up);
+        color: #04120d;
+        font-size: 11px;
+        font-weight: 700;
+        padding: 3px 8px;
+        border-radius: 6px;
+        box-shadow: var(--shadow);
+        opacity: 0;
+        transform: translateY(4px);
+        transition:
+          opacity 0.15s ease,
+          transform 0.15s ease;
+        pointer-events: none;
+        white-space: nowrap;
+      }
+      .copytip.show {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      /* ---------- stock detail modal ---------- */
+      #stockModal {
+        position: fixed;
+        inset: 0;
+        z-index: 250;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+        background: rgba(0, 0, 0, 0.55);
+        -webkit-backdrop-filter: blur(3px);
+        backdrop-filter: blur(3px);
+      }
+      #stockModal.show {
+        display: flex;
+      }
+      .sm-card {
+        background: var(--panel-raised);
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow);
+        width: min(580px, 96vw);
+        max-height: 88vh;
+        overflow: auto;
+      }
+      .sm-head {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 16px 18px 12px;
+        position: sticky;
+        top: 0;
+        background: var(--panel-raised);
+        border-bottom: 1px solid var(--line);
+      }
+      .sm-sym {
+        font-size: 18px;
+        font-weight: 800;
+        letter-spacing: 0.2px;
+      }
+      .sm-name {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 2px;
+      }
+      /* alert (icon-only) + close: identical square icon buttons in a self-contained
+         action group so they line up with each other regardless of the title height */
+      .sm-actions {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .sm-actions .sm-addalert,
+      .sm-actions .sm-close {
+        flex: 0 0 auto;
+        width: 34px;
+        height: 34px;
+        padding: 0 !important;
+        margin: 0;
+        font-size: 16px;
+        line-height: 1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: none !important;
+      }
+      .sm-actions .sm-addalert svg.lucide {
+        width: 16px;
+        height: 16px;
+        margin: 0;
+        vertical-align: 0;
+      }
+      .sm-price {
+        display: flex;
+        align-items: baseline;
+        flex-wrap: wrap;
+        gap: 12px;
+        padding: 14px 18px;
+      }
+      .sm-ltp {
+        font-size: 26px;
+        font-weight: 800;
+      }
+      .sm-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1px;
+        background: var(--line);
+        border-top: 1px solid var(--line);
+      }
+      .sm-grid .cell {
+        background: var(--panel-raised);
+        padding: 11px 16px;
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        font-variant-numeric: tabular-nums;
+      }
+      .sm-grid .cell .k {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .sm-grid .cell .v {
+        font-weight: 650;
+        font-size: 13.5px;
+      }
+      @media (max-width: 480px) {
+        .sm-grid {
+          grid-template-columns: 1fr;
+        }
       }
       .num {
         font-variant-numeric: tabular-nums;
@@ -784,6 +931,19 @@
           overflow: hidden;
           padding-bottom: 16px;
         }
+        /* the visible view fills the space between header and footer; the dashboard's
+           table scrolls inside it, the alerts page scrolls as a whole */
+        #dashView:not([hidden]) {
+          display: flex;
+          flex-direction: column;
+          flex: 1 1 auto;
+          min-height: 0;
+        }
+        #alertsView:not([hidden]) {
+          flex: 1 1 auto;
+          min-height: 0;
+          overflow-y: auto;
+        }
         .tablewrap {
           flex: 1 1 auto;
           max-height: none; /* let flex give it the remaining height */
@@ -793,196 +953,2079 @@
           flex: none;
         }
       }
+      /* ---------- view toggle (Dashboard / Alerts) ---------- */
+      .viewnav {
+        display: inline-flex;
+        gap: 3px;
+        background: var(--chip);
+        border: 1px solid var(--line);
+        padding: 4px;
+        border-radius: 999px;
+      }
+      .viewnav .tab {
+        border-radius: 999px !important;
+        box-shadow: none !important;
+        padding: 7px 14px !important;
+      }
+      .viewnav .tab.active {
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        color: #fff;
+      }
+      .viewnav .bell {
+        margin-left: 3px;
+        background: var(--down);
+        color: #fff;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 800;
+        padding: 1px 6px;
+      }
+
+      /* ---------- alerts view ---------- */
+      #alertsView[hidden] {
+        display: none;
+      }
+      .alerts-layout {
+        display: grid;
+        grid-template-columns: 340px 1fr;
+        gap: 18px;
+        align-items: start;
+      }
+      @media (max-width: 780px) {
+        .alerts-layout {
+          grid-template-columns: 1fr;
+        }
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-sm);
+        padding: 16px 18px;
+      }
+      .card h2 {
+        margin: 0 0 14px;
+        font-size: 14px;
+        font-weight: 750;
+        letter-spacing: 0.2px;
+      }
+      .alert-form {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .alert-form label {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        font-size: 10.5px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        color: var(--muted);
+      }
+      .alert-form .opt {
+        text-transform: none;
+        letter-spacing: 0;
+        font-weight: 500;
+        color: var(--muted);
+      }
+      .alert-form textarea {
+        background: var(--panel2);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        color: var(--txt);
+        font: inherit;
+        font-size: 13.5px;
+        padding: 9px 11px;
+        resize: vertical;
+        min-height: 44px;
+      }
+      .alert-form textarea:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .alert-form input,
+      .alert-form select {
+        appearance: none;
+        -webkit-appearance: none;
+        background: var(--panel2);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        color: var(--txt);
+        font: inherit;
+        font-weight: 600;
+        font-size: 14px;
+        padding: 9px 11px;
+      }
+      .alert-form input:focus,
+      .alert-form select:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .time-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .time-row select {
+        flex: 1;
+      }
+      .time-row span {
+        color: var(--muted);
+        font-weight: 700;
+      }
+      .trigger-preview {
+        font-size: 12.5px;
+        font-weight: 600;
+        color: var(--muted-ink);
+        background: var(--chip);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        padding: 9px 11px;
+      }
+      .trigger-preview b {
+        color: var(--txt);
+        font-variant-numeric: tabular-nums;
+      }
+      .form-actions {
+        display: flex;
+        gap: 8px;
+      }
+      .form-actions button {
+        flex: 1;
+      }
+      .form-err {
+        color: var(--down);
+        font-size: 12px;
+        font-weight: 600;
+        min-height: 0;
+      }
+
+      .alert-filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+      .alert-filters select {
+        appearance: none;
+        -webkit-appearance: none;
+        background: var(--panel2);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        color: var(--txt);
+        font: inherit;
+        font-weight: 600;
+        font-size: 12.5px;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+      .alert-filters select:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .alert-item {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 10px 16px;
+        padding: 12px 14px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md);
+        margin-bottom: 9px;
+        background: var(--panel2);
+      }
+      .alert-item.ringing {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px var(--rowup);
+      }
+      /* info column: badges → prices → meta, stacked and filling the row width */
+      .alert-item .ai-body {
+        flex: 1 1 340px;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+      .alert-item .ai-line1 {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px 8px;
+      }
+      .alert-item .ai-sym {
+        font-weight: 750;
+        font-size: 14px;
+      }
+      .alert-item .ai-side {
+        font-size: 10.5px;
+        font-weight: 800;
+        letter-spacing: 0.5px;
+        padding: 2px 8px;
+        border-radius: 999px;
+      }
+      .ai-side.buy {
+        color: var(--up);
+        background: var(--rowup);
+      }
+      .ai-side.sell {
+        color: var(--down);
+        background: var(--rowdown);
+      }
+      .alert-item .ai-sub {
+        font-size: 11.5px;
+        color: var(--muted);
+      }
+      .alert-item .ai-index {
+        font-size: 10.5px;
+        font-weight: 650;
+        color: var(--muted);
+        background: var(--chip);
+        border: 1px solid var(--line);
+        padding: 2px 7px;
+        border-radius: 999px;
+      }
+      .alert-item .ai-zone {
+        font-size: 10.5px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: var(--chip);
+        color: var(--muted);
+      }
+      .ai-zone.fail {
+        color: var(--down);
+        background: var(--rowdown);
+      }
+      .ai-zone.partial {
+        color: #f0a020;
+        background: rgba(240, 160, 32, 0.14);
+      }
+      .ai-zone.success {
+        color: var(--up);
+        background: var(--rowup);
+      }
+      .alert-item .ai-nums {
+        font-size: 12px;
+        color: var(--muted-ink);
+        font-variant-numeric: tabular-nums;
+      }
+      .alert-item .ai-status {
+        font-size: 10.5px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: var(--chip);
+        color: var(--muted);
+      }
+      .alert-item .ai-verify {
+        font-size: 10.5px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+        padding: 2px 8px;
+        border-radius: 999px;
+      }
+      .ai-verify.yes {
+        color: var(--up);
+        background: var(--rowup);
+      }
+      .ai-verify.no {
+        color: #f0a020;
+        background: rgba(240, 160, 32, 0.13);
+      }
+      .ai-status.armed {
+        color: var(--accent);
+      }
+      .ai-status.triggered {
+        color: var(--up);
+      }
+      .ai-status.closed {
+        color: var(--flat);
+      }
+      .alert-item .ai-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        flex: 0 0 auto;
+        margin-left: auto;
+        align-items: flex-start;
+      }
+      /* on narrow screens actions drop below the info and align to the left edge */
+      @media (max-width: 680px) {
+        .alert-item .ai-actions {
+          margin-left: 0;
+          width: 100%;
+        }
+        .alert-item .btn-sm {
+          flex: 1 1 auto;
+          justify-content: center !important;
+        }
+      }
+      .btn-sm {
+        padding: 5px 10px !important;
+        font-size: 12px;
+        border-radius: var(--radius-sm) !important;
+        box-shadow: none !important;
+      }
+      .btn-sm.danger {
+        color: var(--down);
+      }
+      .empty {
+        color: var(--muted);
+        font-size: 13px;
+        padding: 18px;
+        text-align: center;
+      }
+
+      /* ---------- ringing toasts (bottom-right, any view) ---------- */
+      #ringHost {
+        position: fixed;
+        right: 16px;
+        bottom: 16px;
+        z-index: 200;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        max-width: min(360px, 92vw);
+      }
+      .ring-toast {
+        background: var(--panel-raised);
+        border: 1px solid var(--accent);
+        border-left: 4px solid var(--accent);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow);
+        padding: 12px 14px;
+        animation: ringpop 0.2s ease;
+      }
+      @keyframes ringpop {
+        from {
+          opacity: 0;
+          transform: translateY(8px);
+        }
+      }
+      .ring-toast .rt-top {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 750;
+        font-size: 13.5px;
+        margin-bottom: 4px;
+      }
+      .ring-toast .rt-msg {
+        font-size: 12.5px;
+        color: var(--muted-ink);
+        white-space: pre-line;
+        margin-bottom: 10px;
+        font-variant-numeric: tabular-nums;
+      }
+      .ring-toast .rt-actions {
+        display: flex;
+        gap: 8px;
+      }
+      .ring-toast .rt-actions button {
+        flex: 1;
+      }
+
+      /* ---------- notification center ---------- */
+      .notif-btn {
+        position: relative;
+        width: 38px;
+        height: 38px;
+        padding: 0 !important;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 999px;
+        background: var(--chip);
+        border: 1px solid var(--line);
+        box-shadow: none !important;
+      }
+      .notif-btn svg.lucide {
+        width: 17px;
+        height: 17px;
+        margin: 0;
+      }
+      .notif-btn.has-unread {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+      .notif-badge {
+        position: absolute;
+        top: -4px;
+        right: -4px;
+        min-width: 17px;
+        height: 17px;
+        padding: 0 4px;
+        background: var(--down);
+        color: #fff;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 800;
+        line-height: 17px;
+        text-align: center;
+      }
+      #notifPanel {
+        position: fixed;
+        inset: 0;
+        z-index: 300;
+        display: none;
+        justify-content: flex-end;
+        align-items: flex-start;
+        padding: 64px 16px 16px;
+      }
+      #notifPanel.show {
+        display: flex;
+      }
+      #notifPanel .np-backdrop {
+        position: absolute;
+        inset: 0;
+      }
+      #notifPanel .np-card {
+        position: relative;
+        z-index: 1;
+        width: min(420px, 100%);
+        max-height: min(72vh, 640px);
+        display: flex;
+        flex-direction: column;
+        background: var(--panel-raised);
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+      .np-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--line);
+      }
+      .np-head svg.lucide {
+        color: var(--accent);
+      }
+      .np-head h3 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 760;
+      }
+      .np-head .np-count {
+        color: var(--muted);
+        font-size: 11.5px;
+        font-weight: 600;
+      }
+      .np-head .np-spacer {
+        flex: 1;
+      }
+      .np-head button {
+        padding: 4px 9px !important;
+        font-size: 11.5px;
+        box-shadow: none !important;
+      }
+      .np-list {
+        overflow-y: auto;
+        padding: 6px;
+      }
+      .notif-empty {
+        color: var(--muted);
+        font-size: 13px;
+        text-align: center;
+        padding: 28px 12px;
+        line-height: 1.6;
+      }
+      .notif-item {
+        display: flex;
+        gap: 9px;
+        padding: 10px;
+        border-radius: var(--radius-md);
+        border: 1px solid transparent;
+        cursor: pointer;
+      }
+      .notif-item + .notif-item {
+        margin-top: 2px;
+      }
+      .notif-item:hover {
+        background: var(--chip);
+      }
+      .notif-item.unread {
+        background: var(--rowup);
+        border-color: var(--line);
+      }
+      .notif-item .ni-dot {
+        flex: 0 0 auto;
+        width: 8px;
+        height: 8px;
+        margin-top: 6px;
+        border-radius: 999px;
+        background: transparent;
+      }
+      .notif-item.unread .ni-dot {
+        background: var(--accent);
+      }
+      .notif-item .ni-body {
+        flex: 1;
+        min-width: 0;
+      }
+      .notif-item .ni-line1 {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .notif-item .ni-icon {
+        font-size: 14px;
+      }
+      .notif-item .ni-sym {
+        font-weight: 750;
+        font-size: 13px;
+      }
+      .notif-item .ni-side,
+      .notif-item .ai-side,
+      .notif-item .ai-index {
+        font-size: 10px;
+        font-weight: 700;
+        padding: 1px 7px;
+        border-radius: 999px;
+      }
+      .notif-item .ai-index {
+        color: var(--muted);
+        background: var(--chip);
+        border: 1px solid var(--line);
+      }
+      .notif-item .ni-time {
+        color: var(--muted);
+        font-size: 11px;
+        margin-left: auto;
+      }
+      .notif-item .ni-msg {
+        color: var(--muted-ink);
+        font-size: 12px;
+        margin: 3px 0 7px;
+        font-variant-numeric: tabular-nums;
+      }
+      .notif-item .ni-actions {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      /* ---- lucide icons ---- */
+      [data-lucide] {
+        display: inline-block;
+        width: 14px;
+        height: 14px;
+      }
+      svg.lucide {
+        width: 14px;
+        height: 14px;
+        stroke-width: 2;
+        vertical-align: -2px;
+      }
+      .viewnav .tab svg.lucide,
+      .viewnav .tab [data-lucide] {
+        width: 15px;
+        height: 15px;
+        margin-right: 6px;
+      }
+      .field label svg.lucide,
+      .field label [data-lucide] {
+        width: 12px;
+        height: 12px;
+        color: var(--muted);
+        vertical-align: -1px;
+      }
+      .btn-sm svg.lucide,
+      .btn-sm [data-lucide],
+      .ai-actions svg.lucide {
+        width: 13px;
+        height: 13px;
+        margin-right: 4px;
+      }
+      .rt-actions svg.lucide {
+        width: 13px;
+        height: 13px;
+        margin-right: 4px;
+      }
+
+      /* ============================ Revamp layer ============================ */
+      /* ---- app bar ---- */
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        min-width: 0;
+      }
+      .brand-mark {
+        width: 34px;
+        height: 34px;
+        flex: none;
+        display: grid;
+        place-items: center;
+        border-radius: 10px;
+        color: #fff;
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        box-shadow: var(--shadow-sm);
+      }
+      .brand-text {
+        display: flex;
+        flex-direction: column;
+        line-height: 1.18;
+        min-width: 0;
+      }
+      .brand-title {
+        font-size: 15.5px;
+        font-weight: 780;
+        letter-spacing: 0.2px;
+      }
+      .brand-sub {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--muted);
+      }
+      @media (max-width: 560px) {
+        .brand-sub {
+          display: none;
+        }
+      }
+
+      /* ---- KPI strip: index cards are the index selector ---- */
+      .kpis {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+        gap: 12px;
+        margin: 4px 0 16px;
+      }
+      .kpis .idxcard {
+        min-width: 0;
+        cursor: pointer;
+        transition:
+          border-color 0.15s ease,
+          box-shadow 0.15s ease,
+          transform 0.15s ease,
+          background-color 0.15s ease;
+      }
+      .kpis .idxcard:hover {
+        border-color: var(--line-strong);
+        transform: translateY(-1px);
+        box-shadow: var(--shadow);
+      }
+      .kpis .idxcard.active {
+        border-color: transparent;
+        box-shadow:
+          0 0 0 1.5px var(--accent),
+          var(--shadow-sm);
+        background: linear-gradient(
+          180deg,
+          color-mix(in srgb, var(--accent) 9%, var(--panel)),
+          var(--panel)
+        );
+      }
+      .kpis .idxcard.active .idxcard-name {
+        color: var(--accent);
+      }
+
+      /* ---- toolbar ---- */
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 12px 16px;
+        margin-bottom: 14px;
+      }
+      .toolbar .tabs {
+        margin-bottom: 0;
+      }
+      .toolbar-left {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 12px;
+      }
+      .search {
+        position: relative;
+        display: flex;
+        align-items: center;
+      }
+      .search svg.lucide {
+        position: absolute;
+        left: 9px;
+        width: 14px;
+        height: 14px;
+        color: var(--muted);
+        pointer-events: none;
+      }
+      .search input {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        color: var(--txt);
+        font: inherit;
+        font-weight: 600;
+        font-size: 13px;
+        padding: 7px 10px 7px 30px;
+        width: 210px;
+        transition: border-color 0.15s ease;
+      }
+      .search input::placeholder {
+        color: var(--muted);
+        font-weight: 500;
+      }
+      .search input:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      @media (max-width: 560px) {
+        .search input {
+          width: 150px;
+        }
+      }
+      .tools {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-end;
+        gap: 12px;
+      }
+
+      /* ---- table panel ---- */
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+      .panel-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px 14px;
+        padding: 13px 16px;
+        border-bottom: 1px solid var(--line);
+      }
+      .panel-title {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 750;
+        letter-spacing: 0.2px;
+      }
+      .panel-title #idxName {
+        background: linear-gradient(90deg, var(--accent), var(--accent-2));
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+      .panel-meta {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px 10px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .panel-meta .upd {
+        font-variant-numeric: tabular-nums;
+      }
+      /* the panel owns the border/radius/shadow; strip them from nested pieces */
+      .panel .tablewrap {
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+        background: transparent;
+      }
+      .panel .legend {
+        margin: 0;
+        border: 0;
+        border-bottom: 1px solid var(--line);
+        border-radius: 0;
+        background: color-mix(in srgb, var(--panel2) 60%, transparent);
+        padding: 8px 16px;
+        font-size: 11px;
+      }
+      .legend-hint {
+        margin-left: auto;
+        color: var(--muted);
+      }
+      @media (max-width: 640px) {
+        .legend-hint {
+          display: none;
+        }
+      }
+
+      /* ---- alerts view ---- */
+      .alerts-bar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px 16px;
+        margin: 2px 0 18px;
+      }
+      .alerts-head {
+        min-width: 0;
+      }
+      .alerts-title {
+        margin: 0;
+        font-size: 17px;
+        font-weight: 790;
+        letter-spacing: 0.2px;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+      .alerts-title svg.lucide {
+        width: 18px;
+        height: 18px;
+        color: var(--accent);
+      }
+      .alerts-sub {
+        margin: 3px 0 0;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .card-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 0 14px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--line);
+      }
+      .card-head h2 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 750;
+      }
+      .card-head svg.lucide {
+        width: 16px;
+        height: 16px;
+        color: var(--accent);
+      }
+      .card-head .view-toggle {
+        margin-left: auto;
+        display: inline-flex;
+        gap: 3px;
+        background: var(--chip);
+        border: 1px solid var(--line);
+        padding: 3px;
+        border-radius: 999px;
+      }
+      .card-head .view-toggle .vt {
+        padding: 5px 12px !important;
+        font-size: 12px;
+        border-radius: 999px !important;
+        border: none !important;
+        background: transparent;
+        box-shadow: none !important;
+        color: var(--muted);
+      }
+      .card-head .view-toggle .vt.active {
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        color: #fff;
+      }
+      .vt-count {
+        font-size: 10.5px;
+        opacity: 0.8;
+        font-weight: 700;
+      }
+      /* archived rows read muted + a badge */
+      .alert-item.archived {
+        opacity: 0.82;
+      }
+      .ai-archived {
+        font-size: 10.5px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: var(--chip);
+        color: var(--muted);
+        border: 1px solid var(--line);
+      }
+      .form-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+      @media (max-width: 440px) {
+        .form-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .form-actions svg.lucide {
+        width: 14px;
+        height: 14px;
+        margin-right: 6px;
+        vertical-align: -2px;
+      }
+      /* trigger preview as an accent callout */
+      .trigger-preview {
+        background: color-mix(in srgb, var(--accent) 9%, var(--panel2));
+        border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+        color: var(--muted-ink);
+      }
+      /* alert item: left accent stripe by side */
+      .alert-item {
+        border-left: 3px solid var(--line);
+      }
+      .alert-item.side-buy {
+        border-left-color: var(--up);
+      }
+      .alert-item.side-sell {
+        border-left-color: var(--down);
+      }
+
+      .alerts-bar-right {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 12px;
+      }
+      #al-new svg.lucide {
+        width: 15px;
+        height: 15px;
+        margin-right: 6px;
+        vertical-align: -2px;
+      }
+      /* ---- multi-select filter dropdowns + chips ---- */
+      .ms {
+        position: relative;
+      }
+      .ms-btn {
+        background: var(--panel2);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        color: var(--txt);
+        font: inherit;
+        font-weight: 600;
+        font-size: 12.5px;
+        padding: 6px 10px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        justify-content: space-between;
+        text-align: left;
+        min-width: 118px;
+        box-shadow: none;
+      }
+      .ms-btn.active {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .ms-btn svg.lucide {
+        width: 13px;
+        height: 13px;
+        margin: 0;
+      }
+      .ms-count {
+        color: var(--muted);
+        font-weight: 700;
+      }
+      .ms-menu {
+        position: absolute;
+        top: calc(100% + 4px);
+        left: 0;
+        z-index: 40;
+        min-width: 170px;
+        max-height: 260px;
+        overflow: auto;
+        background: var(--panel-raised);
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow);
+        padding: 5px;
+      }
+      .ms-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 8px;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .ms-item:hover {
+        background: var(--chip);
+      }
+      .ms-item input {
+        width: 14px;
+        height: 14px;
+        accent-color: var(--accent);
+        cursor: pointer;
+      }
+      .filter-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 12px;
+      }
+      .fchip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: var(--chip);
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 3px 6px 3px 10px;
+        font-size: 11.5px;
+        font-weight: 600;
+      }
+      .fchip-x {
+        background: none;
+        border: none;
+        box-shadow: none !important;
+        padding: 0 2px !important;
+        margin: 0;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 12px;
+        line-height: 1;
+      }
+      .fchip-x:hover {
+        color: var(--down);
+      }
+      .fchip-clear {
+        background: none;
+        border: none;
+        box-shadow: none !important;
+        color: var(--accent);
+        font-weight: 650;
+        font-size: 11.5px;
+        cursor: pointer;
+        padding: 3px 6px !important;
+      }
+
+      /* ---- create/edit alert modal ---- */
+      #alertModal {
+        position: fixed;
+        inset: 0;
+        z-index: 260;
+        display: none;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 24px 16px;
+        background: rgba(0, 0, 0, 0.55);
+        -webkit-backdrop-filter: blur(3px);
+        backdrop-filter: blur(3px);
+        overflow-y: auto;
+      }
+      #alertModal.show {
+        display: flex;
+      }
+      .am-card {
+        background: var(--panel-raised);
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow);
+        width: min(580px, 96vw);
+        margin: 0 auto auto;
+      }
+      .am-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--line);
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: var(--panel-raised);
+        border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+      }
+      .am-head h2 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 760;
+      }
+      .am-head svg.lucide {
+        color: var(--accent);
+      }
+      .am-close {
+        margin-left: auto;
+        padding: 4px 10px !important;
+        font-size: 15px;
+        line-height: 1;
+        box-shadow: none !important;
+      }
+      #alertModal .alert-form {
+        padding: 16px 18px;
+      }
+
+      /* ---------- alert detail (view) modal ---------- */
+      #alertViewModal {
+        position: fixed;
+        inset: 0;
+        z-index: 255;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 24px 16px;
+        background: rgba(0, 0, 0, 0.55);
+        -webkit-backdrop-filter: blur(3px);
+        backdrop-filter: blur(3px);
+        overflow-y: auto;
+      }
+      #alertViewModal.show {
+        display: flex;
+      }
+      #alertViewModal .sm-card {
+        margin: auto;
+      }
+      .av-badges {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px 8px;
+        margin-top: 8px;
+      }
+      .av-badges .ai-side,
+      .av-badges .ai-status,
+      .av-badges .ai-verify,
+      .av-badges .ai-zone,
+      .av-badges .ai-index {
+        font-size: 10.5px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+        padding: 2px 8px;
+        border-radius: 999px;
+      }
+      .av-badges .ai-status {
+        text-transform: uppercase;
+      }
+      .av-badges .ai-index {
+        color: var(--muted);
+        background: var(--chip);
+        border: 1px solid var(--line);
+      }
+      .av-badges .ai-status,
+      .av-badges .ai-zone {
+        background: var(--chip);
+        color: var(--muted);
+      }
+      .sm-grid .cell.wide {
+        grid-column: 1 / -1;
+      }
+      .sm-grid .cell .v.note {
+        font-weight: 500;
+        text-align: right;
+      }
+      .av-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 12px 16px;
+        border-top: 1px solid var(--line);
+      }
+      .av-readonly {
+        font-size: 12px;
+        color: var(--muted);
+        font-style: italic;
+      }
+      /* alert rows read as clickable (open the detail modal); buttons stay default */
+      .alert-item {
+        cursor: pointer;
+      }
+      .alert-item:hover {
+        border-color: var(--line-strong);
+      }
+      .alert-item .ai-actions button {
+        cursor: pointer;
+      }
+
+      /* keep the table filling the panel (and only the table scrolling) on desktop */
+      @media (min-width: 820px) {
+        .panel {
+          display: flex;
+          flex-direction: column;
+          flex: 1 1 auto;
+          min-height: 0;
+        }
+        .panel .tablewrap {
+          flex: 1 1 auto;
+          min-height: 0;
+        }
+      }
+      /* ---------- auth: overlay, user chrome, users modal ---------- */
+      #authOverlay {
+        position: fixed;
+        inset: 0;
+        z-index: 400;
+        display: flex; /* shown until the auth controller hides it */
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        background: var(--bg);
+      }
+      #authOverlay.hidden {
+        display: none;
+      }
+      .auth-card {
+        width: min(400px, 96vw);
+        background: var(--panel-raised);
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow);
+        padding: 22px;
+      }
+      .auth-brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+      .auth-brand .brand-mark {
+        display: inline-flex;
+        width: 40px;
+        height: 40px;
+        align-items: center;
+        justify-content: center;
+        border-radius: 12px;
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        color: #fff;
+      }
+      .auth-card h2 {
+        margin: 0 0 4px;
+        font-size: 16px;
+        font-weight: 780;
+      }
+      .auth-hint,
+      .auth-empty {
+        color: var(--muted);
+        font-size: 12.5px;
+        margin: 0 0 14px;
+      }
+      .auth-card input,
+      .auth-card select,
+      .um-form input,
+      .um-form select {
+        width: 100%;
+        box-sizing: border-box;
+        margin-top: 10px;
+        padding: 10px 12px;
+        font: inherit;
+        color: var(--txt);
+        background: var(--panel2);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md);
+      }
+      .auth-submit {
+        width: 100%;
+        margin-top: 14px;
+        justify-content: center !important;
+      }
+      .auth-err {
+        color: var(--down);
+        font-size: 12.5px;
+        min-height: 16px;
+        margin-top: 8px;
+      }
+      .user-picker {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 6px;
+      }
+      .user-picker .up-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        justify-content: flex-start !important;
+        padding: 11px 14px !important;
+        text-align: left;
+      }
+      .user-picker .up-avatar {
+        width: 26px;
+        height: 26px;
+        border-radius: 999px;
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        color: #fff;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 800;
+        font-size: 12px;
+      }
+      .user-picker .up-role {
+        margin-left: auto;
+        font-size: 10.5px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+      }
+      .picked-user {
+        font-weight: 750;
+        margin: 4px 0 2px;
+      }
+      .auth-back {
+        width: 100%;
+        margin-top: 8px;
+        box-shadow: none !important;
+        background: transparent;
+        color: var(--muted);
+      }
+      /* app-bar user chrome */
+      .usernav {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: 8px;
+      }
+      .usernav .who {
+        font-size: 12px;
+        color: var(--muted-ink);
+        font-weight: 650;
+      }
+      .user-chip {
+        padding: 7px 12px !important;
+        border-radius: 999px !important;
+        box-shadow: none !important;
+        font-size: 12.5px;
+      }
+      .logout-btn {
+        width: 34px;
+        height: 34px;
+        padding: 0 !important;
+        border-radius: 999px !important;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: none !important;
+      }
+      .logout-btn svg.lucide {
+        margin: 0;
+      }
+      /* viewer: hide editor-only controls (server also enforces) */
+      body.role-viewer .needs-editor {
+        display: none !important;
+      }
+      /* users modal */
+      #usersModal {
+        position: fixed;
+        inset: 0;
+        z-index: 320;
+        display: none;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 40px 16px;
+      }
+      #usersModal.show {
+        display: flex;
+      }
+      #usersModal .um-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.55);
+        -webkit-backdrop-filter: blur(3px);
+        backdrop-filter: blur(3px);
+      }
+      .um-card {
+        position: relative;
+        z-index: 1;
+        width: min(560px, 96vw);
+        max-height: 84vh;
+        overflow: auto;
+        background: var(--panel-raised);
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow);
+      }
+      .um-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--line);
+        position: sticky;
+        top: 0;
+        background: var(--panel-raised);
+      }
+      .um-head h2 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 760;
+      }
+      .um-head svg.lucide {
+        color: var(--accent);
+      }
+      .um-spacer {
+        flex: 1;
+      }
+      .um-head #um-close {
+        width: 32px;
+        height: 32px;
+        padding: 0 !important;
+        box-shadow: none !important;
+      }
+      .um-list {
+        padding: 8px;
+      }
+      .um-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 10px;
+        border-radius: var(--radius-md);
+      }
+      .um-row:hover {
+        background: var(--chip);
+      }
+      .um-row .um-name {
+        font-weight: 700;
+        font-size: 13.5px;
+      }
+      .um-row .um-role {
+        font-size: 10.5px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: var(--chip);
+        color: var(--muted);
+        text-transform: uppercase;
+      }
+      .um-row .um-role.admin {
+        color: var(--accent);
+        background: var(--rowup);
+      }
+      .um-row .um-disabled {
+        font-size: 10.5px;
+        color: var(--down);
+        font-weight: 700;
+      }
+      .um-row .um-spacer {
+        flex: 1;
+      }
+      .um-form {
+        padding: 14px 18px 18px;
+        border-top: 1px solid var(--line);
+      }
+      .um-form h3 {
+        margin: 0 0 4px;
+        font-size: 13px;
+        font-weight: 750;
+      }
+      .um-form-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .um-form-actions button {
+        flex: 1;
+        justify-content: center !important;
+      }
     </style>
   </head>
   <body>
-    <header>
-      <h1>
-        <span class="idx" id="idxName">NIFTY 50</span> - Open / High / Low
-        Tracker
-      </h1>
+    <header class="appbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg
+            width="19"
+            height="19"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.4"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <polyline points="3 17 9 11 13 15 21 6" />
+            <polyline points="15 6 21 6 21 12" />
+          </svg>
+        </span>
+        <span class="brand-text">
+          <span class="brand-title">Nifty OHL Tracker</span>
+          <span class="brand-sub">Open · High · Low vs day open</span>
+        </span>
+      </div>
       <div class="spacer"></div>
       <div class="status">
         <span id="dot" class="dot"></span><span id="mktText">…</span>
       </div>
+      <button
+        class="notif-btn"
+        id="notifBtn"
+        type="button"
+        aria-label="Notifications"
+        title="Notifications"
+      >
+        <i data-lucide="bell" aria-hidden="true"></i>
+        <span class="notif-badge" id="notifBadge" hidden>0</span>
+      </button>
+      <div class="viewnav" role="tablist" aria-label="View">
+        <button
+          class="tab active"
+          data-view="dash"
+          role="tab"
+          aria-selected="true"
+        >
+          <i data-lucide="layout-grid" aria-hidden="true"></i>Dashboard
+        </button>
+        <button class="tab" data-view="alerts" role="tab" aria-selected="false">
+          <i data-lucide="bell" aria-hidden="true"></i>Alerts<span
+            class="bell"
+            id="bell"
+            hidden
+            >0</span
+          >
+        </button>
+      </div>
+      <div class="usernav" id="userNav" hidden>
+        <button
+          class="user-chip"
+          id="usersBtn"
+          type="button"
+          title="Manage users"
+          hidden
+        >
+          <i data-lucide="users" aria-hidden="true"></i>Users
+        </button>
+        <span class="who" id="whoami" title="Signed in"></span>
+        <button class="logout-btn" id="logoutBtn" type="button" title="Sign out">
+          <i data-lucide="log-out" aria-hidden="true"></i>
+        </button>
+      </div>
     </header>
 
-    <div class="controls">
-      <div
-        class="field"
-        data-tip="How often to fetch fresh data while the market is open. Manual refresh always works, even when paused."
-      >
-        <label for="poll">
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
+    <div id="dashView">
+      <!-- index KPI cards double as the index selector (click to switch) -->
+      <section class="kpis" id="idxCards" aria-label="Indices"></section>
+
+      <!-- toolbar: status filters on the left, data controls on the right -->
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <div class="tabs" id="tabs" role="tablist" aria-label="Filter">
+            <button
+              class="tab active"
+              data-tab="all"
+              role="tab"
+              aria-selected="true"
+            >
+              All <b class="cnt">–</b>
+            </button>
+            <button
+              class="tab"
+              data-tab="high"
+              role="tab"
+              aria-selected="false"
+              data-tip="Today's high equals the open price - the stock never traded above its open."
+            >
+              <span class="dotmark down" aria-hidden="true"></span>Open = High
+              <b class="cnt">–</b>
+            </button>
+            <button
+              class="tab"
+              data-tab="low"
+              role="tab"
+              aria-selected="false"
+              data-tip="Today's low equals the open price - the stock never traded below its open."
+            >
+              <span class="dotmark up" aria-hidden="true"></span>Open = Low
+              <b class="cnt">–</b>
+            </button>
+            <button
+              class="tab"
+              data-tab="neutral"
+              role="tab"
+              aria-selected="false"
+            >
+              Neutral <b class="cnt">–</b>
+            </button>
+          </div>
+          <div class="search">
+            <i data-lucide="search" aria-hidden="true"></i>
+            <input
+              id="search"
+              type="search"
+              placeholder="Search symbol / company…"
+              aria-label="Search stocks in this index"
+            />
+          </div>
+        </div>
+        <div class="tools">
+          <div
+            class="field"
+            data-tip="How often to fetch fresh data while the market is open. Manual refresh always works, even when paused."
           >
-            <circle cx="12" cy="12" r="9" />
-            <polyline points="12 7 12 12 15 14" />
-          </svg>
-          <span class="hint">Auto-poll</span>
-        </label>
-        <select id="poll" aria-label="Auto-poll interval in seconds">
-          <option value="1">1s</option>
-          <option value="2">2s</option>
-          <option value="3" selected>3s</option>
-          <option value="4">4s</option>
-          <option value="5">5s</option>
-          <option value="6">6s</option>
-          <option value="7">7s</option>
-          <option value="8">8s</option>
-          <option value="9">9s</option>
-          <option value="10">10s</option>
-        </select>
+            <label for="poll">
+              <i data-lucide="timer" aria-hidden="true"></i>
+              <span class="hint">Auto-poll</span>
+            </label>
+            <select id="poll" aria-label="Auto-poll interval in seconds">
+              <option value="1">1s</option>
+              <option value="2">2s</option>
+              <option value="3" selected>3s</option>
+              <option value="4">4s</option>
+              <option value="5">5s</option>
+              <option value="6">6s</option>
+              <option value="7">7s</option>
+              <option value="8">8s</option>
+              <option value="9">9s</option>
+              <option value="10">10s</option>
+            </select>
+          </div>
+          <div
+            class="field"
+            data-tip="Show all clock times in 12-hour or 24-hour IST."
+          >
+            <label for="tf">
+              <i data-lucide="clock" aria-hidden="true"></i>
+              <span class="hint">Time</span>
+            </label>
+            <select id="tf" aria-label="Clock time format">
+              <option value="24">24h IST</option>
+              <option value="12">12h IST</option>
+            </select>
+          </div>
+          <button
+            id="refresh"
+            class="primary"
+            data-tip="Fetch new data right now, ignoring the auto-poll timer."
+            aria-label="Refresh now"
+          >
+            <svg
+              id="refreshIcon"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+              <polyline points="21 3 21 9 15 9" />
+            </svg>
+            Refresh
+          </button>
+        </div>
       </div>
-      <span class="divider" aria-hidden="true"></span>
+
+      <!-- table panel -->
+      <section class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">
+            <span id="idxName">NIFTY 50</span> · constituents
+          </h2>
+          <div class="panel-meta">
+            <span id="adv"></span>
+            <span id="updated" class="upd">Not loaded yet.</span>
+            <span id="staleMsg"></span>
+          </div>
+        </div>
+        <div class="legend">
+          <span><span class="sw r"></span>Open = High (never above open)</span>
+          <span><span class="sw g"></span>Open = Low (never below open)</span>
+          <span class="legend-hint"
+            >Click a row for details · click a symbol to copy</span
+          >
+        </div>
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr id="head"></tr>
+            </thead>
+            <tbody id="body">
+              <tr class="loading">
+                <td colspan="8">
+                  <span class="spinner" aria-hidden="true"></span>Loading live
+                  data…
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+    <!-- /#dashView -->
+
+    <div id="alertsView" hidden>
+      <div class="alerts-bar">
+        <div class="alerts-head">
+          <h2 class="alerts-title">
+            <i data-lucide="bell-ring" aria-hidden="true"></i> Price alerts
+          </h2>
+          <p class="alerts-sub">
+            Evaluated server-side during market hours - fire even with no tab
+            open.
+          </p>
+        </div>
+        <div class="alerts-bar-right">
+          <button id="al-new" class="primary needs-editor" type="button">
+            <i data-lucide="plus" aria-hidden="true"></i>New alert
+          </button>
+        </div>
+      </div>
+
+      <!-- create / edit modal -->
+      <div id="alertModal" role="dialog" aria-modal="true" aria-label="Alert">
+        <div class="am-card">
+          <div class="am-head">
+            <i data-lucide="plus-circle" aria-hidden="true"></i>
+            <h2 id="formTitle">Create alert</h2>
+            <button
+              type="button"
+              id="al-modal-close"
+              class="am-close"
+              aria-label="Close"
+            >
+              ✕
+            </button>
+          </div>
+          <form class="alert-form" id="alertForm" autocomplete="off">
+            <input type="hidden" id="al-id" />
+            <label>
+              Index
+              <select id="al-index" required></select>
+            </label>
+            <label>
+              Stock
+              <input
+                id="al-symbol"
+                list="symList"
+                placeholder="Type to search…"
+                required
+              />
+              <datalist id="symList"></datalist>
+            </label>
+            <div class="form-grid">
+              <label>
+                Side
+                <select id="al-side" required>
+                  <option value="" selected disabled>Select…</option>
+                  <option value="BUY">Buy</option>
+                  <option value="SELL">Sell</option>
+                </select>
+              </label>
+              <label>
+                Alert price (₹)
+                <input
+                  id="al-price"
+                  type="number"
+                  min="0"
+                  step="0.05"
+                  inputmode="decimal"
+                  required
+                />
+              </label>
+            </div>
+            <label>
+              Time frame
+              <select id="al-tf" required>
+                <option value="" selected disabled>Select…</option>
+                <optgroup label="Seconds">
+                  <option value="1s">1 second</option>
+                  <option value="5s">5 seconds</option>
+                  <option value="10s">10 seconds</option>
+                  <option value="15s">15 seconds</option>
+                  <option value="30s">30 seconds</option>
+                  <option value="45s">45 seconds</option>
+                </optgroup>
+                <optgroup label="Minutes">
+                  <option value="1m">1 minute</option>
+                  <option value="2m">2 minutes</option>
+                  <option value="3m">3 minutes</option>
+                  <option value="5m">5 minutes</option>
+                  <option value="10m">10 minutes</option>
+                  <option value="15m">15 minutes</option>
+                  <option value="30m">30 minutes</option>
+                  <option value="45m">45 minutes</option>
+                </optgroup>
+                <optgroup label="Hours">
+                  <option value="1h">1 hour</option>
+                  <option value="2h">2 hours</option>
+                  <option value="3h">3 hours</option>
+                  <option value="4h">4 hours</option>
+                </optgroup>
+                <optgroup label="Days">
+                  <option value="1d">1 day</option>
+                  <option value="1w">1 week</option>
+                  <option value="1mo">1 month</option>
+                  <option value="3mo">3 months</option>
+                  <option value="6mo">6 months</option>
+                  <option value="12mo">12 months</option>
+                </optgroup>
+              </select>
+            </label>
+            <div class="form-grid">
+              <label>
+                Stop loss (₹)
+                <input
+                  id="al-stop"
+                  type="number"
+                  min="0"
+                  step="0.05"
+                  inputmode="decimal"
+                  required
+                />
+              </label>
+              <label>
+                Zone creator
+                <input
+                  id="al-creator"
+                  type="text"
+                  maxlength="60"
+                  placeholder="Name"
+                  required
+                />
+              </label>
+            </div>
+            <label>
+              Note
+              <textarea
+                id="al-note"
+                rows="2"
+                maxlength="280"
+                placeholder="Zone rationale / notes"
+                required
+              ></textarea>
+            </label>
+            <div class="form-grid">
+              <label>
+                Candle date <span class="opt">(optional)</span>
+                <input id="al-date" type="date" />
+              </label>
+              <label>
+                Candle time <span class="opt">(IST, optional)</span>
+                <div class="time-row">
+                  <select id="al-hour" aria-label="Hour"></select>
+                  <span>:</span>
+                  <select id="al-min" aria-label="Minute"></select>
+                </div>
+              </label>
+            </div>
+            <div class="trigger-preview" id="al-trigger">Trigger: -</div>
+            <div class="trigger-preview" id="al-targets">Targets: -</div>
+            <div class="form-err" id="al-err"></div>
+            <div class="form-actions">
+              <button type="submit" class="primary" id="al-submit">
+                <i data-lucide="check" aria-hidden="true"></i>
+                <span id="al-submit-text">Create alert</span>
+              </button>
+              <button type="button" id="al-cancel">
+                <i data-lucide="x" aria-hidden="true"></i>Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+      <!-- /#alertModal -->
+
+      <!-- alert detail (read-only) modal, opened by clicking an alert row -->
       <div
-        class="field"
-        data-tip="Show all clock times in 12-hour or 24-hour IST."
+        id="alertViewModal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Alert details"
       >
-        <label for="tf"><span class="hint">Time</span></label>
-        <select id="tf" aria-label="Clock time format">
-          <option value="24">24h IST</option>
-          <option value="12">12h IST</option>
-        </select>
+        <div class="sm-card">
+          <div class="sm-head">
+            <div>
+              <div class="sm-sym" id="av-sym"></div>
+              <div class="av-badges" id="av-badges"></div>
+            </div>
+            <div class="sm-actions">
+              <button
+                class="sm-close"
+                id="av-close"
+                aria-label="Close"
+                title="Close"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+          <div class="sm-grid" id="av-grid"></div>
+          <div class="av-actions" id="av-actions"></div>
+        </div>
       </div>
-      <span class="divider" aria-hidden="true"></span>
-      <button
-        id="refresh"
-        class="primary"
-        data-tip="Fetch new data right now, ignoring the auto-poll timer."
-        aria-label="Refresh now"
-      >
-        <svg
-          id="refreshIcon"
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2.2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-          <polyline points="21 3 21 9 15 9" />
-        </svg>
-        Refresh now
-      </button>
-      <div class="spacer" aria-hidden="true"></div>
-      <div class="idxcards" id="idxCards" aria-label="Index levels"></div>
+      <!-- /#alertViewModal -->
+
+      <!-- alert list (full width) -->
+      <div class="card">
+          <div class="card-head">
+            <i data-lucide="list" aria-hidden="true"></i>
+            <h2>Alerts</h2>
+            <div class="view-toggle" id="alertViewToggle" role="tablist" aria-label="Alert view">
+              <button type="button" class="vt active" data-view="active" role="tab">
+                Active <span class="vt-count" id="vtActiveCount"></span>
+              </button>
+              <button type="button" class="vt" data-view="closed" role="tab">
+                Closed <span class="vt-count" id="vtClosedCount"></span>
+              </button>
+            </div>
+          </div>
+          <!-- multi-select filter dropdowns (built by JS) -->
+          <div class="alert-filters" id="alertFilters"></div>
+          <!-- chips for the active selections (built by JS) -->
+          <div class="filter-chips" id="filterChips" hidden></div>
+          <div id="alertList"><div class="empty">Loading…</div></div>
+        </div>
+    </div>
+    <!-- /#alertsView -->
+
+    <div id="ringHost" aria-live="assertive"></div>
+
+    <!-- notification center: every triggered alert, snooze/close, read/unread.
+         Top-level (outside #alertsView) so it works from any view. -->
+    <div id="notifPanel" role="dialog" aria-label="Notifications">
+      <div class="np-backdrop" id="np-backdrop"></div>
+      <div class="np-card">
+        <div class="np-head">
+          <i data-lucide="bell" aria-hidden="true"></i>
+          <h3>Notifications</h3>
+          <span class="np-count" id="np-count"></span>
+          <span class="np-spacer"></span>
+          <button id="np-readall" type="button">Mark all read</button>
+          <button id="np-close" type="button" aria-label="Close">✕</button>
+        </div>
+        <div class="np-list" id="np-list"></div>
+      </div>
+    </div>
+    <!-- /#notifPanel -->
+
+    <!-- ===== auth gate (covers the app until signed in) ===== -->
+    <div id="authOverlay">
+      <div class="auth-card">
+        <div class="auth-brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 17 9 11 13 15 21 6" />
+              <polyline points="15 6 21 6 21 12" />
+            </svg>
+          </span>
+          <div>
+            <div class="brand-title">Nifty OHL Tracker</div>
+            <div class="brand-sub">Sign in to continue</div>
+          </div>
+        </div>
+
+        <!-- first-run: create admin -->
+        <form id="setupPanel" hidden>
+          <h2>Create admin account</h2>
+          <p class="auth-hint">First run — set up the admin (you'll manage users).</p>
+          <input id="su-user" type="text" placeholder="Admin username" autocomplete="off" />
+          <input id="su-pw" type="password" placeholder="Password (min 6 chars)" />
+          <input id="su-pw2" type="password" placeholder="Confirm password" />
+          <div class="auth-err" id="su-err"></div>
+          <button class="primary auth-submit" id="su-btn" type="submit">Create admin &amp; sign in</button>
+        </form>
+
+        <!-- returning: pick user, then password -->
+        <div id="loginPanel" hidden>
+          <h2>Who's signing in?</h2>
+          <div class="user-picker" id="userPicker"></div>
+          <form id="pwForm" hidden>
+            <div class="picked-user" id="pickedUser"></div>
+            <input id="li-pw" type="password" placeholder="Password" />
+            <div class="auth-err" id="li-err"></div>
+            <button class="primary auth-submit" id="li-btn" type="submit">Sign in</button>
+            <button class="auth-back" id="li-back" type="button">← Choose another user</button>
+          </form>
+          <div class="auth-empty" id="loginEmpty" hidden>No users yet.</div>
+        </div>
+      </div>
+    </div>
+    <!-- /#authOverlay -->
+
+    <!-- ===== admin: manage users ===== -->
+    <div id="usersModal" role="dialog" aria-modal="true" aria-label="Users">
+      <div class="um-backdrop" id="um-backdrop"></div>
+      <div class="um-card">
+        <div class="um-head">
+          <i data-lucide="users" aria-hidden="true"></i>
+          <h2>Users</h2>
+          <span class="um-spacer"></span>
+          <button id="um-close" type="button" aria-label="Close">✕</button>
+        </div>
+        <div class="um-list" id="um-list"></div>
+        <form class="um-form" id="um-form">
+          <h3 id="um-form-title">Add user</h3>
+          <input id="um-user" type="text" placeholder="Username" autocomplete="off" />
+          <input id="um-pw" type="password" placeholder="Password (min 6)" />
+          <select id="um-role">
+            <option value="viewer">Viewer (read-only)</option>
+            <option value="editor">Editor (full alerts)</option>
+            <option value="admin">Admin (+ manage users)</option>
+          </select>
+          <div class="auth-err" id="um-err"></div>
+          <div class="um-form-actions">
+            <button class="primary" id="um-save" type="submit">Add user</button>
+            <button id="um-cancel" type="button" hidden>Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+    <!-- /#usersModal -->
+
+    <div
+      id="stockModal"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Stock details"
+    >
+      <div class="sm-card">
+        <div class="sm-head">
+          <div>
+            <div class="sm-sym" id="sm-sym"></div>
+            <div class="sm-name" id="sm-name"></div>
+          </div>
+          <div class="sm-actions">
+            <button
+              class="primary sm-addalert needs-editor"
+              id="sm-addalert"
+              type="button"
+              aria-label="Add alert"
+              title="Add alert"
+            >
+              <i data-lucide="bell-plus" aria-hidden="true"></i>
+            </button>
+            <button class="sm-close" id="sm-close" aria-label="Close" title="Close">✕</button>
+          </div>
+        </div>
+        <div class="sm-price">
+          <span class="sm-ltp num" id="sm-ltp"></span>
+          <span class="delta" id="sm-delta"></span>
+        </div>
+        <div class="sm-grid" id="sm-grid"></div>
+      </div>
     </div>
 
-    <div class="tabs" id="idxTabs" role="tablist" aria-label="Index">
-      <button
-        class="tab active"
-        data-index="NIFTY 50"
-        role="tab"
-        aria-selected="true"
-        data-tip="The 50 largest NSE-listed companies by free-float market cap."
-      >
-        Nifty 50
-      </button>
-      <button
-        class="tab"
-        data-index="NIFTY NEXT 50"
-        role="tab"
-        aria-selected="false"
-        data-tip="The next 50 largest companies, just outside the Nifty 50."
-      >
-        Nifty Next 50
-      </button>
-    </div>
-
-    <div class="tabs" id="tabs" role="tablist" aria-label="Filter">
-      <button class="tab active" data-tab="all" role="tab" aria-selected="true">
-        All <b class="cnt">–</b>
-      </button>
-      <button
-        class="tab"
-        data-tab="high"
-        role="tab"
-        aria-selected="false"
-        data-tip="Today's high equals the open price - the stock never traded above its open."
-      >
-        <span class="dotmark down" aria-hidden="true"></span>Open = High
-        <b class="cnt">–</b>
-      </button>
-      <button
-        class="tab"
-        data-tab="low"
-        role="tab"
-        aria-selected="false"
-        data-tip="Today's low equals the open price - the stock never traded below its open."
-      >
-        <span class="dotmark up" aria-hidden="true"></span>Open = Low
-        <b class="cnt">–</b>
-      </button>
-      <button class="tab" data-tab="neutral" role="tab" aria-selected="false">
-        Neutral <b class="cnt">–</b>
-      </button>
-    </div>
-    <p class="lbl">click any column header to sort</p>
-
-    <div class="meta">
-      <span id="updated">Not loaded yet.</span>
-      <span id="adv"></span>
-      <span id="staleMsg"></span>
-    </div>
-
-    <div class="legend">
-      <span
-        ><span class="sw r"></span>Red: <b>Open = High</b> (never traded above
-        open)</span
-      >
-      <span
-        ><span class="sw g"></span>Green: <b>Open = Low</b> (never traded below
-        open)</span
-      >
-      <span><span class="sw n"></span>Default: everything else</span>
-      <span>· Change shows ₹ and %</span>
-    </div>
-
-    <div class="tablewrap">
-      <table>
-        <thead>
-          <tr id="head"></tr>
-        </thead>
-        <tbody id="body">
-          <tr class="loading">
-            <td colspan="8">
-              <span class="spinner" aria-hidden="true"></span>Loading live data…
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
     <div id="tt" role="tooltip">
       <span id="ttText"></span>
       <span class="tt-arrow" aria-hidden="true"></span>
     </div>
 
     <footer>
-      Live data via NSE India <code>heatmap-symbols</code> (LTP/High/Low/Close)
-      + <code>market-data-pre-open</code> (Open) + <code>allIndices</code> (index
-      points), proxied by your local
-      <code>server.js</code> (open via <code>http://localhost:8787/</code>).
-      Serves data only during market hours (Mon–Fri 09:15–15:30 IST). Prices in
-      ₹.
+      Live data (level + all constituents:
+      O/H/L/LTP/Prev/Change/Volume/Turnover/52-week), proxied by your local
+      <code>server.js</code> (open via <code>http://localhost:8787/</code>). Live
+      during market hours (Mon–Fri 09:15–15:30 IST); shows last close otherwise.
+      Prices in ₹.
     </footer>
+
+    <!-- Lucide icons (MIT, lightweight) via CDN; degrades gracefully if offline -->
+    <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.min.js"></script>
 
     <script>
       "use strict";
       const API = "/api/indices";
-      const INDEX_NAMES = ["NIFTY 50", "NIFTY NEXT 50"];
+      // default list; replaced at startup by the server's index list (/api/alert-config)
+      let INDEX_NAMES = [
+        "NIFTY 50",
+        "NIFTY NEXT 50",
+        "NIFTY MIDCAP 50",
+        "NIFTY MIDCAP 100",
+      ];
+      const niceLabel = (n) =>
+        n.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
       const eq = (a, b) =>
         a != null &&
         b != null &&
@@ -996,7 +3039,7 @@
           key: "symbol",
           label: "Symbol",
           type: "sym",
-          tip: "NSE trading symbol. Hover a row for its Open→High and Open→Low %.",
+          tip: "Trading symbol. Hover a row for its Open→High and Open→Low %.",
         },
         {
           key: "lastPrice",
@@ -1048,6 +3091,7 @@
         sortDir = -1;
       let activeTab = "all"; // all | high | low | neutral
       let activeIndex = "NIFTY 50"; // NIFTY 50 | NIFTY NEXT 50
+      let searchQuery = ""; // filters the current index's table by symbol / company
       let cache = null, // { "NIFTY 50": {...}, "NIFTY NEXT 50": {...} }
         lastGoodAt = 0,
         timer = null;
@@ -1059,6 +3103,14 @@
           (activeTab === "high" && r.colorRank === 1) ||
           (activeTab === "low" && r.colorRank === -1) ||
           (activeTab === "neutral" && r.colorRank === 0)
+        );
+      }
+      // free-text search over symbol + company name (empty query matches all)
+      function searchMatch(r) {
+        if (!searchQuery) return true;
+        return (
+          r.symbol.toLowerCase().includes(searchQuery) ||
+          (r.companyName || "").toLowerCase().includes(searchQuery)
         );
       }
 
@@ -1087,6 +3139,40 @@
       function cls(v) {
         return v > 0 ? "up" : v < 0 ? "down" : "flat";
       }
+      // click a symbol to copy it to the clipboard, with a brief "Copied" flash
+      function flashCopied(el, label) {
+        const t = document.createElement("div");
+        t.className = "copytip";
+        t.textContent = label;
+        document.body.appendChild(t);
+        const r = el.getBoundingClientRect();
+        t.style.left = r.left + "px";
+        t.style.top = r.top - 26 + "px";
+        requestAnimationFrame(() => t.classList.add("show"));
+        setTimeout(() => {
+          t.classList.remove("show");
+          setTimeout(() => t.remove(), 200);
+        }, 900);
+      }
+      async function copySymbol(sym, el) {
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText)
+            await navigator.clipboard.writeText(sym);
+          else {
+            const ta = document.createElement("textarea");
+            ta.value = sym;
+            ta.style.position = "fixed";
+            ta.style.opacity = "0";
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand("copy");
+            ta.remove();
+          }
+          flashCopied(el, "Copied " + sym);
+        } catch (_) {
+          flashCopied(el, "Copy failed");
+        }
+      }
       // index level is points, not rupees - no ₹ prefix
       function pts(v) {
         return v == null || isNaN(v)
@@ -1096,6 +3182,64 @@
               maximumFractionDigits: 2,
             });
       }
+
+      // ---------- stock detail modal ----------
+      function fmtTurnover(v) {
+        if (v == null || isNaN(v)) return "-";
+        if (v >= 1e7) return "₹" + (v / 1e7).toFixed(2) + " Cr";
+        if (v >= 1e5) return "₹" + (v / 1e5).toFixed(2) + " L";
+        return "₹" + Math.round(v).toLocaleString("en-IN");
+      }
+      const pctC = (v) => `<span class="${cls(v)}">${pct(v)}</span>`;
+      let modalSymbol = null; // symbol currently shown in the stock detail modal
+      function openStockModal(r) {
+        modalSymbol = r.symbol;
+        document.getElementById("sm-sym").textContent = r.symbol;
+        document.getElementById("sm-name").textContent = r.companyName || "";
+        document.getElementById("sm-ltp").textContent = rs(r.lastPrice);
+        const d = document.getElementById("sm-delta");
+        d.className = "delta " + cls(r.change);
+        const absRs = isNaN(r.change) ? r.change : Math.abs(r.change);
+        d.innerHTML = rs(absRs) + `<span class="pc">${pct(r.pChange)}</span>`;
+        const cells = [
+          ["Open", rs(r.open)],
+          ["Prev Close", rs(r.prevClose)],
+          ["Day High", rs(r.dayHigh)],
+          ["Day Low", rs(r.dayLow)],
+          ["Open → High", pctC(r.ohPct)],
+          ["Open → Low", pctC(r.olPct)],
+          ["52-week High", rs(r.yearHigh)],
+          ["52-week Low", rs(r.yearLow)],
+          ["% from 52W High", pctC(r.nearWKH)],
+          ["% from 52W Low", pctC(r.nearWKL)],
+          ["30-day change", pctC(r.perChange30d)],
+          ["1-year change", pctC(r.perChange365d)],
+          ["Volume", vol(r.totalTradedVolume)],
+          ["Turnover", fmtTurnover(r.totalTradedValue)],
+        ];
+        document.getElementById("sm-grid").innerHTML = cells
+          .map(
+            ([k, v]) =>
+              `<div class="cell"><span class="k">${k}</span><span class="v">${v}</span></div>`,
+          )
+          .join("");
+        document.getElementById("stockModal").classList.add("show");
+      }
+      function closeStockModal() {
+        document.getElementById("stockModal").classList.remove("show");
+      }
+      document.getElementById("sm-close").onclick = closeStockModal;
+      // "Add alert" → close this modal, open the create-alert modal prefilled
+      document.getElementById("sm-addalert").onclick = () => {
+        closeStockModal();
+        if (window.openCreateAlert) window.openCreateAlert(activeIndex, modalSymbol);
+      };
+      document.getElementById("stockModal").addEventListener("click", (e) => {
+        if (e.target.id === "stockModal") closeStockModal();
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") closeStockModal();
+      });
 
       // ---------- IST market-hours (correct regardless of viewer timezone) ----------
       function istParts(d) {
@@ -1129,7 +3273,7 @@
         );
       }
 
-      // ---------- transform NSE payload -> rows with ₹ + % diffs + row color ----------
+      // ---------- transform the feed payload -> rows with ₹ + % diffs + row color ----------
       function computeRows(payload) {
         const rows = (payload.data || []).filter(
           (r) => r.symbol && !INDEX_NAMES.includes(r.symbol),
@@ -1162,17 +3306,25 @@
               rowClass = "up-row";
             } // open == low -> green
           }
+          const nf = (v) => (v != null ? +v : NaN);
           return {
             symbol: r.symbol,
+            companyName: r.companyName || "",
             open,
             dayHigh: high,
             dayLow: low,
             lastPrice: last,
-            prevClose: r.prevClose != null ? +r.prevClose : NaN,
-            change: r.change != null ? +r.change : NaN,
-            pChange: r.pChange != null ? +r.pChange : NaN,
-            totalTradedVolume:
-              r.totalTradedVolume != null ? +r.totalTradedVolume : NaN,
+            prevClose: nf(r.prevClose),
+            change: nf(r.change),
+            pChange: nf(r.pChange),
+            totalTradedVolume: nf(r.totalTradedVolume),
+            totalTradedValue: nf(r.totalTradedValue),
+            yearHigh: nf(r.yearHigh),
+            yearLow: nf(r.yearLow),
+            nearWKH: nf(r.nearWKH),
+            nearWKL: nf(r.nearWKL),
+            perChange30d: nf(r.perChange30d),
+            perChange365d: nf(r.perChange365d),
             ohRs,
             olRs,
             ohPct,
@@ -1249,13 +3401,16 @@
         const all = computeRows(payload);
         if (all.length === 0) {
           renderTabs(all);
-          body.innerHTML = `<tr class="loading"><td colspan="${COLS.length}">NSE returned no constituents for ${activeIndex} - this data is live only during market hours (Mon–Fri 09:15–15:30 IST). The table fills automatically when the market opens.</td></tr>`;
+          body.innerHTML = `<tr class="loading"><td colspan="${COLS.length}">No constituents for ${activeIndex} - this data is live only during market hours (Mon–Fri 09:15–15:30 IST). The table fills automatically when the market opens.</td></tr>`;
           return;
         }
         renderTabs(all);
-        const rows = all.filter(tabMatch);
+        const rows = all.filter(tabMatch).filter(searchMatch);
         if (rows.length === 0) {
-          body.innerHTML = `<tr class="loading"><td colspan="${COLS.length}">No stocks currently ${activeTab === "high" ? "at their day high" : activeTab === "low" ? "at their day low" : "in this group"}.</td></tr>`;
+          const msg = searchQuery
+            ? `No stocks match “${searchQuery}” in ${activeIndex}.`
+            : `No stocks currently ${activeTab === "high" ? "at their day high" : activeTab === "low" ? "at their day low" : "in this group"}.`;
+          body.innerHTML = `<tr class="loading"><td colspan="${COLS.length}">${msg}</td></tr>`;
           return;
         }
         rows.sort((a, b) => {
@@ -1274,6 +3429,8 @@
         for (const r of rows) {
           const tr = document.createElement("tr");
           tr.className = r.rowClass;
+          tr.style.cursor = "pointer";
+          tr.onclick = () => openStockModal(r);
           COLS.forEach((c) => {
             const td = document.createElement("td");
             if (c.type === "sym") {
@@ -1282,8 +3439,22 @@
               wrap.className = "symwrap hint";
               wrap.setAttribute(
                 "data-tip",
-                `Open→High ${pct(r.ohPct)} · Open→Low ${pct(r.olPct)}`,
+                `Open→High ${pct(r.ohPct)} · Open→Low ${pct(r.olPct)} · click to copy`,
               );
+              wrap.tabIndex = 0;
+              wrap.setAttribute("role", "button");
+              wrap.setAttribute("aria-label", `Copy ${r.symbol}`);
+              wrap.onclick = (e) => {
+                e.stopPropagation(); // don't open the detail modal when copying
+                copySymbol(r.symbol, wrap);
+              };
+              wrap.onkeydown = (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  copySymbol(r.symbol, wrap);
+                }
+              };
               const dot = document.createElement("span");
               dot.className =
                 "dotmark " +
@@ -1322,18 +3493,21 @@
             lv.variation == null || isNaN(lv.variation)
               ? lv.variation
               : Math.abs(lv.variation);
-          const sign =
-            lv.variation > 0 ? "+" : lv.variation < 0 ? "−" : "";
+          const sign = lv.variation > 0 ? "+" : lv.variation < 0 ? "−" : "";
           const stats = [
-            ["Open", lv.open],
-            ["High", lv.high],
-            ["Low", lv.low],
-            ["Prev", lv.prevClose],
+            ["Open", pts(lv.open)],
+            ["High", pts(lv.high)],
+            ["Low", pts(lv.low)],
+            ["Prev", pts(lv.prevClose)],
+            ["52W H", pts(lv.yearHigh)],
+            ["52W L", pts(lv.yearLow)],
+            ["1Y", pct(lv.perChange365d)],
           ]
-            .map(([k, v]) => `<span>${k}<b>${pts(v)}</b></span>`)
+            .map(([k, v]) => `<span>${k}<b>${v}</b></span>`)
             .join("");
+          const activeCls = name === activeIndex ? " active" : "";
           return (
-            `<div class="idxcard">` +
+            `<div class="idxcard${activeCls}" data-index="${name}" role="button" tabindex="0" aria-label="Show ${name}">` +
             `<span class="idxcard-name">${name}</span>` +
             `<span class="idxcard-row">` +
             `<span class="idxcard-pts num">${pts(lv.last)}</span>` +
@@ -1356,7 +3530,7 @@
           upd.textContent =
             `Updated ${fmtClock(new Date(lastGoodAt))}` +
             (payload && payload.timestamp
-              ? ` · NSE stamp ${payload.timestamp}`
+              ? ` · stamp ${payload.timestamp}`
               : "");
           const pollMs = (+document.getElementById("poll").value || 5) * 1000;
           if (secsAgo * 1000 > 3 * pollMs) {
@@ -1442,27 +3616,42 @@
       document.getElementById("refresh").onclick = refresh;
       document.getElementById("poll").onchange = schedule;
       document.getElementById("tf").onchange = renderMeta;
+      document.getElementById("search").oninput = (e) => {
+        searchQuery = e.target.value.trim().toLowerCase();
+        renderBody();
+      };
       document.querySelectorAll("#tabs .tab").forEach((b) => {
         b.onclick = () => {
           activeTab = b.dataset.tab;
           renderBody();
         };
       });
-      document.querySelectorAll("#idxTabs .tab").forEach((b) => {
-        b.onclick = () => {
-          if (activeIndex === b.dataset.index) return;
-          activeIndex = b.dataset.index;
-          document.querySelectorAll("#idxTabs .tab").forEach((x) => {
-            x.classList.toggle("active", x === b);
-            x.setAttribute("aria-selected", String(x === b));
-          });
-          document.getElementById("idxName").textContent = activeIndex;
-          document.title = activeIndex + " - Open / High / Low Tracker";
-          activeTab = "all";
-          renderBody();
-          renderMeta();
-        };
+      // KPI index cards double as the index selector (event-delegated)
+      document.getElementById("idxCards").addEventListener("click", (e) => {
+        const card = e.target.closest(".idxcard");
+        if (card && card.dataset.index) selectIndex(card.dataset.index);
       });
+      document.getElementById("idxCards").addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          const card = e.target.closest(".idxcard");
+          if (card && card.dataset.index) {
+            e.preventDefault();
+            selectIndex(card.dataset.index);
+          }
+        }
+      });
+      function selectIndex(index) {
+        if (activeIndex === index) return;
+        activeIndex = index;
+        document.querySelectorAll("#idxCards .idxcard").forEach((x) => {
+          x.classList.toggle("active", x.dataset.index === index);
+        });
+        document.getElementById("idxName").textContent = activeIndex;
+        document.title = activeIndex + " - OHL Tracker";
+        activeTab = "all";
+        renderBody();
+        renderMeta();
+      }
       // ---------- tooltips: one JS-driven, position:fixed tooltip for the whole
       // page (a CSS ::after popover has no room to render above elements pinned
       // to the top of an overflow:auto ancestor - e.g. the table's sticky header
@@ -1536,14 +3725,1551 @@
         });
       })();
 
-      renderHead();
-      renderMarketStatus();
-      refresh();
-      schedule();
-      setInterval(() => {
+      async function init() {
+        try {
+          const cfg = await (await fetch("/api/alert-config")).json();
+          if (Array.isArray(cfg.indices) && cfg.indices.length)
+            INDEX_NAMES = cfg.indices;
+        } catch (_) {
+          /* keep default INDEX_NAMES */
+        }
+        activeIndex = INDEX_NAMES[0];
+        document.getElementById("idxName").textContent = activeIndex;
+        if (window.lucide) lucide.createIcons(); // render the static chrome icons
+        renderHead();
         renderMarketStatus();
-        renderMeta();
-      }, 1000);
+        refresh();
+        schedule();
+        setInterval(() => {
+          renderMarketStatus();
+          renderMeta();
+        }, 1000);
+      }
+      // started by the auth controller once the user is signed in (see #authOverlay script)
+      window.__initDash = init;
+    </script>
+
+    <!-- ---------------- Alerts UI (self-contained) ---------------- -->
+    <script>
+      (function () {
+        "use strict";
+        const $ = (s) => document.querySelector(s);
+        const $$ = (s) => document.querySelectorAll(s);
+
+        let alertIndex = "NIFTY 50";
+        let ALERT_INDICES = [
+          "NIFTY 50",
+          "NIFTY NEXT 50",
+          "NIFTY MIDCAP 50",
+          "NIFTY MIDCAP 100",
+        ];
+        const niceLabel = (n) =>
+          n.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+        let editId = null;
+        let SYMS = {};
+        let OFFSETS = {}; // { timeframe: pct } from the server
+        let DEFAULT_OFFSET = 10;
+        let curPrice = 0; // live price of the selected symbol (for the trigger preview)
+        let allAlerts = []; // active alerts (pre-filter)
+        let allArchived = []; // archived (closed) alerts
+        let alertView = "active"; // "active" | "closed" (segmented toggle)
+
+        const TF_GROUPS = [
+          ["Seconds", ["1s", "5s", "10s", "15s", "30s", "45s"]],
+          ["Minutes", ["1m", "2m", "3m", "5m", "10m", "15m", "30m", "45m"]],
+          ["Hours", ["1h", "2h", "3h", "4h"]],
+          ["Days", ["1d", "1w", "1mo", "3mo", "6mo", "12mo"]],
+        ];
+
+        // ---------- multi-select list filters (with removable chips) ----------
+        // `opts` may be an array or a function (evaluated at build time) — the Index
+        // filter's options come from the dynamic ALERT_INDICES list.
+        const FILTER_DEFS = [
+          {
+            key: "index",
+            label: "Index",
+            opts: () => ALERT_INDICES.map((n) => [n, niceLabel(n)]),
+          },
+          {
+            key: "status",
+            label: "Status",
+            opts: [
+              ["armed", "Armed"],
+              ["triggered", "Triggered"],
+              ["active", "Active (entered)"],
+              ["closed", "Closed"],
+            ],
+          },
+          {
+            key: "side",
+            label: "Side",
+            opts: [
+              ["BUY", "Buy"],
+              ["SELL", "Sell"],
+            ],
+          },
+          {
+            key: "tf",
+            label: "Time frame",
+            opts: TF_GROUPS.flatMap(([, vals]) => vals.map((v) => [v, v])),
+          },
+          {
+            key: "verify",
+            label: "Zone",
+            opts: [
+              ["yes", "Verified"],
+              ["no", "Unverified"],
+            ],
+          },
+          {
+            key: "outcome",
+            label: "Outcome",
+            opts: [
+              ["pending", "Pending"],
+              ["fail", "Fail"],
+              ["partial", "Partial"],
+              ["success", "Success"],
+            ],
+          },
+        ];
+        const sel = {
+          index: new Set(),
+          status: new Set(),
+          side: new Set(),
+          tf: new Set(),
+          verify: new Set(),
+          outcome: new Set(),
+        };
+        const optsOf = (def) =>
+          typeof def.opts === "function" ? def.opts() : def.opts;
+        const optLabel = (key, val) => {
+          const d = FILTER_DEFS.find((f) => f.key === key);
+          const o = d && optsOf(d).find((o) => o[0] === val);
+          return o ? o[1] : val;
+        };
+        function closeMenus() {
+          $$("#alertFilters .ms-menu").forEach((m) => (m.hidden = true));
+        }
+        function buildFilters() {
+          const host = $("#alertFilters");
+          host.innerHTML = "";
+          for (const def of FILTER_DEFS) {
+            const wrap = document.createElement("div");
+            wrap.className = "ms";
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "ms-btn";
+            btn.innerHTML = `<span>${def.label} <span class="ms-count"></span></span><i data-lucide="chevron-down"></i>`;
+            const menu = document.createElement("div");
+            menu.className = "ms-menu";
+            menu.hidden = true;
+            menu.onclick = (e) => e.stopPropagation(); // keep menu open while ticking
+            for (const [val, lab] of optsOf(def)) {
+              const item = document.createElement("label");
+              item.className = "ms-item";
+              const cb = document.createElement("input");
+              cb.type = "checkbox";
+              cb.value = val;
+              cb.checked = sel[def.key].has(val);
+              cb.onchange = () => {
+                cb.checked ? sel[def.key].add(val) : sel[def.key].delete(val);
+                updateFilterUI();
+                applyFilters();
+              };
+              const sp = document.createElement("span");
+              sp.textContent = lab;
+              item.appendChild(cb);
+              item.appendChild(sp);
+              menu.appendChild(item);
+            }
+            btn.onclick = (e) => {
+              e.stopPropagation();
+              const wasOpen = !menu.hidden;
+              closeMenus();
+              menu.hidden = wasOpen;
+            };
+            wrap.appendChild(btn);
+            wrap.appendChild(menu);
+            host.appendChild(wrap);
+          }
+          updateFilterUI();
+          drawIcons();
+        }
+        function updateFilterUI() {
+          $$("#alertFilters .ms").forEach((wrap, i) => {
+            const c = sel[FILTER_DEFS[i].key].size;
+            wrap.querySelector(".ms-count").textContent = c ? `(${c})` : "";
+            wrap.querySelector(".ms-btn").classList.toggle("active", c > 0);
+          });
+          renderChips();
+        }
+        function renderChips() {
+          const host = $("#filterChips");
+          const chips = [];
+          for (const def of FILTER_DEFS)
+            for (const val of sel[def.key])
+              chips.push({ key: def.key, val, label: `${def.label}: ${optLabel(def.key, val)}` });
+          if (!chips.length) {
+            host.hidden = true;
+            host.innerHTML = "";
+            return;
+          }
+          host.hidden = false;
+          host.innerHTML =
+            chips
+              .map(
+                (c) =>
+                  `<span class="fchip">${c.label}<button type="button" class="fchip-x" data-key="${c.key}" data-val="${c.val}" aria-label="Remove">✕</button></span>`,
+              )
+              .join("") +
+            `<button type="button" class="fchip-clear" id="chipsClear">Clear all</button>`;
+          host.querySelectorAll(".fchip-x").forEach((b) => {
+            b.onclick = () => {
+              sel[b.dataset.key].delete(b.dataset.val);
+              syncFilterChecks();
+              updateFilterUI();
+              applyFilters();
+            };
+          });
+          $("#chipsClear").onclick = () => {
+            for (const k in sel) sel[k].clear();
+            syncFilterChecks();
+            updateFilterUI();
+            applyFilters();
+          };
+        }
+        function syncFilterChecks() {
+          $$("#alertFilters .ms").forEach((wrap, i) => {
+            const key = FILTER_DEFS[i].key;
+            wrap
+              .querySelectorAll(".ms-item input")
+              .forEach((cb) => (cb.checked = sel[key].has(cb.value)));
+          });
+        }
+        // click anywhere else closes any open filter menu
+        document.addEventListener("click", closeMenus);
+
+        const pad = (n) => String(n).padStart(2, "0");
+        function todayISO() {
+          const d = new Date();
+          return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+        }
+        // build hour (00-23) + minute (00-59) selects, 24h (blank = not set, optional)
+        $("#al-hour").innerHTML =
+          `<option value="">--</option>` +
+          Array.from(
+            { length: 24 },
+            (_, h) => `<option value="${pad(h)}">${pad(h)}</option>`,
+          ).join("");
+        $("#al-min").innerHTML =
+          `<option value="">--</option>` +
+          Array.from(
+            { length: 60 },
+            (_, m) => `<option value="${pad(m)}">${pad(m)}</option>`,
+          ).join("");
+
+        const esc = (s) =>
+          String(s == null ? "" : s).replace(
+            /[<>&]/g,
+            (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c],
+          );
+        const zoneLabel = (o) =>
+          ({
+            fail: "❌ Fail",
+            partial: "🟡 Partial",
+            success: "✅ Success",
+          })[o] || "Pending";
+        function fmtRs(v) {
+          return v == null || isNaN(v)
+            ? "-"
+            : "₹" +
+                Number(v).toLocaleString("en-IN", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                });
+        }
+        async function api(path, method = "GET", body) {
+          const headers = { "X-Requested-With": "XMLHttpRequest" };
+          if (body) headers["Content-Type"] = "application/json";
+          const res = await fetch(path, {
+            method,
+            headers,
+            body: body ? JSON.stringify(body) : undefined,
+          });
+          const txt = await res.text();
+          let j = {};
+          try {
+            j = txt ? JSON.parse(txt) : {};
+          } catch (_) {}
+          if (res.status === 401 && window.__onAuthExpired) window.__onAuthExpired();
+          if (!res.ok || j.error)
+            throw new Error(j.error || "HTTP " + res.status);
+          return j;
+        }
+        function btn(label, cls, onclick, icon) {
+          const b = document.createElement("button");
+          b.type = "button";
+          if (cls) b.className = cls;
+          if (icon)
+            b.innerHTML = `<i data-lucide="${icon}"></i>${label.replace(/[<&]/g, "")}`;
+          else b.textContent = label;
+          b.onclick = onclick;
+          return b;
+        }
+        function drawIcons() {
+          try {
+            if (window.lucide) lucide.createIcons();
+          } catch (_) {}
+        }
+
+        // ---------- sound ----------
+        let actx = null;
+        function beep() {
+          try {
+            actx =
+              actx || new (window.AudioContext || window.webkitAudioContext)();
+            if (actx.state === "suspended") actx.resume();
+            const o = actx.createOscillator(),
+              g = actx.createGain();
+            o.type = "sine";
+            o.frequency.value = 880;
+            g.gain.setValueAtTime(0.0001, actx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.25, actx.currentTime + 0.02);
+            g.gain.exponentialRampToValueAtTime(
+              0.0001,
+              actx.currentTime + 0.35,
+            );
+            o.connect(g);
+            g.connect(actx.destination);
+            o.start();
+            o.stop(actx.currentTime + 0.36);
+          } catch (_) {}
+        }
+        // browsers block audio until a user gesture - resume on first click
+        document.addEventListener("click", () => {
+          if (actx && actx.state === "suspended") actx.resume();
+        });
+
+        // ---------- form ----------
+        function fillDatalist() {
+          const list = SYMS[$("#al-index").value] || [];
+          $("#symList").innerHTML = list
+            .map((s) => `<option value="${s}"></option>`)
+            .join("");
+        }
+        async function loadSymbols() {
+          try {
+            SYMS = await api("/api/symbols");
+          } catch (_) {
+            SYMS = {};
+          }
+          fillDatalist();
+        }
+        async function loadConfig() {
+          try {
+            const c = await api("/api/alert-config");
+            OFFSETS = c.offsets || {};
+            DEFAULT_OFFSET = c.defaultOffset || 10;
+            if (Array.isArray(c.indices) && c.indices.length) {
+              ALERT_INDICES = c.indices;
+              buildIndexUI();
+            }
+          } catch (_) {}
+        }
+        // build the create-form index dropdown from the server's index list; also
+        // rebuild the filters so the Index filter reflects the loaded indices
+        function buildIndexUI() {
+          if (!ALERT_INDICES.includes(alertIndex))
+            alertIndex = ALERT_INDICES[0];
+          $("#al-index").innerHTML = ALERT_INDICES.map(
+            (n) => `<option value="${n}">${n}</option>`,
+          ).join("");
+          if (!editId) $("#al-index").value = alertIndex;
+          buildFilters();
+        }
+        async function loadPrice() {
+          const sym = $("#al-symbol").value.trim().toUpperCase();
+          if (!sym) {
+            curPrice = 0;
+            updatePreview();
+            return;
+          }
+          try {
+            const r = await api(
+              "/api/price?index=" +
+                encodeURIComponent($("#al-index").value) +
+                "&symbol=" +
+                encodeURIComponent(sym),
+            );
+            curPrice = r.price || 0;
+          } catch (_) {
+            curPrice = 0;
+          }
+          updatePreview();
+        }
+        function updatePreview() {
+          const p = parseFloat($("#al-price").value);
+          const side = $("#al-side").value;
+          const tf = $("#al-tf").value;
+          const el = $("#al-trigger");
+          // don't compute the trigger until side + alert price + time frame are all set
+          if (!side || !tf || !(p > 0)) {
+            el.innerHTML =
+              "Trigger: - <span class='opt'>(pick side, alert price & time frame)</span>";
+            return;
+          }
+          const pct = OFFSETS[tf] != null ? OFFSETS[tf] : DEFAULT_OFFSET;
+          // BUY fires on a rise (trigger above); SELL on a fall (trigger below)
+          const sign = side === "BUY" ? "+" : "−";
+          let t = side === "BUY" ? p * (1 + pct / 100) : p * (1 - pct / 100);
+          // re-anchor: if the live price is between the alert price and the trigger,
+          // start from the current price (trigger = current)
+          let note = "";
+          if (curPrice > 0) {
+            if (side === "BUY" && curPrice > p && curPrice < t) {
+              t = curPrice;
+              note = ` - re-anchored to current ${fmtRs(curPrice)}`;
+            } else if (side === "SELL" && curPrice < p && curPrice > t) {
+              t = curPrice;
+              note = ` - re-anchored to current ${fmtRs(curPrice)}`;
+            }
+          }
+          const when = side === "BUY" ? "rises to" : "falls to";
+          el.innerHTML = `Trigger (${tf} · ${side} ${sign}${pct}%): <b>${fmtRs(t)}</b> - fires when price ${when} it, then steps to alert ${fmtRs(p)}${note}`;
+        }
+        // live 3x/5x profit targets from alert price + stop loss
+        function updateTargets() {
+          const p = parseFloat($("#al-price").value);
+          const slv = parseFloat($("#al-stop").value);
+          const side = $("#al-side").value;
+          const el = $("#al-targets");
+          if (!side || !(p > 0) || !(slv > 0)) {
+            el.innerHTML =
+              "Targets: — <span class='opt'>(needs side, alert price & stop loss)</span>";
+            return;
+          }
+          const R = Math.abs(p - slv);
+          const dir = side === "BUY" ? 1 : -1;
+          el.innerHTML = `R ${fmtRs(R)} · 3× <b>${fmtRs(p + dir * 3 * R)}</b> (+${fmtRs(3 * R)}) · 5× <b>${fmtRs(p + dir * 5 * R)}</b> (+${fmtRs(5 * R)})`;
+        }
+        // ---------- create/edit modal ----------
+        function openAlertModal() {
+          $("#alertModal").classList.add("show");
+          drawIcons();
+          setTimeout(() => $("#al-symbol").focus(), 50);
+        }
+        function closeAlertModal() {
+          $("#alertModal").classList.remove("show");
+        }
+        // ---------- alert detail (view) modal ----------
+        const pctTxt = (v) =>
+          v != null && !isNaN(v)
+            ? (+v).toFixed(2).replace(/\.?0+$/, "") + "%"
+            : "-";
+        // absolute IST date-time for metadata (e.g. "04 Aug 2026, 10:30")
+        const fmtDateTime = (iso) => {
+          if (!iso) return "-";
+          const d = new Date(iso);
+          if (isNaN(d)) return "-";
+          return d.toLocaleString("en-GB", {
+            timeZone: "Asia/Kolkata",
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+          });
+        };
+        // short IST date for the compact list line (e.g. "04 Aug")
+        const fmtDateShort = (iso) => {
+          if (!iso) return "";
+          const d = new Date(iso);
+          if (isNaN(d)) return "";
+          return d.toLocaleString("en-GB", {
+            timeZone: "Asia/Kolkata",
+            day: "2-digit",
+            month: "short",
+          });
+        };
+        function openAlertView(a) {
+          $("#av-sym").textContent = a.symbol;
+          $("#av-badges").innerHTML =
+            `<span class="ai-index">${a.index}</span>` +
+            `<span class="ai-side ${a.side === "BUY" ? "buy" : "sell"}">${a.side}</span>` +
+            `<span class="ai-status ${a.status}">${a.status}</span>` +
+            `<span class="ai-verify ${a.zoneVerified ? "yes" : "no"}">${a.zoneVerified ? "✓ Verified" : "⚠ Unverified"}</span>` +
+            `<span class="ai-zone ${a.zoneOutcome || "pending"}">${zoneLabel(a.zoneOutcome)}</span>`;
+          const cell = (k, v, cls, wide) =>
+            `<div class="cell${wide ? " wide" : ""}"><span class="k">${k}</span><span class="v ${cls || ""}">${v}</span></div>`;
+          const cand = a.candleDate
+            ? a.candleDate + (a.candleTime ? " " + a.candleTime : "")
+            : "-";
+          const lastEv = a.lastEvent
+            ? `${a.lastEvent.type} @ ${fmtRs(a.lastEvent.price)}`
+            : "-";
+          const reward =
+            a.profit3 != null
+              ? `${fmtRs(a.profit3)} · ${fmtRs(a.profit5)}`
+              : "-";
+          $("#av-grid").innerHTML = [
+            cell("Alert price", fmtRs(a.alertPrice)),
+            cell("Trigger", fmtRs(a.triggerPrice)),
+            cell("Stop loss", fmtRs(a.stopLoss)),
+            cell("Time frame", a.timeframe || "-"),
+            cell("3× target", fmtRs(a.target3)),
+            cell("5× target", fmtRs(a.target5)),
+            cell("Risk (R)", fmtRs(a.riskR)),
+            cell("Reward (3× · 5×)", reward),
+            cell("Trigger offset", pctTxt(a.offsetPct)),
+            cell("Re-alert step", pctTxt(a.stepPct)),
+            cell("Zone outcome", zoneLabel(a.zoneOutcome)),
+            cell("Verified", a.zoneVerified ? "Yes" : "No"),
+            cell("Creator", esc(a.zoneCreator) || "-", "", true),
+            cell("Note", a.note ? esc(a.note) : "-", "note", true),
+            cell("Candle", cand),
+            cell("Entered", a.entered ? "Yes" : "No"),
+            cell("Last event", lastEv),
+            cell("Created", fmtDateTime(a.createdAt)),
+            cell("Last updated", fmtDateTime(a.updatedAt)),
+            cell("Last fired", fmtDateTime(a.lastFiredAt)),
+          ].join("");
+          const acts = $("#av-actions");
+          acts.innerHTML = "";
+          const isArch = a._archived || a.status === "closed";
+          if (!canEdit()) {
+            // viewer: read-only
+            acts.innerHTML = `<span class="av-readonly">Read only</span>`;
+          } else if (isArch) {
+            // archived alert: re-open (re-arm) or delete
+            acts.appendChild(
+              btn("Re-open", "btn-sm", () => rearmAlert(a), "rotate-ccw"),
+            );
+            acts.appendChild(
+              btn(
+                "Delete",
+                "btn-sm danger",
+                () => {
+                  if (confirm(`Delete archived alert for ${a.symbol}?`)) {
+                    del(a.id);
+                    closeAlertView();
+                  }
+                },
+                "trash-2",
+              ),
+            );
+          } else {
+            acts.appendChild(
+              btn(
+                "Edit",
+                "btn-sm",
+                () => {
+                  closeAlertView();
+                  editAlert(a);
+                },
+                "pencil",
+              ),
+            );
+            acts.appendChild(
+              btn(
+                a.zoneVerified ? "Unverify" : "Verify",
+                "btn-sm",
+                async () => {
+                  await act(a.id, a.zoneVerified ? "unverify" : "verify");
+                  closeAlertView();
+                },
+                a.zoneVerified ? "shield-off" : "shield-check",
+              ),
+            );
+            acts.appendChild(
+              btn(
+                "Close",
+                "btn-sm",
+                async () => {
+                  await act(a.id, "close");
+                  closeAlertView();
+                },
+                "circle-x",
+              ),
+            );
+            acts.appendChild(
+              btn(
+                "Delete",
+                "btn-sm danger",
+                () => {
+                  if (confirm(`Delete alert for ${a.symbol}?`)) {
+                    del(a.id);
+                    closeAlertView();
+                  }
+                },
+                "trash-2",
+              ),
+            );
+          }
+          $("#alertViewModal").classList.add("show");
+          drawIcons();
+        }
+        function closeAlertView() {
+          $("#alertViewModal").classList.remove("show");
+        }
+        // called from the dashboard's stock modal: switch to Alerts + open create,
+        // prefilled with the given index + symbol
+        window.openCreateAlert = function (index, symbol) {
+          const btn = document.querySelector('.viewnav .tab[data-view="alerts"]');
+          if (btn) btn.click(); // switch to the Alerts view
+          if (index && ALERT_INDICES.includes(index)) alertIndex = index;
+          resetForm(); // sets al-index = alertIndex, clears the rest
+          if (symbol) $("#al-symbol").value = String(symbol).toUpperCase();
+          loadPrice();
+          openAlertModal();
+        };
+        function resetForm() {
+          editId = null;
+          $("#formTitle").textContent = "Create alert";
+          $("#al-submit-text").textContent = "Create alert";
+          $("#alertForm").reset();
+          $("#al-index").value = alertIndex;
+          // side, time frame, candle date/time start empty (no premature trigger)
+          $("#al-side").value = "";
+          $("#al-tf").value = "";
+          $("#al-date").value = "";
+          $("#al-hour").value = "";
+          $("#al-min").value = "";
+          $("#al-err").textContent = "";
+          fillDatalist();
+          updatePreview();
+          updateTargets();
+        }
+        function editAlert(a) {
+          editId = a.id;
+          $("#formTitle").textContent = "Edit alert";
+          $("#al-submit-text").textContent = "Save changes";
+          $("#al-index").value = a.index;
+          fillDatalist();
+          $("#al-symbol").value = a.symbol;
+          $("#al-side").value = a.side;
+          $("#al-price").value = a.alertPrice;
+          $("#al-stop").value = a.stopLoss != null ? a.stopLoss : "";
+          $("#al-creator").value = a.zoneCreator || "";
+          $("#al-note").value = a.note || "";
+          $("#al-tf").value = a.timeframe || "";
+          $("#al-date").value = a.candleDate || "";
+          const [hh, mm] = (a.candleTime || ":").split(":");
+          $("#al-hour").value = hh || "";
+          $("#al-min").value = mm || "";
+          $("#al-err").textContent = "";
+          loadPrice();
+          updateTargets();
+          openAlertModal();
+        }
+        async function submitForm(e) {
+          e.preventDefault();
+          const hh = $("#al-hour").value,
+            mm = $("#al-min").value;
+          const body = {
+            index: $("#al-index").value,
+            symbol: $("#al-symbol").value.trim().toUpperCase(),
+            side: $("#al-side").value,
+            alertPrice: parseFloat($("#al-price").value),
+            stopLoss: parseFloat($("#al-stop").value),
+            zoneCreator: $("#al-creator").value.trim(),
+            note: $("#al-note").value.trim(),
+            timeframe: $("#al-tf").value,
+            candleDate: $("#al-date").value || "",
+            candleTime: hh && mm ? `${hh}:${mm}` : "",
+          };
+          $("#al-err").textContent = "";
+          // If the live price is already at/past the entry, warn: the alert will be
+          // created already "entered" (targets/stop-loss track immediately).
+          if (body.side && body.alertPrice > 0 && body.symbol) {
+            try {
+              const { price } = await api(
+                "/api/price?symbol=" + encodeURIComponent(body.symbol),
+              );
+              const past =
+                price > 0 &&
+                (body.side === "BUY"
+                  ? price <= body.alertPrice
+                  : price >= body.alertPrice);
+              if (past) {
+                const ok = confirm(
+                  `Current price ${fmtRs(price)} is already ${body.side === "BUY" ? "at/below" : "at/above"} your entry ${fmtRs(body.alertPrice)}.\n\n` +
+                    `The alert will be created already ENTERED — its 3×/5×/stop-loss can fire immediately.\n\nCreate it anyway?`,
+                );
+                if (!ok) return;
+              }
+            } catch (_) {
+              /* price lookup failed - just proceed with create */
+            }
+          }
+          try {
+            if (editId) await api("/api/alerts/" + editId, "PATCH", body);
+            else await api("/api/alerts", "POST", body);
+            alertIndex = body.index; // remember for the next new-alert default
+            resetForm();
+            closeAlertModal();
+            loadList();
+          } catch (err) {
+            $("#al-err").textContent = err.message;
+          }
+        }
+
+        // ---------- list ----------
+        // multi-select: an empty set = no filter; otherwise the value must be in the set
+        function applyFilters() {
+          // update the toggle counts
+          if ($("#vtActiveCount")) $("#vtActiveCount").textContent = allAlerts.length;
+          if ($("#vtClosedCount")) $("#vtClosedCount").textContent = allArchived.length;
+          // base list depends on the Active/Closed view; closed rows are tagged _archived
+          let list =
+            alertView === "closed"
+              ? allArchived.map((a) => ({ ...a, _archived: true }))
+              : allAlerts;
+          if (sel.index.size) list = list.filter((a) => sel.index.has(a.index));
+          if (sel.status.size) list = list.filter((a) => sel.status.has(a.status));
+          if (sel.side.size) list = list.filter((a) => sel.side.has(a.side));
+          if (sel.tf.size) list = list.filter((a) => sel.tf.has(a.timeframe));
+          if (sel.verify.size)
+            list = list.filter((a) => sel.verify.has(a.zoneVerified ? "yes" : "no"));
+          if (sel.outcome.size)
+            list = list.filter((a) => sel.outcome.has(a.zoneOutcome || "pending"));
+          renderList(list);
+        }
+        function renderList(alerts) {
+          const host = $("#alertList");
+          if (!alerts.length) {
+            const base = alertView === "closed" ? allArchived : allAlerts;
+            host.innerHTML = base.length
+              ? `<div class="empty">No alerts match the current filters.</div>`
+              : alertView === "closed"
+                ? `<div class="empty">No closed alerts yet.</div>`
+                : `<div class="empty">No active alerts. Click "New alert" to create one.</div>`;
+            return;
+          }
+          host.innerHTML = "";
+          for (const a of alerts) {
+            const isArch = a._archived || a.status === "closed";
+            const div = document.createElement("div");
+            div.className =
+              "alert-item " +
+              (a.side === "BUY" ? "side-buy" : "side-sell") +
+              (a.ringing ? " ringing" : "") +
+              (isArch ? " archived" : "");
+            const last = a.lastEvent
+              ? ` · last ${a.lastEvent.type} @ ${fmtRs(a.lastEvent.price)}`
+              : "";
+            div.innerHTML =
+              `<div class="ai-body">` +
+              `<div class="ai-line1">` +
+              `<span class="ai-sym">${a.symbol}</span>` +
+              `<span class="ai-index">${a.index}</span>` +
+              `<span class="ai-side ${a.side === "BUY" ? "buy" : "sell"}">${a.side}</span>` +
+              `<span class="ai-status ${a.status}">${a.status}</span>` +
+              (isArch ? `<span class="ai-archived">Archived</span>` : "") +
+              `<span class="ai-verify ${a.zoneVerified ? "yes" : "no"}">${a.zoneVerified ? "✓ Verified" : "⚠ Unverified"}</span>` +
+              `<span class="ai-zone ${a.zoneOutcome || "pending"}">${zoneLabel(a.zoneOutcome)}</span>` +
+              `</div>` +
+              `<span class="ai-nums">Alert ${fmtRs(a.alertPrice)} · Trigger ${fmtRs(a.triggerPrice)} · SL ${fmtRs(a.stopLoss)} · ${a.timeframe || "-"}</span>` +
+              `<span class="ai-sub">3× ${fmtRs(a.target3)} · 5× ${fmtRs(a.target5)} · R ${fmtRs(a.riskR)} · by ${esc(a.zoneCreator) || "-"}${a.note ? ` · ${esc(a.note)}` : ""}${a.candleDate ? ` · candle ${a.candleDate}${a.candleTime ? " " + a.candleTime : ""}` : ""}${a.createdAt ? ` · created ${fmtDateShort(a.createdAt)}` : ""}${last}</span>` +
+              `</div>` +
+              `<div class="ai-actions"></div>`;
+            const acts = div.querySelector(".ai-actions");
+            if (!canEdit()) {
+              // viewer: read-only, just View
+              acts.appendChild(
+                btn("View", "btn-sm", () => openAlertView(a), "eye"),
+              );
+            } else if (isArch) {
+              // archived alerts: re-open (re-arm with current-price logic), view, delete
+              acts.appendChild(
+                btn("Re-open", "btn-sm", () => rearmAlert(a), "rotate-ccw"),
+              );
+              acts.appendChild(
+                btn("View", "btn-sm", () => openAlertView(a), "eye"),
+              );
+              acts.appendChild(
+                btn(
+                  "Delete",
+                  "btn-sm danger",
+                  () => {
+                    if (confirm(`Delete archived alert for ${a.symbol}?`)) del(a.id);
+                  },
+                  "trash-2",
+                ),
+              );
+            } else {
+              acts.appendChild(
+                btn(
+                  a.zoneVerified ? "Unverify" : "Verify",
+                  "btn-sm",
+                  () => act(a.id, a.zoneVerified ? "unverify" : "verify"),
+                  a.zoneVerified ? "shield-off" : "shield-check",
+                ),
+              );
+              if (a.ringing)
+                acts.appendChild(
+                  btn("Snooze", "btn-sm", () => act(a.id, "snooze"), "clock"),
+                );
+              acts.appendChild(
+                btn("Close", "btn-sm", () => act(a.id, "close"), "circle-x"),
+              );
+              acts.appendChild(
+                btn("Edit", "btn-sm", () => editAlert(a), "pencil"),
+              );
+              acts.appendChild(
+                btn(
+                  "Delete",
+                  "btn-sm danger",
+                  () => {
+                    if (confirm(`Delete alert for ${a.symbol}?`)) del(a.id);
+                  },
+                  "trash-2",
+                ),
+              );
+            }
+            // click the row (anywhere but the action buttons) to view details
+            div.addEventListener("click", (e) => {
+              if (e.target.closest(".ai-actions")) return;
+              openAlertView(a);
+            });
+            host.appendChild(div);
+          }
+          drawIcons();
+        }
+        async function loadList() {
+          try {
+            // active + archived together; archived shown only when the toggle is on
+            const { alerts, archived } = await api("/api/alerts/all");
+            allAlerts = alerts || [];
+            allArchived = archived || [];
+            applyFilters();
+          } catch (err) {
+            $("#alertList").innerHTML =
+              `<div class="empty">Failed to load: ${err.message}</div>`;
+          }
+        }
+        async function act(id, action) {
+          try {
+            await api("/api/alerts/" + id + "/" + action, "POST");
+          } catch (_) {}
+          pollRinging();
+          if (!$("#alertsView").hidden) loadList();
+        }
+        async function del(id) {
+          try {
+            await api("/api/alerts/" + id, "DELETE");
+          } catch (_) {}
+          loadList();
+        }
+        // Re-arm a (usually closed) alert with the same data + creation-time logic. Warns
+        // if the live price is already past the entry (it'll re-arm already-entered).
+        async function rearmAlert(a) {
+          try {
+            const { price } = await api(
+              "/api/price?symbol=" + encodeURIComponent(a.symbol),
+            );
+            const past =
+              price > 0 &&
+              (a.side === "BUY" ? price <= a.alertPrice : price >= a.alertPrice);
+            const msg = past
+              ? `Re-arm ${a.symbol}? Current ${fmtRs(price)} is already ${a.side === "BUY" ? "at/below" : "at/above"} the entry ${fmtRs(a.alertPrice)}, so it will re-arm ALREADY ENTERED (targets/stop-loss track immediately).`
+              : `Re-arm ${a.symbol}? It returns to Armed with a fresh state (same alert/stop-loss/targets).`;
+            if (!confirm(msg)) return;
+          } catch (_) {
+            if (!confirm(`Re-arm ${a.symbol}?`)) return;
+          }
+          try {
+            await api("/api/alerts/" + a.id + "/rearm", "POST");
+          } catch (err) {
+            window.alert("Re-arm failed: " + err.message);
+            return;
+          }
+          alertView = "active"; // jump to Active so the re-armed alert is visible
+          syncViewToggle();
+          closeAlertView();
+          loadList();
+        }
+        function syncViewToggle() {
+          $$("#alertViewToggle .vt").forEach((b) =>
+            b.classList.toggle("active", b.dataset.view === alertView),
+          );
+        }
+
+        // ---------- ringing toasts (any view) ----------
+        const toasts = new Map(); // id -> { el, at }
+        function toastEl(a) {
+          const t = a.lastEvent ? a.lastEvent.type : "ALERT";
+          const icon =
+            {
+              FINAL: "🎯",
+              TRIGGER: "🔔",
+              REALERT: "🔁",
+              PARTIAL: "🟡",
+              SUCCESS: "✅",
+              FAIL: "❌",
+            }[t] || "🔔";
+          const el = document.createElement("div");
+          el.className = "ring-toast";
+          el.innerHTML =
+            `<div class="rt-top">${icon} ${a.symbol} <span class="ai-side ${a.side === "BUY" ? "buy" : "sell"}">${a.side}</span></div>` +
+            `<div class="rt-msg"></div>` +
+            `<div class="rt-actions"></div>`;
+          el.querySelector(".rt-msg").textContent = a.lastEvent
+            ? a.lastEvent.text
+            : "";
+          const acts = el.querySelector(".rt-actions");
+          acts.appendChild(
+            btn("Snooze", "primary", () => act(a.id, "snooze"), "clock"),
+          );
+          acts.appendChild(
+            btn("Close", "", () => act(a.id, "close"), "circle-x"),
+          );
+          return el;
+        }
+        async function pollRinging() {
+          let data;
+          try {
+            data = await api("/api/alerts/active");
+          } catch (_) {
+            return;
+          }
+          const ring = data.alerts || [];
+          const byId = new Map(ring.map((a) => [a.id, a]));
+          for (const [id, rec] of [...toasts]) {
+            if (!byId.has(id)) {
+              rec.el.remove();
+              toasts.delete(id);
+            }
+          }
+          for (const a of ring) {
+            const at = a.lastEvent ? a.lastEvent.at : "";
+            const rec = toasts.get(a.id);
+            if (!rec) {
+              const el = toastEl(a);
+              $("#ringHost").appendChild(el);
+              toasts.set(a.id, { el, at });
+              beep();
+            } else if (rec.at !== at) {
+              const el = toastEl(a);
+              rec.el.replaceWith(el);
+              toasts.set(a.id, { el, at });
+              beep();
+            }
+          }
+          const bell = $("#bell");
+          if (ring.length) {
+            bell.hidden = false;
+            bell.textContent = ring.length;
+          } else bell.hidden = true;
+          drawIcons();
+        }
+
+        // ---------- notification center ----------
+        // One notification per fired alert (its latest event). Persists until the user
+        // snoozes/closes it; read/unread state is kept in localStorage across reloads.
+        const NOTIF_READ_KEY = "tt_notif_read";
+        const NOTIF_DISMISS_KEY = "tt_notif_dismissed";
+        const loadSet = (key) => {
+          try {
+            return new Set(JSON.parse(localStorage.getItem(key) || "[]"));
+          } catch (_) {
+            return new Set();
+          }
+        };
+        const saveSet = (key, set) => {
+          try {
+            localStorage.setItem(key, JSON.stringify([...set]));
+          } catch (_) {}
+        };
+        const notifRead = loadSet(NOTIF_READ_KEY);
+        const notifDismissed = loadSet(NOTIF_DISMISS_KEY);
+        let notifItems = []; // [{ a, sig }] newest first
+        // a signature changes whenever the alert fires again -> re-surfaces as unread
+        const sigOf = (a) => a.id + ":" + (a.lastEvent ? a.lastEvent.at : "");
+        const EVENT_ICON = {
+          ENTRY: "🎯",
+          TRIGGER: "🔔",
+          REALERT: "🔁",
+          PARTIAL: "🟡",
+          SUCCESS: "✅",
+          FAIL: "❌",
+          SL_AFTER_PARTIAL: "🟡",
+        };
+        function agoText(iso) {
+          if (!iso) return "";
+          const s = Math.max(
+            0,
+            Math.round((Date.now() - new Date(iso).getTime()) / 1000),
+          );
+          if (s < 60) return s + "s ago";
+          const m = Math.round(s / 60);
+          if (m < 60) return m + "m ago";
+          const h = Math.round(m / 60);
+          if (h < 24) return h + "h ago";
+          return Math.round(h / 24) + "d ago";
+        }
+        const unreadCount = () =>
+          notifItems.filter((it) => !notifRead.has(it.sig)).length;
+        function updateNotifBadge() {
+          const n = unreadCount();
+          const badge = $("#notifBadge"),
+            btn = $("#notifBtn");
+          if (n > 0) {
+            badge.hidden = false;
+            badge.textContent = n > 99 ? "99+" : n;
+            btn.classList.add("has-unread");
+          } else {
+            badge.hidden = true;
+            btn.classList.remove("has-unread");
+          }
+        }
+        async function pollNotifications() {
+          let data;
+          try {
+            // include archived so Entry/Success/Fail of auto-closed alerts still show here
+            data = await api("/api/alerts/all");
+          } catch (_) {
+            return;
+          }
+          const all = (data.alerts || []).concat(data.archived || []);
+          const live = new Set();
+          const items = [];
+          for (const a of all) {
+            if (!a.lastEvent || !a.firedCount) continue;
+            const sig = sigOf(a);
+            live.add(sig);
+            if (notifDismissed.has(sig)) continue;
+            items.push({ a, sig });
+          }
+          // prune stale read/dismissed signatures no longer present
+          let pruned = false;
+          for (const s of [...notifDismissed])
+            if (!live.has(s)) (notifDismissed.delete(s), (pruned = true));
+          for (const s of [...notifRead])
+            if (!live.has(s)) (notifRead.delete(s), (pruned = true));
+          if (pruned) {
+            saveSet(NOTIF_DISMISS_KEY, notifDismissed);
+            saveSet(NOTIF_READ_KEY, notifRead);
+          }
+          items.sort((x, y) =>
+            (y.a.lastEvent.at || "").localeCompare(x.a.lastEvent.at || ""),
+          );
+          notifItems = items;
+          updateNotifBadge();
+          if ($("#notifPanel").classList.contains("show")) renderNotifs();
+        }
+        function markRead(sig) {
+          if (!notifRead.has(sig)) {
+            notifRead.add(sig);
+            saveSet(NOTIF_READ_KEY, notifRead);
+            updateNotifBadge();
+          }
+        }
+        function dismissNotif(sig) {
+          notifDismissed.add(sig);
+          saveSet(NOTIF_DISMISS_KEY, notifDismissed);
+          notifItems = notifItems.filter((it) => it.sig !== sig);
+        }
+        function markAllNotifsRead() {
+          for (const it of notifItems) notifRead.add(it.sig);
+          saveSet(NOTIF_READ_KEY, notifRead);
+          updateNotifBadge();
+          renderNotifs();
+        }
+        function renderNotifs() {
+          const host = $("#np-list");
+          $("#np-count").textContent = notifItems.length
+            ? `${unreadCount()} unread · ${notifItems.length} total`
+            : "";
+          if (!notifItems.length) {
+            host.innerHTML = `<div class="notif-empty">No notifications yet.<br>Triggered alerts show up here.</div>`;
+            return;
+          }
+          host.innerHTML = "";
+          for (const { a, sig } of notifItems) {
+            const ev = a.lastEvent;
+            const item = document.createElement("div");
+            item.className = "notif-item" + (notifRead.has(sig) ? "" : " unread");
+            item.innerHTML =
+              `<span class="ni-dot"></span>` +
+              `<div class="ni-body">` +
+              `<div class="ni-line1">` +
+              `<span class="ni-icon">${EVENT_ICON[ev.type] || "🔔"}</span>` +
+              `<span class="ni-sym">${a.symbol}</span>` +
+              `<span class="ai-side ${a.side === "BUY" ? "buy" : "sell"}">${a.side}</span>` +
+              `<span class="ai-index">${a.index}</span>` +
+              `<span class="ni-time">${agoText(ev.at)}</span>` +
+              `</div>` +
+              `<div class="ni-msg"></div>` +
+              `<div class="ni-actions"></div>` +
+              `</div>`;
+            item.querySelector(".ni-msg").textContent =
+              ev.text || `${ev.type} @ ${fmtRs(ev.price)}`;
+            const acts = item.querySelector(".ni-actions");
+            // Snooze/Close only make sense for still-open alerts a non-viewer owns;
+            // closed/archived (or viewers) get just a Dismiss (client-side) + View.
+            const closed = a.status === "closed" || !canEdit();
+            if (!closed) {
+              acts.appendChild(
+                btn(
+                  "Snooze",
+                  "btn-sm",
+                  async () => {
+                    markRead(sig);
+                    dismissNotif(sig);
+                    await act(a.id, "snooze");
+                    pollNotifications();
+                  },
+                  "clock",
+                ),
+              );
+              acts.appendChild(
+                btn(
+                  "Close",
+                  "btn-sm",
+                  async () => {
+                    markRead(sig);
+                    dismissNotif(sig);
+                    await act(a.id, "close");
+                    pollNotifications();
+                  },
+                  "circle-x",
+                ),
+              );
+            } else {
+              acts.appendChild(
+                btn(
+                  "Dismiss",
+                  "btn-sm",
+                  () => {
+                    markRead(sig);
+                    dismissNotif(sig);
+                    renderNotifs();
+                  },
+                  "check",
+                ),
+              );
+            }
+            acts.appendChild(
+              btn(
+                "View",
+                "btn-sm",
+                () => {
+                  markRead(sig);
+                  closeNotifPanel();
+                  openAlertView(a);
+                },
+                "eye",
+              ),
+            );
+            item.addEventListener("click", (e) => {
+              if (e.target.closest(".ni-actions")) return;
+              markRead(sig);
+              item.classList.remove("unread");
+              $("#np-count").textContent = `${unreadCount()} unread · ${notifItems.length} total`;
+            });
+            host.appendChild(item);
+          }
+          drawIcons();
+        }
+        function openNotifPanel() {
+          $("#notifPanel").classList.add("show");
+          renderNotifs();
+          drawIcons();
+        }
+        function closeNotifPanel() {
+          $("#notifPanel").classList.remove("show");
+        }
+
+        // ---------- view switch ----------
+        $$(".viewnav .tab").forEach((b) => {
+          b.onclick = () => {
+            const alertsOn = b.dataset.view === "alerts";
+            $$(".viewnav .tab").forEach((x) => {
+              const on = x === b;
+              x.classList.toggle("active", on);
+              x.setAttribute("aria-selected", String(on));
+            });
+            $("#dashView").hidden = alertsOn;
+            $("#alertsView").hidden = !alertsOn;
+            if (alertsOn) {
+              loadSymbols();
+              loadList();
+            }
+          };
+        });
+
+        // ---------- wire up ----------
+        $("#al-index").addEventListener("change", () => {
+          fillDatalist();
+          loadPrice();
+        });
+        $("#al-symbol").addEventListener("change", loadPrice);
+        $("#al-price").addEventListener("input", () => {
+          updatePreview();
+          updateTargets();
+        });
+        $("#al-side").addEventListener("change", () => {
+          updatePreview();
+          updateTargets();
+        });
+        $("#al-tf").addEventListener("change", updatePreview);
+        $("#al-stop").addEventListener("input", updateTargets);
+        $("#al-cancel").onclick = closeAlertModal;
+        $("#al-modal-close").onclick = closeAlertModal;
+        $("#al-new").onclick = () => {
+          resetForm();
+          openAlertModal();
+        };
+        // close on backdrop click / Esc
+        $("#alertModal").addEventListener("click", (e) => {
+          if (e.target.id === "alertModal") closeAlertModal();
+        });
+        $("#av-close").onclick = closeAlertView;
+        $("#alertViewModal").addEventListener("click", (e) => {
+          if (e.target.id === "alertViewModal") closeAlertView();
+        });
+        // notification center wiring
+        $("#notifBtn").onclick = () =>
+          $("#notifPanel").classList.contains("show")
+            ? closeNotifPanel()
+            : openNotifPanel();
+        $("#np-close").onclick = closeNotifPanel;
+        $("#np-backdrop").onclick = closeNotifPanel;
+        $("#np-readall").onclick = markAllNotifsRead;
+        document.addEventListener("keydown", (e) => {
+          if (e.key === "Escape") {
+            closeAlertModal();
+            closeAlertView();
+            closeNotifPanel();
+          }
+        });
+        $("#alertForm").onsubmit = submitForm;
+        $$("#alertViewToggle .vt").forEach((b) => {
+          b.onclick = () => {
+            alertView = b.dataset.view;
+            syncViewToggle();
+            applyFilters();
+          };
+        });
+
+        buildFilters(); // build the multi-select filter dropdowns + chips
+
+        // role gating: viewers can't create/modify alerts (server also enforces this)
+        const canEdit = () => {
+          const r = window.APP_AUTH && window.APP_AUTH.user && window.APP_AUTH.user.role;
+          return r === "admin" || r === "editor";
+        };
+        window.__alertsCanEdit = canEdit;
+        window.__reloadAlerts = loadList; // let the auth controller refresh after login
+
+        let alertsPollStarted = false;
+        // started by the auth controller once the user is signed in
+        window.__initAlerts = async function () {
+          document.body.classList.toggle("role-viewer", !canEdit());
+          try {
+            await loadConfig(); // builds the index dropdown, loads offsets
+          } catch (_) {}
+          resetForm();
+          loadSymbols();
+          loadList();
+          updatePreview();
+          drawIcons();
+          pollRinging();
+          pollNotifications();
+          if (!alertsPollStarted) {
+            alertsPollStarted = true;
+            setInterval(() => {
+              if (!window.APP_AUTH || !window.APP_AUTH.user) return; // paused until signed in
+              pollRinging();
+              pollNotifications();
+              if (!$("#alertsView").hidden) loadList();
+            }, 3000);
+          }
+        };
+      })();
+    </script>
+
+    <!-- ---------------- Auth controller (login gate + user admin) ---------------- -->
+    <script>
+      (function () {
+        "use strict";
+        const $ = (s) => document.querySelector(s);
+        const APP_AUTH = (window.APP_AUTH = { user: null });
+        let appStarted = false;
+        const draw = () => {
+          try {
+            if (window.lucide) window.lucide.createIcons();
+          } catch (_) {}
+        };
+        async function aapi(path, method = "GET", body) {
+          const headers = { "X-Requested-With": "XMLHttpRequest" };
+          if (body) headers["Content-Type"] = "application/json";
+          const res = await fetch(path, {
+            method,
+            headers,
+            body: body ? JSON.stringify(body) : undefined,
+          });
+          const txt = await res.text();
+          let j = {};
+          try {
+            j = txt ? JSON.parse(txt) : {};
+          } catch (_) {}
+          if (!res.ok || j.error) throw new Error(j.error || "HTTP " + res.status);
+          return j;
+        }
+
+        const overlay = $("#authOverlay");
+        const showOverlay = () => overlay.classList.remove("hidden");
+        const hideOverlay = () => overlay.classList.add("hidden");
+        function showSetup() {
+          $("#setupPanel").hidden = false;
+          $("#loginPanel").hidden = true;
+          showOverlay();
+          setTimeout(() => $("#su-user").focus(), 60);
+        }
+        let picked = null;
+        function showLogin(users) {
+          $("#setupPanel").hidden = true;
+          $("#loginPanel").hidden = false;
+          $("#pwForm").hidden = true;
+          $("#userPicker").hidden = false;
+          $("#loginEmpty").hidden = users.length > 0;
+          const host = $("#userPicker");
+          host.innerHTML = "";
+          users.forEach((u) => {
+            const b = document.createElement("button");
+            b.type = "button";
+            b.className = "up-item";
+            b.innerHTML =
+              `<span class="up-avatar">${(u.username[0] || "?").toUpperCase()}</span>` +
+              `<span>${u.username}</span><span class="up-role">${u.role}</span>`;
+            b.onclick = () => pickUser(u);
+            host.appendChild(b);
+          });
+          showOverlay();
+        }
+        function pickUser(u) {
+          picked = u;
+          $("#userPicker").hidden = true;
+          $("#pwForm").hidden = false;
+          $("#pickedUser").textContent = "Signing in as " + u.username;
+          $("#li-err").textContent = "";
+          $("#li-pw").value = "";
+          setTimeout(() => $("#li-pw").focus(), 50);
+        }
+        $("#li-back").onclick = () => {
+          picked = null;
+          $("#userPicker").hidden = false;
+          $("#pwForm").hidden = true;
+        };
+
+        function chrome(user) {
+          $("#userNav").hidden = false;
+          $("#whoami").textContent = user.username + " · " + user.role;
+          $("#usersBtn").hidden = user.role !== "admin";
+        }
+        function onAuthed(user) {
+          APP_AUTH.user = user;
+          hideOverlay();
+          chrome(user);
+          document.body.classList.toggle(
+            "role-viewer",
+            !(user.role === "admin" || user.role === "editor"),
+          );
+          draw();
+          if (!appStarted) {
+            appStarted = true;
+            try {
+              window.__initDash && window.__initDash();
+            } catch (_) {}
+            try {
+              window.__initAlerts && window.__initAlerts();
+            } catch (_) {}
+          } else {
+            window.__reloadAlerts && window.__reloadAlerts();
+          }
+        }
+
+        $("#setupPanel").addEventListener("submit", async (e) => {
+          e.preventDefault();
+          const u = $("#su-user").value.trim(),
+            p = $("#su-pw").value,
+            p2 = $("#su-pw2").value;
+          $("#su-err").textContent = "";
+          if (p !== p2) {
+            $("#su-err").textContent = "passwords do not match";
+            return;
+          }
+          try {
+            const r = await aapi("/api/auth/setup", "POST", { username: u, password: p });
+            onAuthed(r.user);
+          } catch (err) {
+            $("#su-err").textContent = err.message;
+          }
+        });
+        $("#pwForm").addEventListener("submit", async (e) => {
+          e.preventDefault();
+          if (!picked) return;
+          $("#li-err").textContent = "";
+          try {
+            const r = await aapi("/api/auth/login", "POST", {
+              username: picked.username,
+              password: $("#li-pw").value,
+            });
+            onAuthed(r.user);
+          } catch (err) {
+            $("#li-err").textContent = err.message;
+          }
+        });
+        $("#logoutBtn").onclick = async () => {
+          try {
+            await aapi("/api/auth/logout", "POST");
+          } catch (_) {}
+          APP_AUTH.user = null;
+          location.reload(); // simplest clean reset of all app state
+        };
+        // any protected call returning 401 (session expired) -> back to login
+        window.__onAuthExpired = () => {
+          if (APP_AUTH.user) {
+            APP_AUTH.user = null;
+            location.reload();
+          }
+        };
+
+        // ----- admin: users management modal -----
+        const um = $("#usersModal");
+        let umEditId = null;
+        const openUsers = () => {
+          um.classList.add("show");
+          umResetForm();
+          loadUsers();
+          draw();
+        };
+        const closeUsers = () => um.classList.remove("show");
+        $("#usersBtn").onclick = openUsers;
+        $("#um-close").onclick = closeUsers;
+        $("#um-backdrop").onclick = closeUsers;
+        $("#um-cancel").onclick = () => umResetForm();
+        function umResetForm() {
+          umEditId = null;
+          $("#um-form-title").textContent = "Add user";
+          $("#um-save").textContent = "Add user";
+          $("#um-cancel").hidden = true;
+          $("#um-user").value = "";
+          $("#um-pw").value = "";
+          $("#um-pw").placeholder = "Password (min 6)";
+          $("#um-role").value = "viewer";
+          $("#um-err").textContent = "";
+        }
+        async function loadUsers() {
+          const host = $("#um-list");
+          let data;
+          try {
+            data = await aapi("/api/users");
+          } catch (e) {
+            host.innerHTML = `<div class="auth-err" style="padding:12px">${e.message}</div>`;
+            return;
+          }
+          host.innerHTML = "";
+          data.users.forEach((u) => {
+            const row = document.createElement("div");
+            row.className = "um-row";
+            row.innerHTML =
+              `<span class="um-name">${u.username}</span>` +
+              `<span class="um-role ${u.role}">${u.role}</span>` +
+              (u.disabled ? `<span class="um-disabled">disabled</span>` : "") +
+              `<span class="um-spacer"></span>`;
+            const mk = (label, cls, fn) => {
+              const b = document.createElement("button");
+              b.type = "button";
+              b.className = cls;
+              b.textContent = label;
+              b.onclick = fn;
+              return b;
+            };
+            row.appendChild(mk("Edit", "btn-sm", () => umEdit(u)));
+            row.appendChild(
+              mk(u.disabled ? "Enable" : "Disable", "btn-sm", async () => {
+                try {
+                  await aapi("/api/users/" + u.id, "PATCH", { disabled: !u.disabled });
+                  loadUsers();
+                } catch (e) {
+                  $("#um-err").textContent = e.message;
+                }
+              }),
+            );
+            row.appendChild(
+              mk("Delete", "btn-sm danger", async () => {
+                if (!confirm("Delete user " + u.username + "?")) return;
+                try {
+                  await aapi("/api/users/" + u.id, "DELETE");
+                  loadUsers();
+                } catch (e) {
+                  $("#um-err").textContent = e.message;
+                }
+              }),
+            );
+            host.appendChild(row);
+          });
+          draw();
+        }
+        function umEdit(u) {
+          umEditId = u.id;
+          $("#um-form-title").textContent = "Edit " + u.username;
+          $("#um-save").textContent = "Save changes";
+          $("#um-cancel").hidden = false;
+          $("#um-user").value = u.username;
+          $("#um-pw").value = "";
+          $("#um-pw").placeholder = "New password (blank = keep)";
+          $("#um-role").value = u.role;
+          $("#um-err").textContent = "";
+        }
+        $("#um-form").addEventListener("submit", async (e) => {
+          e.preventDefault();
+          $("#um-err").textContent = "";
+          const username = $("#um-user").value.trim(),
+            pw = $("#um-pw").value,
+            role = $("#um-role").value;
+          try {
+            if (umEditId) {
+              const patch = { username, role };
+              if (pw) patch.password = pw;
+              await aapi("/api/users/" + umEditId, "PATCH", patch);
+            } else {
+              await aapi("/api/users", "POST", { username, password: pw, role });
+            }
+            umResetForm();
+            loadUsers();
+          } catch (err) {
+            $("#um-err").textContent = err.message;
+          }
+        });
+
+        // ----- boot -----
+        (async () => {
+          try {
+            const st = await aapi("/api/auth/status");
+            if (st.user) {
+              onAuthed(st.user);
+              return;
+            }
+            if (st.needsSetup) {
+              showSetup();
+              return;
+            }
+            const up = await aapi("/api/auth/users-public");
+            showLogin(up.users || []);
+          } catch (e) {
+            $("#setupPanel").hidden = true;
+            $("#loginPanel").hidden = false;
+            $("#loginEmpty").hidden = false;
+            $("#loginEmpty").textContent = "Cannot reach server: " + e.message;
+            showOverlay();
+          }
+          draw();
+        })();
+      })();
     </script>
   </body>
 </html>

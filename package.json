@@ -1,0 +1,13 @@
+{
+  "name": "trading-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "NIFTY OHL dashboard + server-side price alerts (local data proxy)",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "mongodb": "^6.9.0"
+  }
+}
