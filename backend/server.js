@@ -440,7 +440,7 @@ async function handleUsersApi(req, res, url, method, actor) {
 }
 
 // Alert + symbol API. Returns true if it handled the request.
-async function handleAlertsApi(req, res, url, method) {
+async function handleAlertsApi(req, res, url, method, user) {
   if (url === "/api/symbols" && method === "GET") {
     sendJson(res, 200, alerts.symbols());
     return true;
@@ -484,6 +484,7 @@ async function handleAlertsApi(req, res, url, method) {
   }
   if (url === "/api/alerts" && method === "POST") {
     const body = await readJson(req);
+    body.zoneCreator = (user && user.username) || ""; // authoritative: the signed-in user
     const cp = latestPrices[String(body.symbol || "").toUpperCase()];
     const r = alerts.create(body, cp);
     if (r.error) sendJson(res, 400, { error: r.error });
@@ -510,6 +511,7 @@ async function handleAlertsApi(req, res, url, method) {
     if (action === "unverify" && method === "POST") return finishAlert(res, alerts.setVerified(id, false)), true;
     if (!action && method === "PATCH") {
       const body = await readJson(req);
+      delete body.zoneCreator; // creator is fixed at create time; edits never reassign it
       const cp = latestPrices[String(body.symbol || "").toUpperCase()];
       return finishAlert(res, alerts.update(id, body, cp)), true;
     }
@@ -596,7 +598,7 @@ const server = http.createServer(async (req, res) => {
         url === "/api/price" ||
         url.startsWith("/api/alerts")
       ) {
-        if (await handleAlertsApi(req, res, url, method)) return;
+        if (await handleAlertsApi(req, res, url, method, user)) return;
         sendJson(res, 404, { error: "not found" });
         return;
       }

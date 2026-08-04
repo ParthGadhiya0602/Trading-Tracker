@@ -582,6 +582,10 @@
           $("#al-date").value = "";
           $("#al-hour").value = "";
           $("#al-min").value = "";
+          // zone creator = the signed-in user (read-only; server sets it authoritatively)
+          $("#al-creator").value =
+            (window.APP_AUTH && window.APP_AUTH.user && window.APP_AUTH.user.username) ||
+            "";
           $("#al-err").textContent = "";
           fillDatalist();
           updatePreview();
@@ -619,7 +623,7 @@
             side: $("#al-side").value,
             alertPrice: parseFloat($("#al-price").value),
             stopLoss: parseFloat($("#al-stop").value),
-            zoneCreator: $("#al-creator").value.trim(),
+            // zoneCreator is set server-side from the session (create) / preserved (edit)
             note: $("#al-note").value.trim(),
             timeframe: $("#al-tf").value,
             candleDate: $("#al-date").value || "",

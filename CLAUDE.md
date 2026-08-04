@@ -70,7 +70,9 @@ each index's stock list is refreshed from the feed on every
 market tick (i.e. daily) via `updateSymbols()` → `GET /api/symbols`.
 
 **Required inputs**: index, stock (searchable), side (Buy/Sell), alert price, **stop loss**,
-**note**, **zone creator**, **time frame** (1s…12mo, drives the offset - see below).
+**note**, **time frame** (1s…12mo, drives the offset - see below). **Zone creator** is set
+automatically to the signed-in user (server-authoritative on create, read-only in the form,
+preserved on edit) — not a manual field.
 **Optional metadata** (stored/shown/sent, does not affect firing): candle date, candle
 time (HH:MM IST, 24h). The form's trigger preview stays blank until side + alert price +
 time frame are all chosen (Side/Time frame default to an empty "Select…").
