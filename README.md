@@ -188,7 +188,8 @@ APIs only — no fires, no Telegram, no writes); handy for local inspection.
 backend/   server.js  · alerts.js · auth.js · config.example.json
 frontend/  index.html · css/{base,components,dashboard,alerts,auth}.css
            js/{main,dashboard,alerts-ui,auth-ui}.js
-root       package.json · package-lock.json   +  (gitignored) config.json · alerts.json · users.json · logs/
+store/     (gitignored) alerts.json · users.json     ← alert + user data
+root       package.json · package-lock.json   +  (gitignored) config.json · logs/
 ```
 
 - `backend/server.js` - zero-dependency Node proxy: warms the session, serves `frontend/`

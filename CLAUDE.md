@@ -10,8 +10,8 @@ Split into **`backend/`** (Node server) and **`frontend/`** (the static app it s
 A pure-browser page can't reach the upstream feed (CORS forbids the needed headers; its
 anti-bot layer blocks any request without a warmed session), hence the local proxy.
 
-`config.json`, `alerts.json`, `users.json`, `logs/`, and `package.json`/lockfile live at
-the **repo root**; `backend/*.js` reaches config + runtime data via `..`.
+`config.json`, `logs/`, and `package.json`/lockfile live at the **repo root**; alert + user
+data (`alerts.json`, `users.json`) live in **`store/`**; `backend/*.js` reaches them via `..`.
 
 - **`backend/server.js`** - Node 18+, **zero dependencies** (built-in `fetch` + hand-rolled
   cookie jar). Warms an upstream session (cookies + browser headers, rewarm-on-403, 10 min

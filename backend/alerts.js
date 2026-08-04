@@ -18,8 +18,9 @@ const path = require("path");
 const crypto = require("crypto");
 
 const HERE = __dirname;
-const ROOT = path.join(HERE, ".."); // repo root (config + runtime data live here)
-const STORE_FILE = path.join(ROOT, "alerts.json");
+const ROOT = path.join(HERE, ".."); // repo root (config lives here)
+const STORE_DIR = path.join(ROOT, "store"); // alert + user data files live here
+const STORE_FILE = path.join(STORE_DIR, "alerts.json");
 const CONFIG_FILE = path.join(ROOT, "config.json");
 const LOG_DIR = path.join(ROOT, "logs");
 const LOG_FILE = path.join(LOG_DIR, "alerts-errors.log");
@@ -291,6 +292,7 @@ function backendName() {
 function save() {
   // always keep a local file copy (offline cache + fallback on next start)
   try {
+    fs.mkdirSync(STORE_DIR, { recursive: true });
     fs.writeFileSync(STORE_FILE, JSON.stringify(store, null, 2));
   } catch (e) {
     logError("file.write", `alerts.json - ${e.message}`);
