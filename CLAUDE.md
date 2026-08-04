@@ -153,7 +153,23 @@ symbol (`window.openCreateAlert(index, symbol)` bridges the dashboard → alerts
 - In-memory cache with stale indicator; light/dark; full-height layout on ≥820px
   (only the table scrolls).
 
-## Agents (`.claude/agents/`)
+## Agents (`.claude/agents/`) & workflow
 
-- **nifty-rnd** - R&D: verify data-source endpoints/fields, market-hours logic, edge cases.
-- **nifty-coder** - implementation (Sonnet 5): builds/edits `server.js` + `index.html`.
+Single-responsibility roster. **Opus** (reason/R&D/design/review, high effort) ·
+**Sonnet** (code generation, high effort):
+
+- **nifty-explorer** (Opus) - map the actual code relevant to a request, `file:line` cited.
+- **nifty-researcher** (Opus) - verify external/behavioural facts (only what code can't answer).
+- **nifty-architect** (Opus) - spec + task breakdown (backend/frontend/needsUI/risks/
+  verification/openQuestions). No code.
+- **nifty-ui-designer** (Opus) - UI/UX design spec grounded in the CSS design system.
+- **nifty-reviewer** (Opus) - adversarial verification of finished work vs spec.
+- **nifty-backend** (Sonnet) - implement `server.js`/`alerts.js`/`auth.js` (backend/*) to spec.
+- **nifty-frontend** (Sonnet) - implement `index.html` / `frontend/js|css` to design+spec.
+
+**Workflow** `.claude/workflows/feature.js` (invoke with `args:{request:"..."}`): a
+deterministic, module-aware pipeline — Explore → Plan (openQuestions gate) → Design? →
+Backend → Frontend → Review → bounded fix loop → report. Anti-hallucination: everything
+anchored to the explorer's real `file:line` map, structured schema per phase,
+read-before-edit, honest verification (no fabricated results), reviewer re-verifies claims,
+never destructive git, endpoints only from `config.json` `feed`.
