@@ -2,8 +2,7 @@
 config.json
 
 # Runtime / generated data
-alerts.json
-users.json
+store/*
 license.key
 logs/
 

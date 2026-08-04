@@ -87,7 +87,11 @@
 
     <div id="dashView">
       <!-- index KPI cards double as the index selector (click to switch) -->
-      <section class="kpis" id="idxCards" aria-label="Indices"></section>
+      <section class="kpis" id="idxCards" aria-label="Indices">
+        <div class="idxcard skel-card"><div class="skel l1"></div><div class="skel l2"></div><div class="skel l3"></div></div>
+        <div class="idxcard skel-card"><div class="skel l1"></div><div class="skel l2"></div><div class="skel l3"></div></div>
+        <div class="idxcard skel-card"><div class="skel l1"></div><div class="skel l2"></div><div class="skel l3"></div></div>
+      </section>
 
       <!-- toolbar: status filters on the left, data controls on the right -->
       <div class="toolbar">
@@ -269,7 +273,7 @@
               class="am-close"
               aria-label="Close"
             >
-              ✕
+              <i data-lucide="x" aria-hidden="true"></i>
             </button>
           </div>
           <form class="alert-form" id="alertForm" autocomplete="off">
@@ -431,7 +435,7 @@
                 aria-label="Close"
                 title="Close"
               >
-                ✕
+                <i data-lucide="x" aria-hidden="true"></i>
               </button>
             </div>
           </div>
@@ -477,7 +481,7 @@
           <span class="np-count" id="np-count"></span>
           <span class="np-spacer"></span>
           <button id="np-readall" type="button">Mark all read</button>
-          <button id="np-close" type="button" aria-label="Close">✕</button>
+          <button id="np-close" type="button" aria-label="Close"><i data-lucide="x" aria-hidden="true"></i></button>
         </div>
         <div class="np-list" id="np-list"></div>
       </div>
@@ -536,7 +540,7 @@
           <i data-lucide="users" aria-hidden="true"></i>
           <h2>Users</h2>
           <span class="um-spacer"></span>
-          <button id="um-close" type="button" aria-label="Close">✕</button>
+          <button id="um-close" type="button" aria-label="Close"><i data-lucide="x" aria-hidden="true"></i></button>
         </div>
         <div class="um-list" id="um-list"></div>
         <form class="um-form" id="um-form">
@@ -580,7 +584,7 @@
             >
               <i data-lucide="bell-plus" aria-hidden="true"></i>
             </button>
-            <button class="sm-close" id="sm-close" aria-label="Close" title="Close">✕</button>
+            <button class="sm-close" id="sm-close" aria-label="Close" title="Close"><i data-lucide="x" aria-hidden="true"></i></button>
           </div>
         </div>
         <div class="sm-price">

@@ -14,14 +14,31 @@
         --accent: #5b9dff;
         --accent-2: #8b7bf0;
         --chip: rgba(255, 255, 255, 0.06);
-        --radius-sm: 8px;
-        --radius-md: 12px;
+        --radius-sm: 9px;
+        --radius-md: 13px;
         --radius-lg: 18px;
-        --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.25);
-        --shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
         --rowup: rgba(45, 212, 167, 0.1);
         --rowdown: rgba(251, 106, 117, 0.11);
         --select-chevron: #8b96ad;
+        /* ---- redesign tokens (additive) ---- */
+        --s1: 4px;
+        --s2: 8px;
+        --s3: 12px;
+        --s4: 16px;
+        --s5: 20px;
+        --s6: 24px;
+        --s8: 32px;
+        --radius-xs: 6px;
+        --radius-pill: 999px;
+        --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+        --warn: #f0a020;
+        --warn-tint: rgba(240, 160, 32, 0.14);
+        --accent-tint: rgba(91, 157, 255, 0.12);
+        --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 6px rgba(0, 0, 0, 0.28);
+        --shadow: 0 8px 24px -6px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
+        --shadow-lg: 0 20px 48px -12px rgba(0, 0, 0, 0.6);
+        --skel1: var(--panel2);
+        --skel2: #232d45;
       }
       @media (prefers-color-scheme: light) {
         :root {
@@ -40,11 +57,17 @@
           --accent: #2f6fed;
           --accent-2: #7c5cf0;
           --chip: rgba(20, 30, 60, 0.05);
-          --shadow-sm: 0 2px 8px rgba(20, 30, 60, 0.06);
-          --shadow: 0 12px 28px rgba(20, 30, 60, 0.1);
           --rowup: rgba(13, 155, 108, 0.09);
           --rowdown: rgba(224, 52, 79, 0.08);
           --select-chevron: #66708a;
+          /* ---- redesign tokens (additive, light overrides) ---- */
+          --warn: #c9820f;
+          --warn-tint: rgba(201, 130, 15, 0.14);
+          --accent-tint: rgba(47, 111, 237, 0.1);
+          --shadow-sm: 0 1px 2px rgba(20, 30, 60, 0.06), 0 2px 6px rgba(20, 30, 60, 0.06);
+          --shadow: 0 10px 26px -8px rgba(20, 30, 60, 0.16), 0 2px 6px rgba(20, 30, 60, 0.06);
+          --shadow-lg: 0 22px 48px -14px rgba(20, 30, 60, 0.22);
+          --skel2: #dde3ef;
         }
       }
       * {
@@ -264,7 +287,7 @@
       .field select {
         appearance: none;
         -webkit-appearance: none;
-        background-color: var(--panel);
+        background-color: var(--panel2);
         background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238b96ad' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
         background-repeat: no-repeat;
         background-position: right 9px center;
@@ -274,15 +297,20 @@
         font: inherit;
         font-weight: 650;
         font-size: 13px;
-        padding: 6px 27px 6px 9px;
+        height: 38px;
+        padding: 0 27px 0 9px;
         cursor: pointer;
-        transition: border-color 0.15s ease;
+        transition:
+          border-color 0.15s var(--ease),
+          box-shadow 0.15s var(--ease);
       }
       .field select:hover {
         border-color: var(--line-strong);
       }
       .field select:focus-visible {
+        outline: none;
         border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-tint);
       }
       @media (prefers-color-scheme: light) {
         .field select {
@@ -297,6 +325,7 @@
         margin-bottom: 1px;
       }
       button {
+        --bh: 38px;
         cursor: pointer;
         font: inherit;
         font-weight: 600;
@@ -304,19 +333,21 @@
         border: 1px solid var(--line);
         background: var(--panel);
         color: var(--txt);
-        padding: 8px 14px;
+        padding: 0 14px;
+        height: var(--bh);
         box-shadow: var(--shadow-sm);
         display: inline-flex;
         align-items: center;
-        justify-content: flex-end; /* align button content (icon + text) to the right */
+        justify-content: center; /* height-driven, centered content */
         gap: 7px;
-        text-align: right;
+        text-align: center;
         transition:
-          background-color 0.15s ease,
-          border-color 0.15s ease,
-          color 0.15s ease,
-          transform 0.15s ease,
-          filter 0.15s ease;
+          background-color 0.15s var(--ease),
+          border-color 0.15s var(--ease),
+          color 0.15s var(--ease),
+          transform 0.12s var(--ease),
+          box-shadow 0.15s var(--ease),
+          filter 0.15s var(--ease);
       }
       button:hover:not(:disabled):not(.tab) {
         border-color: var(--line-strong);
@@ -328,6 +359,8 @@
         color: #fff;
         border-color: transparent;
         margin-top: auto;
+        box-shadow: 0 4px 14px -3px
+          color-mix(in srgb, var(--accent) 55%, transparent);
       }
       button.primary:hover:not(:disabled) {
         filter: brightness(1.08);
@@ -341,6 +374,31 @@
       button:disabled {
         opacity: 0.5;
         cursor: not-allowed;
+        transform: none;
+      }
+      /* danger buttons get a hover fill, not just red text */
+      button.danger,
+      .btn-sm.danger {
+        color: var(--down);
+        border-color: color-mix(in srgb, var(--down) 30%, var(--line));
+      }
+      button.danger:hover:not(:disabled),
+      .btn-sm.danger:hover:not(:disabled) {
+        background: var(--rowdown);
+        border-color: var(--down);
+      }
+      /* icon-only square buttons - unify size/shape across the app */
+      .notif-btn,
+      .logout-btn,
+      .sm-close,
+      .am-close,
+      #np-close,
+      #um-close {
+        --bh: 34px;
+        width: 34px;
+        height: 34px;
+        padding: 0 !important;
+        border-radius: var(--radius-pill) !important;
       }
       #refreshIcon {
         display: inline-block;
@@ -408,6 +466,7 @@
       #idxTabs .tab.active {
         background: linear-gradient(135deg, var(--accent), var(--accent-2));
         color: #fff;
+        box-shadow: 0 3px 10px -2px color-mix(in srgb, var(--accent) 50%, transparent) !important;
       }
       #idxTabs .tab {
         font-size: 13px;
@@ -461,7 +520,7 @@
         gap: 9px;
       }
       .idxcard-pts {
-        font-size: 19px;
+        font-size: 21px;
         font-weight: 760;
         letter-spacing: 0.2px;
       }
@@ -550,6 +609,37 @@
         opacity: 0.5;
       }
       /* the table itself scrolls, both directions; header + first column stay put */
+      .tablewrap,
+      .ms-menu,
+      .np-list,
+      .sm-card,
+      .um-card {
+        scrollbar-width: thin;
+        scrollbar-color: var(--line-strong) transparent;
+      }
+      .tablewrap::-webkit-scrollbar,
+      .ms-menu::-webkit-scrollbar,
+      .np-list::-webkit-scrollbar,
+      .sm-card::-webkit-scrollbar,
+      .um-card::-webkit-scrollbar {
+        width: 9px;
+        height: 9px;
+      }
+      .tablewrap::-webkit-scrollbar-thumb,
+      .ms-menu::-webkit-scrollbar-thumb,
+      .np-list::-webkit-scrollbar-thumb,
+      .sm-card::-webkit-scrollbar-thumb,
+      .um-card::-webkit-scrollbar-thumb {
+        background: var(--line-strong);
+        border-radius: var(--radius-pill);
+      }
+      .tablewrap::-webkit-scrollbar-track,
+      .ms-menu::-webkit-scrollbar-track,
+      .np-list::-webkit-scrollbar-track,
+      .sm-card::-webkit-scrollbar-track,
+      .um-card::-webkit-scrollbar-track {
+        background: transparent;
+      }
       .tablewrap {
         max-height: 72vh;
         overflow: auto;
@@ -627,6 +717,9 @@
         opacity: 1;
         color: var(--accent);
       }
+      tbody tr:nth-child(even):not(.up-row):not(.down-row) td {
+        background: color-mix(in srgb, var(--panel2) 45%, transparent);
+      }
       tbody tr.up-row td {
         background: var(--rowup);
       }
@@ -702,6 +795,34 @@
       .copytip.show {
         opacity: 1;
         transform: translateY(0);
+      }
+      /* table error/empty state - CSS shipped for JS to wire up (no existing
+         render hook to inject this markup without touching dashboard.js) */
+      .state-block {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        padding: 38px 16px;
+        color: var(--muted);
+        text-align: center;
+      }
+      .state-block svg,
+      .state-block [data-lucide] {
+        width: 26px;
+        height: 26px;
+      }
+      .state-block.err svg,
+      .state-block.err [data-lucide] {
+        color: var(--down);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation: none !important;
+          transition: none !important;
+        }
       }
 
       

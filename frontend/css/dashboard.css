@@ -47,32 +47,82 @@
         margin: 4px 0 16px;
       }
       .kpis .idxcard {
+        position: relative;
         min-width: 0;
         cursor: pointer;
+        overflow: hidden;
         transition:
-          border-color 0.15s ease,
-          box-shadow 0.15s ease,
-          transform 0.15s ease,
-          background-color 0.15s ease;
+          border-color 0.15s var(--ease),
+          box-shadow 0.15s var(--ease),
+          transform 0.15s var(--ease),
+          background-color 0.15s var(--ease);
       }
       .kpis .idxcard:hover {
         border-color: var(--line-strong);
-        transform: translateY(-1px);
+        transform: translateY(-2px);
         box-shadow: var(--shadow);
       }
       .kpis .idxcard.active {
         border-color: transparent;
         box-shadow:
           0 0 0 1.5px var(--accent),
-          var(--shadow-sm);
+          var(--shadow);
         background: linear-gradient(
           180deg,
           color-mix(in srgb, var(--accent) 9%, var(--panel)),
           var(--panel)
         );
       }
+      .kpis .idxcard.active::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 3px;
+        background: linear-gradient(180deg, var(--accent), var(--accent-2));
+      }
       .kpis .idxcard.active .idxcard-name {
         color: var(--accent);
+      }
+      /* ---- skeleton shimmer helper for loading shells ---- */
+      .skel {
+        background: linear-gradient(
+          100deg,
+          var(--skel1) 30%,
+          var(--skel2) 50%,
+          var(--skel1) 70%
+        );
+        background-size: 200% 100%;
+        animation: shimmer 1.3s var(--ease) infinite;
+        border-radius: var(--radius-xs);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .skel {
+          animation: none;
+        }
+      }
+      @keyframes shimmer {
+        to {
+          background-position: -200% 0;
+        }
+      }
+      .idxcard.skel-card {
+        cursor: default;
+      }
+      .idxcard.skel-card .skel.l1 {
+        height: 11px;
+        width: 52%;
+      }
+      .idxcard.skel-card .skel.l2 {
+        height: 20px;
+        width: 70%;
+        margin-top: 8px;
+      }
+      .idxcard.skel-card .skel.l3 {
+        height: 10px;
+        width: 88%;
+        margin-top: 10px;
       }
 
       /* ---- toolbar ---- */
@@ -107,24 +157,29 @@
         pointer-events: none;
       }
       .search input {
-        background: var(--panel);
+        background: var(--panel2);
         border: 1px solid var(--line);
         border-radius: var(--radius-sm);
         color: var(--txt);
         font: inherit;
         font-weight: 600;
         font-size: 13px;
-        padding: 7px 10px 7px 30px;
+        height: 38px;
+        padding: 0 10px 0 30px;
         width: 210px;
-        transition: border-color 0.15s ease;
+        transition:
+          border-color 0.15s var(--ease),
+          box-shadow 0.15s var(--ease);
       }
       .search input::placeholder {
         color: var(--muted);
         font-weight: 500;
       }
-      .search input:focus {
+      .search input:focus,
+      .search input:focus-visible {
         outline: none;
         border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-tint);
       }
       @media (max-width: 560px) {
         .search input {

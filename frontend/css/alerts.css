@@ -69,6 +69,7 @@
       .card-head .view-toggle .vt.active {
         background: linear-gradient(135deg, var(--accent), var(--accent-2));
         color: #fff;
+        box-shadow: 0 3px 10px -2px color-mix(in srgb, var(--accent) 50%, transparent) !important;
       }
       .vt-count {
         font-size: 10.5px;
@@ -146,7 +147,8 @@
         font: inherit;
         font-weight: 600;
         font-size: 12.5px;
-        padding: 6px 10px;
+        height: 38px;
+        padding: 0 10px;
         display: inline-flex;
         align-items: center;
         gap: 6px;
@@ -154,10 +156,18 @@
         text-align: left;
         min-width: 118px;
         box-shadow: none;
+        transition:
+          border-color 0.15s var(--ease),
+          box-shadow 0.15s var(--ease);
       }
       .ms-btn.active {
         border-color: var(--accent);
         color: var(--accent);
+      }
+      .ms-btn:focus-visible {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-tint);
       }
       .ms-btn svg.lucide {
         width: 13px;
@@ -211,12 +221,15 @@
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        background: var(--chip);
-        border: 1px solid var(--line);
+        background: var(--accent-tint);
+        border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
         border-radius: 999px;
         padding: 3px 6px 3px 10px;
         font-size: 11.5px;
         font-weight: 600;
+      }
+      .fchip .k {
+        color: var(--muted);
       }
       .fchip-x {
         background: none;
@@ -252,7 +265,7 @@
         align-items: flex-start;
         justify-content: center;
         padding: 24px 16px;
-        background: rgba(0, 0, 0, 0.55);
+        background: color-mix(in srgb, #05070c 55%, transparent);
         -webkit-backdrop-filter: blur(3px);
         backdrop-filter: blur(3px);
         overflow-y: auto;
@@ -264,7 +277,7 @@
         background: var(--panel-raised);
         border: 1px solid var(--line-strong);
         border-radius: var(--radius-lg);
-        box-shadow: var(--shadow);
+        box-shadow: var(--shadow-lg);
         width: min(580px, 96vw);
         margin: 0 auto auto;
       }
@@ -290,7 +303,10 @@
       }
       .am-close {
         margin-left: auto;
-        padding: 4px 10px !important;
+        width: 34px;
+        height: 34px;
+        padding: 0 !important;
+        border-radius: var(--radius-pill) !important;
         font-size: 15px;
         line-height: 1;
         box-shadow: none !important;
@@ -308,7 +324,7 @@
         align-items: center;
         justify-content: center;
         padding: 24px 16px;
-        background: rgba(0, 0, 0, 0.55);
+        background: color-mix(in srgb, #05070c 55%, transparent);
         -webkit-backdrop-filter: blur(3px);
         backdrop-filter: blur(3px);
         overflow-y: auto;
@@ -335,20 +351,44 @@
         font-weight: 700;
         letter-spacing: 0.3px;
         padding: 2px 8px;
-        border-radius: 999px;
+        border-radius: var(--radius-pill);
+        background: var(--chip);
+        color: var(--muted);
       }
       .av-badges .ai-status {
         text-transform: uppercase;
       }
       .av-badges .ai-index {
-        color: var(--muted);
-        background: var(--chip);
         border: 1px solid var(--line);
       }
-      .av-badges .ai-status,
-      .av-badges .ai-zone {
-        background: var(--chip);
-        color: var(--muted);
+      /* let state tints win over the neutral chip default above */
+      .av-badges .ai-status.armed {
+        color: var(--accent);
+        background: var(--accent-tint);
+      }
+      .av-badges .ai-status.triggered {
+        color: var(--up);
+        background: var(--rowup);
+      }
+      .av-badges .ai-zone.fail {
+        color: var(--down);
+        background: var(--rowdown);
+      }
+      .av-badges .ai-zone.partial {
+        color: var(--warn);
+        background: var(--warn-tint);
+      }
+      .av-badges .ai-zone.success {
+        color: var(--up);
+        background: var(--rowup);
+      }
+      .av-badges .ai-verify.yes {
+        color: var(--up);
+        background: var(--rowup);
+      }
+      .av-badges .ai-verify.no {
+        color: var(--warn);
+        background: var(--warn-tint);
       }
       .sm-grid .cell.wide {
         grid-column: 1 / -1;
