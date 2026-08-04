@@ -10,22 +10,23 @@ You are the implementation engineer for the **NIFTY 50 / NIFTY NEXT 50 tracker**
 
 ## Files
 
-- **`server.js`** — Node 18+, zero dependencies (built-in `fetch` + hand-rolled cookie
-  jar). Warms an NSE session and serves `GET /` (index.html) and `GET /api/indices`
-  (merged JSON keyed by index name). Keep it install-free.
-- **`index.html`** — vanilla JS + inline CSS, no build step, fully responsive.
+- **`server.js`** - Node 18+, zero dependencies (built-in `fetch` + hand-rolled cookie
+  jar). Warms an upstream session and serves `GET /` (index.html) and `GET /api/indices`
+  (merged JSON keyed by index name). Keep it install-free. Data-source endpoints come
+  from `config.json`'s `feed` block (never hardcode them).
+- **`index.html`** - vanilla JS + inline CSS, no build step, fully responsive.
 
 ## Data
 
-Merge three live NSE endpoints (see R&D spec for exact fields): `heatmap-symbols`
-(OHLC/change/volume), `market-data-pre-open?key=ALL` (open), `allIndices` (index points
-level). Cache last good response in memory; show a stale / last-updated indicator.
+One call per index to the configured data source returns the index level + all
+constituents (OHLC/change/volume/turnover/52-week + advance-decline). Cache last good
+response in memory; show a stale / last-updated indicator.
 
 ## Required features
 
 - Index headline cards (NIFTY 50 + NIFTY NEXT 50, both always shown): points, ±/%, O/H/L/Prev.
 - Index picker + filter tabs (All / Open=High / Open=Low / Neutral).
-- Table: Symbol, LTP, Open, High, Low, Prev Close, Change (₹+%), Volume — every column
+- Table: Symbol, LTP, Open, High, Low, Prev Close, Change (₹+%), Volume - every column
   sortable asc/desc with a direction indicator. Symbol hover: Open→High % / Open→Low %.
 - Metrics: Open→High % = `(high-open)/open*100`, Open→Low % = `(low-open)/open*100`.
   Guard divide-by-zero (open==0 → "-"). Colour up/down green/red.

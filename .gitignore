@@ -9,6 +9,9 @@ logs/
 
 # Data-source reference (kept local only, not published)
 NSE_API.md
+AUTH_DESIGN.md
+ALERT_LIFECYCLE_PLAN.md
+REORG_PLAN.md
 
 # OS / editor cruft
 .DS_Store
