@@ -436,8 +436,9 @@ function active() {
   return store.alerts.filter((a) => a.ringing);
 }
 
-function validate(input) {
+function validate(input, opts = {}) {
   const errors = [];
+  const requireZoneCreator = opts.requireZoneCreator !== false;
   const index = String(input.index || "");
   const symbol = String(input.symbol || "").toUpperCase();
   const side = String(input.side || "").toUpperCase();
@@ -465,7 +466,10 @@ function validate(input) {
   if (!TIMEFRAMES.includes(timeframe)) errors.push("timeframe is required");
   if (!(stopLoss > 0)) errors.push("stop loss must be a positive number");
   if (!note) errors.push("note is required");
-  if (!zoneCreator) errors.push("zone creator name is required");
+  // on create the caller must supply a creator (set server-side from the session);
+  // on edit a blank/legacy stored value shouldn't block an otherwise-valid update.
+  if (!zoneCreator && requireZoneCreator)
+    errors.push("zone creator name is required");
   if (
     candleDate &&
     (!/^\d{4}-\d{2}-\d{2}$/.test(candleDate) || isNaN(Date.parse(candleDate)))
@@ -570,8 +574,11 @@ function update(id, input, currentPrice) {
   const alert = store.alerts.find((a) => a.id === id);
   if (!alert) return { error: "not found" };
   const merged = { ...alert, ...input };
-  const { errors, clean } = validate(merged);
+  const { errors, clean } = validate(merged, { requireZoneCreator: false });
   if (errors.length) return { error: errors.join("; ") };
+  // backfill from the existing alert if the update input carried no creator (or the
+  // stored value is blank/legacy) - never let that block an otherwise-valid edit.
+  clean.zoneCreator = clean.zoneCreator || alert.zoneCreator || "";
   alert.index = clean.index;
   alert.symbol = clean.symbol;
   alert.side = clean.side;

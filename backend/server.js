@@ -277,19 +277,21 @@ async function fetchPreopen() {
     if (m && m.symbol) bySym.set(m.symbol, m);
   }
   const stamp = (j && j.timestamp) || null;
-  const advance = {
-    advances: num(j.advances) || 0,
-    declines: num(j.declines) || 0,
-    unchanged: num(j.unchanged) || 0,
-  };
   const out = {};
   for (const index of DASH_INDICES) {
     const syms = alerts.symbols()[index] || [];
     const data = [];
+    let advances = 0;
+    let declines = 0;
+    let unchanged = 0;
     for (const sym of syms) {
       const m = bySym.get(sym);
       if (!m) continue;
       const iep = num(m.iep);
+      const change = num(m.change);
+      if (change > 0) advances++;
+      else if (change < 0) declines++;
+      else unchanged++;
       data.push({
         symbol: sym,
         companyName: null,
@@ -298,7 +300,7 @@ async function fetchPreopen() {
         dayLow: iep,
         lastPrice: iep,
         prevClose: num(m.previousClose),
-        change: num(m.change),
+        change,
         pChange: num(m.pChange),
         totalTradedVolume: num(m.finalQuantity),
         totalTradedValue: num(m.totalTurnover),
@@ -316,7 +318,7 @@ async function fetchPreopen() {
       marketStatus: "Pre-open",
       marketDataLive: data.length > 0,
       level: null,
-      advance,
+      advance: { advances, declines, unchanged },
       data,
     };
   }
@@ -344,10 +346,6 @@ function marketState(d = new Date()) {
   if (mins >= 9 * 60 + 15 && mins <= 15 * 60 + 30) return "open";
   return "closed";
 }
-function isMarketOpen(d = new Date()) {
-  return marketState(d) === "open";
-}
-
 // ---------------- alert evaluation loop (server-side; fires with no tab open) ----------------
 const ALERT_POLL_MS =
   Math.max(2, Number(process.env.ALERT_POLL_SECONDS) || 5) * 1000;

@@ -237,12 +237,6 @@
         f.formatToParts(d).forEach((p) => (o[p.type] = p.value));
         return o;
       }
-      function isMarketOpen(d) {
-        const p = istParts(d);
-        if (p.weekday === "Sat" || p.weekday === "Sun") return false;
-        const mins = (parseInt(p.hour, 10) % 24) * 60 + parseInt(p.minute, 10);
-        return mins >= 9 * 60 + 15 && mins <= 15 * 60 + 30;
-      }
       // pre-open 09:00-09:15, open 09:15-15:30, else closed (IST, Mon-Fri)
       function marketState(d) {
         const p = istParts(d);
@@ -478,8 +472,23 @@
       function renderIndexCards() {
         const host = document.getElementById("idxCards");
         host.innerHTML = INDEX_NAMES.map((name) => {
-          const lv = cache && cache[name] && cache[name].level;
-          if (!lv || lv.last == null) return "";
+          const payload = cache && cache[name];
+          const lv = payload && payload.level;
+          const activeCls = name === activeIndex ? " active" : "";
+          if (!lv || lv.last == null) {
+            // Pre-open (or no data yet) - keep the card visible & clickable so it
+            // still works as the index selector; just show a minimal placeholder.
+            const tag =
+              payload && payload.marketStatus === "Pre-open"
+                ? "PRE-OPEN"
+                : "NO DATA";
+            return (
+              `<div class="idxcard idxcard-mini${activeCls}" data-index="${name}" role="button" tabindex="0" aria-label="Show ${name}">` +
+              `<span class="idxcard-name">${name}</span>` +
+              `<span class="idxcard-preopen">${tag}</span>` +
+              `</div>`
+            );
+          }
           const c = cls(lv.variation);
           const absPts =
             lv.variation == null || isNaN(lv.variation)
@@ -497,7 +506,6 @@
           ]
             .map(([k, v]) => `<span>${k}<b>${v}</b></span>`)
             .join("");
-          const activeCls = name === activeIndex ? " active" : "";
           return (
             `<div class="idxcard${activeCls}" data-index="${name}" role="button" tabindex="0" aria-label="Show ${name}">` +
             `<span class="idxcard-name">${name}</span>` +
