@@ -1197,6 +1197,7 @@
                 () => {
                   markRead(sig);
                   closeNotifPanel();
+                  activateView("alerts"); // modal lives in #alertsView - make it visible
                   openAlertView(a);
                 },
                 "eye",
@@ -1222,21 +1223,25 @@
         }
 
         // ---------- view switch ----------
+        // Activate a top-level view ("dash" | "alerts"). Exposed so other surfaces (e.g.
+        // the global notification center's "View") can switch to Alerts before opening a
+        // modal that lives inside #alertsView (hidden while on the dashboard).
+        function activateView(view) {
+          const alertsOn = view === "alerts";
+          $$(".viewnav .tab").forEach((x) => {
+            const on = x.dataset.view === view;
+            x.classList.toggle("active", on);
+            x.setAttribute("aria-selected", String(on));
+          });
+          $("#dashView").hidden = alertsOn;
+          $("#alertsView").hidden = !alertsOn;
+          if (alertsOn) {
+            loadSymbols();
+            loadList();
+          }
+        }
         $$(".viewnav .tab").forEach((b) => {
-          b.onclick = () => {
-            const alertsOn = b.dataset.view === "alerts";
-            $$(".viewnav .tab").forEach((x) => {
-              const on = x === b;
-              x.classList.toggle("active", on);
-              x.setAttribute("aria-selected", String(on));
-            });
-            $("#dashView").hidden = alertsOn;
-            $("#alertsView").hidden = !alertsOn;
-            if (alertsOn) {
-              loadSymbols();
-              loadList();
-            }
-          };
+          b.onclick = () => activateView(b.dataset.view);
         });
 
         // ---------- wire up ----------
