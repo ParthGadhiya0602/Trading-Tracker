@@ -274,7 +274,7 @@ async function fetchPreopen() {
   const bySym = new Map();
   for (const r of rows) {
     const m = r && r.metadata;
-    if (m && m.symbol) bySym.set(m.symbol, m);
+    if (m && m.symbol) bySym.set(m.symbol, { metadata: m, pom: (r.detail && r.detail.preOpenMarket) || null });
   }
   const stamp = (j && j.timestamp) || null;
   const out = {};
@@ -285,14 +285,15 @@ async function fetchPreopen() {
     let declines = 0;
     let unchanged = 0;
     for (const sym of syms) {
-      const m = bySym.get(sym);
-      if (!m) continue;
+      const entry = bySym.get(sym);
+      if (!entry) continue;
+      const m = entry.metadata;
       const iep = num(m.iep);
       const change = num(m.change);
       if (change > 0) advances++;
       else if (change < 0) declines++;
       else unchanged++;
-      data.push({
+      const row = {
         symbol: sym,
         companyName: null,
         open: iep,
@@ -310,7 +311,29 @@ async function fetchPreopen() {
         nearWKL: null,
         perChange30d: null,
         perChange365d: null,
-      });
+      };
+      const pom = entry.pom;
+      if (pom && Array.isArray(pom.preopen)) {
+        const ato = pom.ato || {};
+        row.preOpen = {
+          iep: num(pom.IEP) != null ? num(pom.IEP) : num(pom.finalPrice),
+          ladder: pom.preopen.map((lvl) => ({
+            price: num(lvl.price),
+            buyQty: num(lvl.buyQty),
+            sellQty: num(lvl.sellQty),
+            iep: !!lvl.iep,
+          })),
+          totalBuyQty: num(pom.totalBuyQuantity),
+          totalSellQty: num(pom.totalSellQuantity),
+          ato: {
+            buyQty: num(pom.atoBuyQty) != null ? num(pom.atoBuyQty) : num(ato.totalBuyQuantity),
+            sellQty: num(pom.atoSellQty) != null ? num(pom.atoSellQty) : num(ato.totalSellQuantity),
+          },
+          finalQty: num(pom.finalQuantity),
+          lastUpdateTime: pom.lastUpdateTime || null,
+        };
+      }
+      data.push(row);
     }
     out[index] = {
       source: "live",

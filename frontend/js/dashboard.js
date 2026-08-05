@@ -174,6 +174,101 @@
         return "₹" + Math.round(v).toLocaleString("en-IN");
       }
       const pctC = (v) => `<span class="${cls(v)}">${pct(v)}</span>`;
+
+      // ---------- pre-open order book (10-level depth ladder, stock detail modal) ----------
+      function escText(s) {
+        return String(s).replace(
+          /[&<>"']/g,
+          (c) =>
+            ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
+        );
+      }
+      // absent/0 quantity -> em-dash with a muted class (vol() would otherwise show "0")
+      function pobQty(v) {
+        return v == null || isNaN(v) || +v === 0
+          ? '<span class="v num pob-dash">—</span>'
+          : `<span class="v num">${vol(v)}</span>`;
+      }
+      function pobCellQty(v) {
+        return v == null || isNaN(v) || +v === 0
+          ? '<span class="pob-qty pob-dash">—</span>'
+          : `<span class="pob-qty">${vol(v)}</span>`;
+      }
+      // renders (or clears) the #sm-preopen section from a computed row's r.preOpen
+      function renderPreOpen(section, po) {
+        section.hidden = true;
+        section.innerHTML = "";
+        if (!po || typeof po !== "object") return;
+        const ladder = Array.isArray(po.ladder) ? po.ladder.slice() : [];
+        ladder.sort((a, b) => (+b.price || 0) - (+a.price || 0)); // high -> low
+        const totalBuy = +po.totalBuyQty || 0;
+        const totalSell = +po.totalSellQty || 0;
+        const sumBS = totalBuy + totalSell;
+        const buyPct = sumBS > 0 ? Math.round((totalBuy / sumBS) * 100) : 0;
+        const sellPct = sumBS > 0 ? 100 - buyPct : 0;
+        const maxQty = Math.max(
+          1,
+          ...ladder.flatMap((l) => [+l.buyQty || 0, +l.sellQty || 0]),
+        );
+        const ladderHasQty = ladder.some(
+          (l) => (+l.buyQty || 0) + (+l.sellQty || 0) > 0,
+        );
+        const timeHtml = po.lastUpdateTime
+          ? `<span class="pob-time num" id="pob-time">${escText(po.lastUpdateTime)}</span>`
+          : "";
+        const iepHtml =
+          po.iep == null || isNaN(po.iep) || +po.iep === 0
+            ? '<span class="v num pob-dash">—</span>'
+            : `<span class="v num">${rs(+po.iep)}</span>`;
+        const pressureHtml =
+          sumBS > 0
+            ? `<div class="pob-pressure" role="img" aria-label="Buy pressure ${buyPct} percent (${vol(totalBuy)}), sell pressure ${sellPct} percent (${vol(totalSell)})">
+                 <div class="pob-bar"><span class="pob-buy" style="width:${buyPct}%"></span><span class="pob-sell" style="width:${sellPct}%"></span></div>
+                 <div class="pob-legend"><span class="up">Buy ${vol(totalBuy)} · ${buyPct}%</span><span class="down">${sellPct}% · ${vol(totalSell)} Sell</span></div>
+               </div>`
+            : `<div class="pob-pressure" role="img" aria-label="No quantity yet">
+                 <div class="pob-bar flat"></div>
+                 <div class="pob-legend flat"><span>No quantity yet</span></div>
+               </div>`;
+        const ladderRows = ladder
+          .map((l) => {
+            const b = +l.buyQty || 0,
+              s = +l.sellQty || 0;
+            const bw = b > 0 ? (b / maxQty) * 100 : 0;
+            const sw = s > 0 ? (s / maxQty) * 100 : 0;
+            return `<tr class="pob-row${l.iep ? " is-iep" : ""}">
+              <td class="buy">${b > 0 ? `<span class="depth" style="width:${bw}%"></span>` : ""}${pobCellQty(b)}</td>
+              <td class="price">${rs(+l.price)}</td>
+              <td class="ask">${s > 0 ? `<span class="depth" style="width:${sw}%"></span>` : ""}${pobCellQty(s)}</td>
+            </tr>`;
+          })
+          .join("");
+        const ladderHtml =
+          ladder.length && ladderHasQty
+            ? `<table class="pob-ladder">
+                 <caption class="sr-only">Ten level bid and ask depth ladder</caption>
+                 <thead><tr><th scope="col" class="buy">Buy Qty</th><th scope="col" class="mid">Price</th><th scope="col" class="ask">Sell Qty</th></tr></thead>
+                 <tbody>${ladderRows}</tbody>
+               </table>`
+            : `<div class="pob-empty">Depth not yet available for this stock.</div>`;
+        section.innerHTML = `
+          <div class="pob-head">
+            <span class="pob-tag">PRE-OPEN</span>
+            <span class="pob-title">Order book · depth</span>
+            ${timeHtml}
+          </div>
+          <div class="pob-summary">
+            <div class="pob-stat"><span class="k">IEP</span>${iepHtml}</div>
+            <div class="pob-stat"><span class="k">Matched</span>${pobQty(po.finalQty)}</div>
+            <div class="pob-stat"><span class="k">ATO Buy</span>${pobQty(po.ato && po.ato.buyQty)}</div>
+            <div class="pob-stat"><span class="k">ATO Sell</span>${pobQty(po.ato && po.ato.sellQty)}</div>
+          </div>
+          ${pressureHtml}
+          ${ladderHtml}
+        `;
+        section.hidden = false;
+      }
+
       let modalSymbol = null; // symbol currently shown in the stock detail modal
       function openStockModal(r) {
         modalSymbol = r.symbol;
@@ -206,6 +301,7 @@
               `<div class="cell"><span class="k">${k}</span><span class="v">${v}</span></div>`,
           )
           .join("");
+        renderPreOpen(document.getElementById("sm-preopen"), r.preOpen);
         document.getElementById("stockModal").classList.add("show");
       }
       function closeStockModal() {
@@ -317,6 +413,7 @@
             olPct,
             rowClass,
             colorRank,
+            ...(r.preOpen ? { preOpen: r.preOpen } : {}),
           };
         });
       }
