@@ -927,9 +927,17 @@ function evaluate(payload) {
     if (!(ltp > 0)) continue; // no live price (market closed / not trading) -> skip
     if (alert.status === "closed") continue;
     const buy = alert.side === "BUY";
+    // During pre-open (09:00-09:15) the price is the INDICATIVE equilibrium (IEP) - a
+    // provisional, volatile number set by early order-book discovery, NOT a real trade.
+    const preopen =
+      (payload[alert.index] && payload[alert.index].marketStatus) === "Pre-open";
 
     // ENTERED: gate is open - run the target/stop-loss machine only here
     if (alert.status === "active") {
+      // Don't resolve SL / 3x / 5x against the pre-open IEP (a tight stop would trip on a
+      // transient indicative swing before the market truly opens). The zone outcome only
+      // settles in the continuous session (>=09:15). Entry/trigger below still run.
+      if (preopen) continue;
       const r = evaluateZone(alert, ltp);
       if (r.fired) mutated = true;
       if (r.terminal) {

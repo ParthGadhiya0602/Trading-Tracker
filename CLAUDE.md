@@ -107,6 +107,10 @@ bool = reached `active`). The engine (`evaluate`) runs one state machine per tic
   it) ⇒ **ENTRY** (🎯, silent, no prompt) and `status = active`. This is the **entry gate**.
 - **The zone machine (`evaluateZone`) runs ONLY when `active`** — so 3×/5×/stop-loss can
   never fire before the price actually reaches the entry.
+- **Never during pre-open**: while `marketStatus === "Pre-open"` the zone machine is
+  skipped in `evaluate()` — SL/3×/5× do **not** resolve against the indicative equilibrium
+  price (IEP), which is a provisional, volatile discovery number, not a real trade. Alerts
+  still arm/trigger/enter in pre-open; outcomes only settle in the continuous session (≥09:15).
 
 **Profit targets & zone outcome** (only evaluated once `active`). R = |alert − stop loss|;
 **3× target** = alert ±3R, **5× target** = alert ±5R (BUY +, SELL −); profits = 3R/5R
@@ -179,8 +183,10 @@ Per-index payload shape:
 serves `fetchPreopen()` — ONE `key=ALL` call to `feed.preopenEndpoint` filtered per index by the
 cached symbol list, with each stock's **IEP** as `open`=`high`=`low`=`lastPrice` and
 `marketStatus:"Pre-open"` (same payload shape). So `/api/indices` shows a **PRE-OPEN** dashboard
-state and the `alertTick` loop evaluates alerts against IEP before the 09:15 open (the symbol
-cache only refreshes from real `open`-session constituents). Full shape/mapping in `NSE_API.md`.
+state and the `alertTick` loop evaluates alerts against IEP before the 09:15 open — but only
+for arm/trigger/**entry**; the SL/target **zone machine is skipped in pre-open** (see the
+lifecycle note above) so a tight stop can't trip on the provisional IEP. The symbol
+cache only refreshes from real `open`-session constituents. Full shape/mapping in `NSE_API.md`.
 
 ## Features / UI
 
