@@ -68,8 +68,9 @@ const INDICES = [
   "NIFTY MIDCAP 50",
   "NIFTY MIDCAP 100",
 ];
-// Trigger offset (%) per time frame - short frames use a much smaller band than 10%.
-// Anchor: 2h = 10% (per requirement); scales down for shorter, up for longer.
+// Trigger offset (%) per time frame - the pre-alert band scales with the timeframe.
+// 1s-15m are tuned tight; 30m+ were retuned down to match realistic price travel
+// (a stock rarely moves 4% in 30m or 20% in a day as normal noise). Kept monotonic.
 const OFFSETS = {
   "1s": 0.1,
   "5s": 0.15,
@@ -83,18 +84,18 @@ const OFFSETS = {
   "5m": 1.5,
   "10m": 2,
   "15m": 3,
-  "30m": 4,
-  "45m": 5,
-  "1h": 7,
-  "2h": 10,
-  "3h": 12,
-  "4h": 15,
-  "1d": 20,
-  "1w": 30,
-  "1mo": 40,
-  "3mo": 60,
-  "6mo": 80,
-  "12mo": 100,
+  "30m": 3.5,
+  "45m": 4,
+  "1h": 4.5,
+  "2h": 5.5,
+  "3h": 6.5,
+  "4h": 7.5,
+  "1d": 9,
+  "1w": 13,
+  "1mo": 18,
+  "3mo": 26,
+  "6mo": 32,
+  "12mo": 40,
 };
 function offsetFor(tf) {
   return OFFSETS[tf] != null ? OFFSETS[tf] : OFFSET_PCT;

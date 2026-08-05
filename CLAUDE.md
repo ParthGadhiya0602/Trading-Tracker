@@ -80,8 +80,11 @@ time frame are all chosen (Side/Time frame default to an empty "Select…").
 **Model: the alert price is the entry/target; the trigger is offset% away from it, and
 re-alerts step BACK toward the alert price.** BUY trigger = `alertPrice + offset%`
 (above); SELL trigger = `alertPrice − offset%` (below). The offset **scales with the time
-frame** (`OFFSETS` in `alerts.js`; anchor 2h = 10%, e.g. 1m = 0.5%, 15m = 3%, 1h = 7%,
-1d = 20%). The re-alert step is **0.5% for 1m–15m** frames, else offset ÷ 5. Both are
+frame** (`OFFSETS` in `alerts.js`; 1s–15m tuned tight, 30m+ retuned down to match
+realistic price travel, kept monotonic — e.g. 1m = 0.5%, 15m = 3%, 30m = 3.5%, 1h = 4.5%,
+2h = 5.5%, 1d = 9%, 1w = 13%, 1mo = 18%, 12mo = 40%). The re-alert step is **0.5% for
+1m–15m** frames, else offset ÷ 5. Offsets are snapshotted per alert at create/edit/re-arm,
+so retuning the map only affects new/edited/re-armed alerts, not live ones. Both are
 snapshotted onto the alert at create/edit (`offsetPct`, `stepPct`); the offset map is
 served at `GET /api/alert-config` for the form preview.
 
