@@ -24,6 +24,7 @@ const fs = require("fs");
 const path = require("path");
 const alerts = require("./alerts");
 const auth = require("./auth");
+const stream = require("./stream");
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.PORT || 8787);
@@ -48,6 +49,20 @@ function requireFeed() {
     throw new Error(
       "data source not configured - add a `feed` block to config.json (see config.example.json)",
     );
+}
+// Live WS feed is opt-in (STREAM_WS env). When the flag is set but `feed.stream` (or its
+// required sub-keys) is missing, we warn and continue in pure-REST mode - never crash.
+function requireStream() {
+  if (!process.env.STREAM_WS) return null;
+  const s = FEED && FEED.stream;
+  if (!s || !s.wsBase || !s.constituents) {
+    console.log(
+      "  WARNING - STREAM_WS is set but `feed.stream` is missing/incomplete in config.json " +
+        "(see config.example.json) - continuing in pure-REST mode.",
+    );
+    return null;
+  }
+  return s;
 }
 // One call per index returns everything we need (index level + all constituents +
 // advance-decline + marketStatus). endpoint/query come from config.json.
@@ -369,6 +384,84 @@ function marketState(d = new Date()) {
   if (mins >= 9 * 60 + 15 && mins <= 15 * 60 + 30) return "open";
   return "closed";
 }
+// ---------------- live WS feed (opt-in via STREAM_WS; open session only) ----------------
+// When unset, every path below is bypassed - getMarketData() delegates straight through to
+// fetchMarketData(), byte-for-byte today's behaviour. This is the safety guarantee.
+const STREAM_WS = !!process.env.STREAM_WS;
+const STALE_MAX_MS = 15_000; // liveCache older than this -> treat as stale, fall back to REST
+const SLOW_REFRESH_MS = 45_000; // REST reseed cadence while the WS feed is driving the cache
+// liveCache mirrors the exact buildPayloadNext envelope, keyed by DASH_INDICES.
+let liveCache = {};
+let liveCacheStampMs = 0;
+let liveCacheSource = null; // 'rest' | 'ws'
+
+function getLivePayload() {
+  return liveCache;
+}
+// Full-fidelity reseed from a REST fetch (all fields, incl. enrichment-only ones).
+function seedLiveCache(payload) {
+  liveCache = payload;
+  liveCacheStampMs = Date.now();
+  liveCacheSource = "rest";
+}
+// Merge one normalized WS tick into liveCache, preserving REST-only enrichment fields.
+function applyTick(t) {
+  if (!t || !t.index || !liveCache[t.index]) return;
+  const entry = liveCache[t.index];
+  if (t.kind === "stock" && t.symbol) {
+    const rows = entry.data || (entry.data = []);
+    const row = rows.find((r) => r.symbol === t.symbol);
+    if (!row) return; // unknown symbol - ignore (constituent list is REST-owned)
+    Object.assign(row, t.patch);
+    if (row.lastPrice > 0) latestPrices[t.symbol] = row.lastPrice;
+  } else if (t.kind === "level") {
+    entry.level = Object.assign(entry.level || {}, t.patch);
+  } else {
+    return;
+  }
+  entry.timestamp = Date.now();
+  liveCacheStampMs = Date.now();
+  liveCacheSource = "ws";
+}
+// SSE fan-out for /api/stream (only ever populated when STREAM_WS is on - the endpoint
+// itself 404s otherwise, so nothing subscribes).
+const sseClients = new Set();
+function sseWrite(res, chunk) {
+  try {
+    if (res.writableEnded) {
+      sseClients.delete(res);
+      return;
+    }
+    res.write(chunk);
+  } catch (_) {
+    sseClients.delete(res);
+  }
+}
+let reseedTimer = null;
+async function reseedLiveCache() {
+  if (!(STREAM_WS && marketState() === "open")) return;
+  try {
+    const payload = await fetchAllIndices();
+    seedLiveCache(payload);
+  } catch (_) {
+    /* transient - keep serving the existing liveCache/REST fallback */
+  }
+}
+// Wrapper the rest of the server calls instead of fetchMarketData() directly. Flag-off (or
+// outside the open session) -> identical to calling fetchMarketData() today.
+async function getMarketData() {
+  if (!STREAM_WS) return fetchMarketData();
+  const st = marketState();
+  if (st === "open") {
+    const fresh = liveCacheStampMs && Date.now() - liveCacheStampMs < STALE_MAX_MS;
+    if (fresh && Object.keys(liveCache).length) return liveCache;
+    const payload = await fetchAllIndices();
+    seedLiveCache(payload);
+    return liveCache;
+  }
+  return fetchMarketData(); // pre-open / closed: unchanged REST paths
+}
+
 // ---------------- alert evaluation loop (server-side; fires with no tab open) ----------------
 const ALERT_POLL_MS =
   Math.max(2, Number(process.env.ALERT_POLL_SECONDS) || 5) * 1000;
@@ -391,7 +484,7 @@ async function alertTick() {
   if (evaluating || NO_TICK || (st !== "open" && st !== "pre-open")) return;
   evaluating = true;
   try {
-    const payload = await fetchMarketData();
+    const payload = await getMarketData();
     cachePrices(payload);
     if (st === "open") alerts.updateSymbols(payload); // refresh symbol cache from real constituents only
     alerts.evaluate(payload);
@@ -695,9 +788,27 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       if (url === "/api/indices") {
-        const data = await fetchMarketData(); // pre-open feed during 09:00-09:15, else live
+        const data = await getMarketData(); // pre-open feed during 09:00-09:15, else live (WS-backed when STREAM_WS is on)
         cachePrices(data);
         send(res, 200, JSON.stringify(data), "application/json; charset=utf-8");
+        return;
+      }
+      if (url === "/api/stream") {
+        // flag-off -> no SSE at all (clean 404), so parity holds when STREAM_WS is unset
+        if (!STREAM_WS) {
+          sendJson(res, 404, { error: "not found" });
+          return;
+        }
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        });
+        res.write("retry: 3000\n\n");
+        res.write(`event: snapshot\ndata: ${JSON.stringify(await getMarketData())}\n\n`);
+        sseClients.add(res);
+        req.on("close", () => sseClients.delete(res));
         return;
       }
       sendJson(res, 404, { error: "not found" });
@@ -730,11 +841,18 @@ async function main() {
     `  Auth: ${auth.listUsers().length} user(s) · store: ${auth.backendName()}` +
       (auth.needsSetup() ? " · NEEDS SETUP (create admin on first open)" : ""),
   );
+  const streamCfg = requireStream(); // null when STREAM_WS unset, or on WARNING+continue
+  console.log(
+    STREAM_WS
+      ? `  Live WS feed: STREAM_WS on · ${streamCfg ? "feed.stream configured" : "feed.stream NOT configured - pure-REST fallback"} · SSE ${streamCfg ? "available at /api/stream" : "disabled (404)"}`
+      : "  Live WS feed: STREAM_WS off - pure REST (today's behaviour), /api/stream disabled (404)",
+  );
   console.log("  Self-test: fetching indices from the data source ...");
   try {
     const j = await fetchAllIndices();
     cachePrices(j); // seed live prices so create/edit can re-anchor immediately
     alerts.updateSymbols(j); // seed the create-form dropdown when started in market hours
+    if (STREAM_WS) seedLiveCache(j); // seed liveCache from the startup self-test fetch
     for (const key of DASH_INDICES) {
       const n = (j[key].data || []).length;
       const lv = j[key].level;
@@ -777,6 +895,25 @@ async function main() {
     if (NO_TICK)
       console.log("  ALERTS_NO_TICK set - alert engine PAUSED (read-only, no fires).\n");
     else setInterval(alertTick, ALERT_POLL_MS); // server-side alert engine
+    if (STREAM_WS && streamCfg) {
+      stream.start({
+        feed: FEED,
+        onTick: applyTick,
+        isOpen: () => marketState() === "open",
+        log: (msg) => console.log(`  ${msg}`),
+        userAgent: USER_AGENTS[0],
+      });
+      reseedTimer = setInterval(reseedLiveCache, SLOW_REFRESH_MS); // 45s REST reseed cadence
+      setInterval(() => {
+        // 1/s SSE fan-out: only while the session is open and someone is listening
+        if (!(STREAM_WS && marketState() === "open" && sseClients.size > 0)) return;
+        const chunk = `event: patch\ndata: ${JSON.stringify(getLivePayload())}\n\n`;
+        for (const client of sseClients) sseWrite(client, chunk);
+      }, 1000);
+      setInterval(() => {
+        for (const client of sseClients) sseWrite(client, ":\n\n"); // heartbeat comment
+      }, 15_000);
+    }
   });
 }
 main();

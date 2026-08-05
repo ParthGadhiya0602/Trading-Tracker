@@ -145,7 +145,20 @@
           </div>
         </div>
         <div class="tools">
+          <span
+            id="streamStatus"
+            class="stream-pill"
+            data-state="paused"
+            role="status"
+            aria-live="polite"
+            data-tip="Market closed — updates paused. Use Refresh for the latest close."
+          >
+            <span class="dot" aria-hidden="true"></span>
+            <span class="stream-label">PAUSED</span>
+            <span class="stream-int" hidden></span>
+          </span>
           <div
+            id="pollField"
             class="field"
             data-tip="How often to fetch fresh data while the market is open. Manual refresh always works, even when paused."
           >

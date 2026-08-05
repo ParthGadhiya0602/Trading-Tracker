@@ -78,6 +78,10 @@
       let cache = null, // { "NIFTY 50": {...}, "NIFTY NEXT 50": {...} }
         lastGoodAt = 0,
         timer = null;
+      // ---------- live stream (SSE) state ----------
+      let streamLive = false, // true once a snapshot/patch has been applied
+        es = null; // EventSource handle
+      const SLOW_REFRESH_MS = 45000; // top-up poll while streaming (52W/1Y/adv-dec, other index cards)
 
       // tab filter: high = at day high (green), low = at day low (red), neutral = rest.
       function tabMatch(r) {
@@ -655,6 +659,198 @@
         return st !== "closed"; // poll during pre-open + open
       }
 
+      // ---------- live stream (SSE) helpers ----------
+      // merges an incoming full-payload (server-merged WS ticks, or a plain
+      // /api/indices response) into the existing cache: top-level fields are
+      // overwritten where present, rows are merged key-by-key keyed on symbol
+      // so client-side enrichment (e.g. preOpen) never gets blanked, and
+      // unknown symbols are appended.
+      function mergeLive(target, payload) {
+        if (!payload) return target;
+        if (!target) target = {};
+        for (const idx in payload) {
+          const incoming = payload[idx];
+          if (!incoming) continue;
+          if (!target[idx]) {
+            target[idx] = incoming;
+            continue;
+          }
+          const cur = target[idx];
+          ["timestamp", "marketStatus", "marketDataLive", "level", "advance"].forEach(
+            (k) => {
+              if (incoming[k] !== undefined) cur[k] = incoming[k];
+            },
+          );
+          if (Array.isArray(incoming.data)) {
+            if (!Array.isArray(cur.data)) cur.data = [];
+            const bySym = {};
+            cur.data.forEach((r) => {
+              if (r && r.symbol) bySym[r.symbol] = r;
+            });
+            incoming.data.forEach((r) => {
+              if (!r || !r.symbol) return;
+              if (bySym[r.symbol]) Object.assign(bySym[r.symbol], r);
+              else {
+                const nr = { ...r };
+                bySym[r.symbol] = nr;
+                cur.data.push(nr);
+              }
+            });
+          }
+        }
+        return target;
+      }
+
+      // sets the #streamStatus pill (live / rest / connecting / paused) and
+      // de-emphasises (opacity-mute, never disabled) the auto-poll field
+      // while live so its interval applies instantly on fallback.
+      function setStreamStatus(state, intervalSecs) {
+        const pill = document.getElementById("streamStatus");
+        if (!pill) return;
+        pill.dataset.state = state;
+        const label = pill.querySelector(".stream-label");
+        const intEl = pill.querySelector(".stream-int");
+        const labels = {
+          live: "LIVE",
+          rest: "REST",
+          connecting: "CONNECTING",
+          paused: "PAUSED",
+        };
+        const tips = {
+          live: "Live streaming — real-time ticks. Auto-poll interval applies only if streaming drops.",
+          rest: "Live stream unavailable — refreshing on the auto-poll timer.",
+          connecting: "Connecting to the live stream…",
+          paused: "Market closed — updates paused. Use Refresh for the latest close.",
+        };
+        if (label) label.textContent = labels[state] || String(state).toUpperCase();
+        pill.setAttribute("data-tip", tips[state] || "");
+        if (intEl) {
+          if (state === "rest" && intervalSecs) {
+            intEl.hidden = false;
+            intEl.textContent = " · " + intervalSecs + "s";
+          } else {
+            intEl.hidden = true;
+            intEl.textContent = "";
+          }
+        }
+        const field = document.getElementById("pollField");
+        if (field) {
+          const live = state === "live";
+          field.classList.toggle("is-muted", live);
+          field.setAttribute(
+            "data-tip",
+            live
+              ? "Live streaming — interval applies only when polling."
+              : "How often to fetch fresh data while the market is open. Manual refresh always works, even when paused.",
+          );
+        }
+      }
+
+      // opens the live SSE stream; degrades silently to the existing REST
+      // poll (schedule()) on 404/error/unsupported - never throws.
+      function connectStream() {
+        if (!window.EventSource) return; // F5: unsupported -> skip, REST poll runs as today
+        let esOpened = false, // ever received an open/frame
+          esErrs = 0; // consecutive errors with no successful open
+        try {
+          es = new EventSource("/api/stream");
+        } catch (_) {
+          return;
+        }
+        es.onopen = () => {
+          esOpened = true;
+          esErrs = 0;
+          setStreamStatus("connecting");
+        };
+        es.addEventListener("snapshot", (e) => {
+          try {
+            const payload = JSON.parse(e.data);
+            cache = payload;
+            streamLive = true;
+            esOpened = true;
+            esErrs = 0;
+            lastGoodAt = Date.now();
+            document.getElementById("staleMsg").textContent = "";
+            renderIndexCards();
+            renderBody();
+            renderMeta();
+            setStreamStatus("live");
+          } catch (_) {
+            /* malformed frame - ignore, next frame will retry */
+          }
+        });
+        es.addEventListener("patch", (e) => {
+          try {
+            const payload = JSON.parse(e.data);
+            cache = mergeLive(cache, payload);
+            streamLive = true;
+            esOpened = true;
+            esErrs = 0;
+            lastGoodAt = Date.now();
+            document.getElementById("staleMsg").textContent = "";
+            renderIndexCards();
+            renderBody();
+            renderMeta();
+            setStreamStatus("live");
+          } catch (_) {
+            /* malformed frame - ignore, next frame will retry */
+          }
+        });
+        es.onerror = () => {
+          // 404 (STREAM_WS off) or a dropped/expired-session connection:
+          // degrade to REST and never throw. If we NEVER managed to open
+          // (endpoint absent / flag off), stop the ~3s reconnect storm after
+          // a couple of tries by closing the source; a live stream that drops
+          // mid-session (esOpened) is left to auto-reconnect on its own.
+          streamLive = false;
+          esErrs++;
+          if (!esOpened && esErrs >= 2) {
+            try {
+              es.close();
+            } catch (_) {}
+          }
+          const st = marketState(new Date());
+          if (st === "closed") {
+            setStreamStatus("paused");
+          } else {
+            const secs = Math.max(
+              1,
+              Math.min(10, +document.getElementById("poll").value || 5),
+            );
+            setStreamStatus("rest", secs);
+          }
+          // resume the fast REST poll immediately instead of waiting out a
+          // pending 45s slow-refresh cycle (schedule() clears+re-arms timer).
+          schedule();
+        };
+      }
+
+      // background top-up while streaming: keeps the non-NIFTY-50 index card
+      // levels + 52W/1Y/adv-dec fresh (fields the WS stream never patches).
+      // Additive merge only - never disturbs streamed prices.
+      async function slowRefresh() {
+        try {
+          const res = await fetch(API + "?t=" + Date.now(), {
+            cache: "no-store",
+          });
+          const text = await res.text();
+          let json;
+          try {
+            json = JSON.parse(text);
+          } catch (_) {
+            return;
+          }
+          if (!res.ok || json.error) return;
+          cache = mergeLive(cache, json);
+          lastGoodAt = Date.now();
+          renderIndexCards();
+          renderBody();
+          renderMeta();
+        } catch (_) {
+          /* ignore - the live stream is still supplying fresh prices */
+        }
+      }
+
       // ---------- fetch (in-memory cache keeps last good on failure) ----------
       async function refresh() {
         const btn = document.getElementById("refresh");
@@ -701,6 +897,8 @@
       }
 
       // ---------- scheduler: auto-poll only in market hours; manual always allowed ----------
+      // when the live stream is up, this demotes to a 45s top-up (SLOW_REFRESH_MS)
+      // instead of the 1-10s REST poll - the stream keeps prices fresh in between.
       function schedule() {
         if (timer) clearTimeout(timer);
         const open = renderMarketStatus();
@@ -708,8 +906,19 @@
           1,
           Math.min(10, +document.getElementById("poll").value || 5),
         );
-        if (open) refresh();
-        timer = setTimeout(schedule, secs * 1000);
+        if (!open) {
+          setStreamStatus("paused");
+          timer = setTimeout(schedule, secs * 1000);
+          return;
+        }
+        if (streamLive) {
+          slowRefresh();
+          timer = setTimeout(schedule, SLOW_REFRESH_MS);
+        } else {
+          setStreamStatus("rest", secs);
+          refresh();
+          timer = setTimeout(schedule, secs * 1000);
+        }
       }
 
       // ---------- wire up ----------
@@ -840,6 +1049,7 @@
         renderMarketStatus();
         refresh();
         schedule();
+        connectStream();
         setInterval(() => {
           renderMarketStatus();
           renderMeta();

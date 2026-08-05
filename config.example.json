@@ -11,6 +11,20 @@
     "indicesEndpoint": "/path/to/indices-api?functionName=SOME_FUNCTION&symbol=",
     "preopenEndpoint": "/path/to/preopen-api?key=",
     "referer": "/path/used/as/referer-header",
-    "warmupPaths": ["/", "/path/that/sets/anti-bot-cookies?symbol=SYMBOL"]
+    "warmupPaths": ["/", "/path/that/sets/anti-bot-cookies?symbol=SYMBOL"],
+    "stream": {
+      "wsBase": "wss://YOUR_STREAM_HOST/PATH/PREFIX",
+      "origin": "https://YOUR_DATA_SOURCE_ORIGIN",
+      "indexParam": "index",
+      "constituents": {
+        "NIFTY 50":         { "path": "PATH_KEY_FOR_NIFTY50_STOCKS",  "index": "Nifty 50" },
+        "NIFTY NEXT 50":    { "path": "PATH_KEY_FOR_NEXT50",          "index": "Nifty Next 50" },
+        "NIFTY MIDCAP 50":  { "path": "PATH_KEY_FOR_MIDCAP50",        "index": "Nifty Midcap 50" },
+        "NIFTY MIDCAP 100": { "path": "PATH_KEY_FOR_MIDCAP100",       "index": "Nifty Midcap 100" }
+      },
+      "levels": {
+        "NIFTY 50": { "path": "PATH_KEY_FOR_NIFTY50_LEVEL", "index": "Nifty 50" }
+      }
+    }
   }
 }

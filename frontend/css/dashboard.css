@@ -192,6 +192,88 @@
         align-items: flex-end;
         gap: 12px;
       }
+      /* de-emphasise the auto-poll field while the live stream is active
+         (opacity-mute only - never disabled, so the interval applies
+         instantly if the stream drops) */
+      .field.is-muted {
+        opacity: 0.5;
+      }
+      .field.is-muted label {
+        text-decoration: line-through solid var(--muted) 1px;
+      }
+
+      /* ---- stream status pill (SSE live / REST fallback / connecting / paused) ---- */
+      .stream-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--s2);
+        align-self: flex-end;
+        font-weight: 600;
+        font-size: 12px;
+        background: var(--chip);
+        border: 1px solid var(--line);
+        padding: 0 12px;
+        height: 38px;
+        border-radius: var(--radius-pill);
+        color: var(--muted-ink);
+        font-variant-numeric: tabular-nums;
+        transition:
+          background-color 0.15s var(--ease),
+          border-color 0.15s var(--ease),
+          color 0.15s var(--ease),
+          opacity 0.15s var(--ease);
+      }
+      .stream-pill .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--flat);
+        flex: none;
+      }
+      .stream-pill .stream-int {
+        color: var(--muted);
+        font-weight: 600;
+      }
+      /* live */
+      .stream-pill[data-state="live"] {
+        background: var(--rowup);
+        border-color: color-mix(in srgb, var(--up) 34%, var(--line));
+        color: var(--up);
+      }
+      .stream-pill[data-state="live"] .dot {
+        background: var(--up);
+        box-shadow: 0 0 0 3px var(--rowup);
+        animation: pulse 2s infinite;
+      }
+      /* rest / polling */
+      .stream-pill[data-state="rest"] {
+        background: var(--chip);
+        border-color: var(--line);
+        color: var(--muted-ink);
+      }
+      .stream-pill[data-state="rest"] .dot {
+        background: var(--flat);
+      }
+      /* connecting */
+      .stream-pill[data-state="connecting"] {
+        background: var(--warn-tint);
+        border-color: color-mix(in srgb, var(--warn) 34%, var(--line));
+        color: var(--warn);
+      }
+      .stream-pill[data-state="connecting"] .dot {
+        background: var(--warn);
+        box-shadow: 0 0 0 3px var(--warn-tint);
+        animation: pulse 2s infinite;
+      }
+      /* paused / offline */
+      .stream-pill[data-state="paused"] {
+        opacity: 0.6;
+        color: var(--muted);
+      }
+      .stream-pill[data-state="paused"] .dot {
+        background: var(--flat);
+        opacity: 0.45;
+      }
 
       /* ---- table panel ---- */
       .panel {
