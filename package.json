@@ -5,7 +5,9 @@
   "description": "NIFTY OHL dashboard + server-side price alerts (local data proxy)",
   "type": "commonjs",
   "scripts": {
-    "start": "node backend/server.js"
+    "start": "node backend/server.js",
+    "live": "STREAM_WS=1 node backend/server.js",
+    "closed": "node backend/server.js"
   },
   "dependencies": {
     "mongodb": "^6.9.0"
