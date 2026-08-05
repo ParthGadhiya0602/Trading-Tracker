@@ -306,22 +306,45 @@
           )
           .join("");
         renderPreOpen(document.getElementById("sm-preopen"), r.preOpen);
+        setStockTab("details"); // always open on Details
         renderStockAlerts(r.symbol);
         document.getElementById("stockModal").classList.add("show");
+      }
+      // Details / Alerts tab switch inside the stock modal.
+      function setStockTab(tab) {
+        document.querySelectorAll("#stockModal .sm-tab").forEach((b) => {
+          const on = b.dataset.tab === tab;
+          b.classList.toggle("active", on);
+          b.setAttribute("aria-selected", String(on));
+        });
+        document.getElementById("sm-panel-details").hidden = tab !== "details";
+        document.getElementById("sm-panel-alerts").hidden = tab !== "alerts";
+      }
+      document.querySelectorAll("#stockModal .sm-tab").forEach((b) => {
+        b.onclick = () => setStockTab(b.dataset.tab);
+      });
+      function setAlertsTabCount(n) {
+        const el = document.getElementById("sm-tab-alerts-count");
+        if (!el) return;
+        if (n > 0) {
+          el.textContent = n;
+          el.hidden = false;
+        } else el.hidden = true;
       }
       // List this stock's alerts (active + archived) inside the detail modal, or a
       // "no alerts" line. Each row opens the full alert view (via the alerts module).
       const REVIEW_TXT = { approved: "Approved", rejected: "Rejected", raw: "Raw" };
       async function renderStockAlerts(symbol) {
         const host = document.getElementById("sm-alerts");
-        host.innerHTML = `<div class="sm-al-head">Alerts</div><div class="sm-al-msg">Loading…</div>`;
+        host.innerHTML = `<div class="sm-al-msg">Loading…</div>`;
+        setAlertsTabCount(0);
         let data;
         try {
           data = await fetch("/api/alerts/all", {
             credentials: "same-origin",
           }).then((res) => res.json());
         } catch (_) {
-          host.innerHTML = `<div class="sm-al-head">Alerts</div><div class="sm-al-msg">Couldn't load alerts.</div>`;
+          host.innerHTML = `<div class="sm-al-msg">Couldn't load alerts.</div>`;
           return;
         }
         if (symbol !== modalSymbol) return; // user clicked another row meanwhile
@@ -330,7 +353,8 @@
           .filter((a) => a.symbol === symbol)
           .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
         if (!mine.length) {
-          host.innerHTML = `<div class="sm-al-head">Alerts</div><div class="sm-al-msg">No alerts for this stock yet.</div>`;
+          host.innerHTML = `<div class="sm-al-msg">No alerts for this stock yet.</div>`;
+          setAlertsTabCount(0);
           return;
         }
         const rowsHtml = mine
@@ -349,9 +373,8 @@
             );
           })
           .join("");
-        host.innerHTML =
-          `<div class="sm-al-head">Alerts <span class="sm-al-count">${mine.length}</span></div>` +
-          `<div class="sm-al-list">${rowsHtml}</div>`;
+        host.innerHTML = `<div class="sm-al-list">${rowsHtml}</div>`;
+        setAlertsTabCount(mine.length);
         const byId = new Map(mine.map((a) => [a.id, a]));
         host.querySelectorAll(".sm-alert").forEach((el) => {
           el.onclick = () => {

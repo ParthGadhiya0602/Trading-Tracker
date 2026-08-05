@@ -650,18 +650,42 @@
           <span class="sm-ltp num" id="sm-ltp"></span>
           <span class="delta" id="sm-delta"></span>
         </div>
-        <div class="sm-grid" id="sm-grid"></div>
-        <section
-          id="sm-preopen"
-          class="sm-preopen"
-          aria-label="Pre-open order book"
-          hidden
-        ></section>
-        <section
-          id="sm-alerts"
-          class="sm-alerts"
-          aria-label="Alerts for this stock"
-        ></section>
+        <div class="sm-tabs" role="tablist" aria-label="Stock detail sections">
+          <button
+            type="button"
+            class="sm-tab active"
+            data-tab="details"
+            role="tab"
+            aria-selected="true"
+          >
+            Details
+          </button>
+          <button
+            type="button"
+            class="sm-tab"
+            data-tab="alerts"
+            role="tab"
+            aria-selected="false"
+          >
+            Alerts <span class="sm-tab-count" id="sm-tab-alerts-count" hidden></span>
+          </button>
+        </div>
+        <div class="sm-panel" id="sm-panel-details" role="tabpanel">
+          <div class="sm-grid" id="sm-grid"></div>
+          <section
+            id="sm-preopen"
+            class="sm-preopen"
+            aria-label="Pre-open order book"
+            hidden
+          ></section>
+        </div>
+        <div class="sm-panel" id="sm-panel-alerts" role="tabpanel" hidden>
+          <section
+            id="sm-alerts"
+            class="sm-alerts"
+            aria-label="Alerts for this stock"
+          ></section>
+        </div>
       </div>
     </div>
 

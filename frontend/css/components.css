@@ -123,9 +123,54 @@
       .sm-preopen[hidden] {
         display: none;
       }
-      /* this stock's alerts, listed inside the detail modal */
+      /* Details / Alerts tabs inside the stock modal */
+      .sm-tabs {
+        display: flex;
+        gap: var(--s4);
+        padding: 0 18px;
+        border-bottom: 1px solid var(--line);
+      }
+      .sm-tab {
+        appearance: none;
+        background: none;
+        border: none;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -1px;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--muted);
+        padding: 12px 2px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .sm-tab:hover {
+        color: var(--txt);
+      }
+      .sm-tab.active {
+        color: var(--txt);
+        border-bottom-color: var(--accent);
+      }
+      .sm-tab-count {
+        font-size: 10.5px;
+        font-weight: 700;
+        color: var(--muted);
+        background: var(--chip);
+        border-radius: var(--radius-pill);
+        padding: 0 7px;
+        line-height: 18px;
+      }
+      .sm-tab.active .sm-tab-count {
+        color: var(--accent);
+        background: var(--accent-tint);
+      }
+      .sm-panel[hidden] {
+        display: none;
+      }
+      /* this stock's alerts, listed inside the Alerts tab */
       .sm-alerts {
-        border-top: 1px solid var(--line);
         padding: 14px 18px 18px;
         display: flex;
         flex-direction: column;
