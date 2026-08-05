@@ -670,7 +670,12 @@ async function handleAlertsApi(req, res, url, method, user) {
   if (url === "/api/alerts" && method === "POST") {
     const body = await readJson(req);
     body.zoneCreator = (user && user.username) || ""; // authoritative: the signed-in user
-    const cp = latestPrices[String(body.symbol || "").toUpperCase()];
+    // Prefer the price the create form captured (once side+entry+time frame were set) so
+    // the saved Alert price matches the preview; fall back to the server's latest tick.
+    const formCp = num(body.formPrice);
+    delete body.formPrice; // transport-only; never persisted on the alert
+    const cp =
+      formCp > 0 ? formCp : latestPrices[String(body.symbol || "").toUpperCase()];
     const r = alerts.create(body, cp);
     if (r.error) sendJson(res, 400, { error: r.error });
     else sendJson(res, 201, { alert: r.alert });
@@ -703,7 +708,10 @@ async function handleAlertsApi(req, res, url, method, user) {
     if (!action && method === "PATCH") {
       const body = await readJson(req);
       delete body.zoneCreator; // creator is fixed at create time; edits never reassign it
-      const cp = latestPrices[String(body.symbol || "").toUpperCase()];
+      const formCp = num(body.formPrice);
+      delete body.formPrice; // transport-only; never persisted on the alert
+      const cp =
+        formCp > 0 ? formCp : latestPrices[String(body.symbol || "").toUpperCase()];
       return finishAlert(res, alerts.update(id, body, cp)), true;
     }
     if (!action && method === "DELETE") {

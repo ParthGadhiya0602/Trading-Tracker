@@ -692,6 +692,10 @@
             candleDate: $("#al-date").value || "",
             candleTime: hh && mm ? `${hh}:${mm}` : "",
           };
+          // Anchor the Alert (trigger) price to the price the form already had once
+          // side + entry + time frame were set (what the preview used) - NOT a fresh
+          // save-time tick. Server re-anchors against this instead of its latest price.
+          if (curPrice > 0) body.formPrice = curPrice;
           $("#al-err").textContent = "";
           // If the live price is already at/past the entry, warn: the alert will be
           // created already "entered" (targets/stop-loss track immediately).
