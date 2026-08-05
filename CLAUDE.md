@@ -217,13 +217,21 @@ Single-responsibility roster. **Opus** (reason/R&D/design/review, high effort) �
 - **nifty-architect** (Opus) - spec + task breakdown (backend/frontend/needsUI/risks/
   verification/openQuestions). No code.
 - **nifty-ui-designer** (Opus) - UI/UX design spec grounded in the CSS design system.
+- **nifty-stream-diagnostics** (Opus) - diagnose the WSS/SSE path, live tick schema,
+  reconnects, and market-status propagation. Read-only unless explicitly handed an
+  implementation task.
 - **nifty-reviewer** (Opus) - adversarial verification of finished work vs spec.
 - **nifty-backend** (Sonnet) - implement `server.js`/`alerts.js`/`auth.js` (backend/*) to spec.
 - **nifty-frontend** (Sonnet) - implement `index.html` / `frontend/js|css` to design+spec.
 
-**Workflow** `.claude/workflows/feature.js` (invoke with `args:{request:"..."}`): a
-deterministic, module-aware pipeline — Explore → Plan (openQuestions gate) → Design? →
-Backend → Frontend → Review → bounded fix loop → report. Anti-hallucination: everything
-anchored to the explorer's real `file:line` map, structured schema per phase,
-read-before-edit, honest verification (no fabricated results), reviewer re-verifies claims,
-never destructive git, endpoints only from `config.json` `feed`.
+**Workflows** (invoke with `args:{request:"..."}`):
+
+- `.claude/workflows/feature.js` — broad feature delivery: Explore → Plan (openQuestions
+  gate) → Design? → Backend → Frontend → Review → bounded fix loop → report.
+- `.claude/workflows/safe-change.js` — the default for a bug fix, narrow feature, or
+  refactor: evidence-first scoping, only affected layers run, then reviewer-owned targeted
+  repairs (maximum two) rather than re-running unrelated implementation work.
+
+Both workflows are anchored to the explorer's real `file:line` map, use structured phase
+outputs, require read-before-edit and honest verification, have the reviewer re-check claims,
+never use destructive git, and keep endpoints only in `config.json`'s `feed` block.
