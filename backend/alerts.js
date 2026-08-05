@@ -172,12 +172,35 @@ function readFileStore() {
     return { alerts: [], archived: [], symbols: {} };
   }
 }
+// backfill the tri-state review fields on a single alert, deriving from the legacy
+// boolean `zoneVerified` when present. Ensures all 4 fields exist afterward.
+function migrateReview(a) {
+  if (a.reviewState === undefined) {
+    if (a.zoneVerified === true) {
+      a.reviewState = "approved";
+      a.reviewer = "(migrated)";
+      a.reviewReason = "(migrated from verify)";
+      a.reviewedAt = new Date().toISOString();
+    } else {
+      a.reviewState = "raw";
+      a.reviewer = "";
+      a.reviewReason = "";
+      a.reviewedAt = null;
+    }
+  }
+  // backfill defaults if partially present (e.g. hand-edited record)
+  if (a.reviewer === undefined) a.reviewer = "";
+  if (a.reviewReason === undefined) a.reviewReason = "";
+  if (a.reviewedAt === undefined) a.reviewedAt = null;
+  delete a.zoneVerified;
+}
 // migrate/backfill older records to the current schema (runs on whatever we loaded)
 function migrate() {
   if (!Array.isArray(store.archived)) store.archived = [];
+  for (const a of store.archived) migrateReview(a);
   for (const a of store.alerts) {
     if (a.reanchorChecked === undefined) a.reanchorChecked = false;
-    if (a.zoneVerified === undefined) a.zoneVerified = false;
+    migrateReview(a);
     if (a.zoneOutcome === undefined) a.zoneOutcome = "pending";
     if (a.offsetPct == null) a.offsetPct = offsetFor(a.timeframe);
     if (a.stepPct == null) a.stepPct = stepFor(a.timeframe, a.offsetPct);
@@ -503,7 +526,11 @@ function freshState(alert) {
   alert.ringing = false;
   alert.snoozed = false;
   alert.reanchorChecked = false; // one-time re-anchor happens on first live tick
-  alert.zoneVerified = false; // someone must verify the zone (reset on create/edit)
+  // tri-state review workflow (gates whether the alert raises); reset to raw on create/edit
+  alert.reviewState = "raw"; // raw | approved | rejected
+  alert.reviewer = "";
+  alert.reviewReason = "";
+  alert.reviewedAt = null;
   alert.zoneOutcome = "pending"; // pending | fail | partial | success (from live price)
   alert.lastEvent = null; // { type, price, at, text }
   alert.lastFiredAt = null; // timestamp of the most recent fire (metadata)
@@ -667,7 +694,7 @@ function close(id) {
 // Re-arm an alert (active or closed) to a clean pre-entry state, applying the SAME
 // current-price logic as creation: recompute trigger/targets, re-anchor against the live
 // price, and mark it already-entered if the price is past the entry. Keeps the definition
-// and createdAt; resets all fired/zone state. Preserves the manual zoneVerified flag.
+// and createdAt; resets all fired/zone state. Preserves the review decision.
 // A closed alert is pulled back out of the archive into the active list.
 function rearm(id, currentPrice) {
   let alert = store.alerts.find((a) => a.id === id);
@@ -678,7 +705,12 @@ function rearm(id, currentPrice) {
     delete alert.archivedAt;
     store.alerts.push(alert);
   }
-  const verified = !!alert.zoneVerified;
+  const review = {
+    reviewState: alert.reviewState,
+    reviewer: alert.reviewer,
+    reviewReason: alert.reviewReason,
+    reviewedAt: alert.reviewedAt,
+  };
   alert.offsetPct = offsetFor(alert.timeframe);
   alert.stepPct = stepFor(alert.timeframe, alert.offsetPct);
   const t = targetsFor(alert.side, alert.alertPrice, alert.stopLoss);
@@ -688,7 +720,7 @@ function rearm(id, currentPrice) {
   alert.profit3 = t.profit3;
   alert.profit5 = t.profit5;
   freshState(alert);
-  alert.zoneVerified = verified; // preserve manual verification
+  Object.assign(alert, review); // preserve the review decision across re-arm
   // creation-time logic: raw trigger, re-anchor to current price, entered-if-past-entry
   alert.triggerPrice = reanchorTrigger(
     alert.side,
@@ -703,11 +735,22 @@ function rearm(id, currentPrice) {
   return { alert };
 }
 
-// mark the alert's zone as verified / unverified (manual review flag)
-function setVerified(id, verified) {
-  const alert = store.alerts.find((a) => a.id === id);
+// Manual review decision - approve or reject an alert's zone (gates whether it raises;
+// see fire()). Transitions between raw/approved/rejected all go through here, so toggling
+// back and forth (e.g. approved -> rejected) just re-runs this with the new decision.
+function review(id, decision, reason, reviewer) {
+  const alert =
+    store.alerts.find((a) => a.id === id) ||
+    store.archived.find((a) => a.id === id);
   if (!alert) return { error: "not found" };
-  alert.zoneVerified = !!verified;
+  const trimmed = String(reason || "").trim();
+  if (!trimmed) return { error: "reason is required" };
+  if (decision !== "approve" && decision !== "reject")
+    return { error: "decision must be approve or reject" };
+  alert.reviewState = decision === "approve" ? "approved" : "rejected";
+  alert.reviewer = String(reviewer || "");
+  alert.reviewReason = trimmed;
+  alert.reviewedAt = new Date().toISOString();
   alert.updatedAt = new Date().toISOString();
   save();
   return { alert };
@@ -753,7 +796,7 @@ function messageFor(alert, type, ltp) {
     `Time frame: ${alert.timeframe}`,
     `Creator: ${alert.zoneCreator || "-"}`,
     `Note: ${alert.note || "-"}`,
-    `Verified: ${alert.zoneVerified ? "Yes" : "No"}`,
+    `Reviewed by: ${alert.reviewer || "-"}`,
   ].join("\n");
 }
 
@@ -785,8 +828,25 @@ async function sendTelegram(text) {
   );
 }
 
+// Events allowed to raise for a "rejected" alert - only the terminal zone outcomes, and
+// only in-page (no Telegram). TRIGGER/REALERT/ENTRY stay suppressed.
+const REJECTED_ALLOWED = new Set(["SUCCESS", "PARTIAL", "FAIL", "SL_AFTER_PARTIAL"]);
+
+// Emit an alert event, gated by the alert's review state. The FSM (evaluate/evaluateZone)
+// always advances regardless of review state - this only gates what actually raises:
+//   approved -> unchanged (rings per RINGS, silent otherwise; always Telegram + in-page)
+//   raw      -> dormant: nothing emitted at all (no ring, no Telegram, no in-page event)
+//   rejected -> only terminal zone outcomes, in-page only, never ringing, never Telegram
 function fire(alert, type, ltp, opts) {
-  const ring = opts && opts.ring !== undefined ? opts.ring : RINGS.has(type);
+  const reviewState = alert.reviewState || "raw";
+  if (reviewState === "raw") return; // evaluate silently; raise nothing
+  let ring = opts && opts.ring !== undefined ? opts.ring : RINGS.has(type);
+  let skipTelegram = false;
+  if (reviewState === "rejected") {
+    if (!REJECTED_ALLOWED.has(type)) return; // suppress TRIGGER/REALERT/ENTRY entirely
+    ring = false;
+    skipTelegram = true;
+  }
   const text = messageFor(alert, type, ltp);
   const at = new Date().toISOString();
   alert.firedCount++;
@@ -797,7 +857,7 @@ function fire(alert, type, ltp, opts) {
   console.log(
     `  ALERT ${type}: ${alert.symbol} ${alert.side} @ ${ltp}${ring ? "" : " (silent)"}`,
   );
-  sendTelegram(text); // fire-and-forget; never blocks evaluation
+  if (!skipTelegram) sendTelegram(text); // fire-and-forget; never blocks evaluation
 }
 
 // Trade "zone" outcome against live price. ONLY runs once the alert is entered (status
@@ -943,7 +1003,7 @@ module.exports = {
   snooze,
   close,
   rearm,
-  setVerified,
+  review,
   updateSymbols,
   evaluate,
   telegramConfigured,

@@ -315,6 +315,30 @@
         padding: 16px 18px;
       }
 
+      /* ---- approve/reject review modal (reuses .am-card/.am-head chrome) ---- */
+      #reviewModal {
+        position: fixed;
+        inset: 0;
+        z-index: 262;
+        display: none;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 24px 16px;
+        background: color-mix(in srgb, #05070c 55%, transparent);
+        -webkit-backdrop-filter: blur(3px);
+        backdrop-filter: blur(3px);
+        overflow-y: auto;
+      }
+      #reviewModal.show {
+        display: flex;
+      }
+      #reviewModal .am-card {
+        width: min(420px, 96vw);
+      }
+      #reviewModal .alert-form {
+        padding: 16px 18px;
+      }
+
       /* ---------- alert detail (view) modal ---------- */
       #alertViewModal {
         position: fixed;
@@ -344,7 +368,7 @@
       }
       .av-badges .ai-side,
       .av-badges .ai-status,
-      .av-badges .ai-verify,
+      .av-badges .ai-review,
       .av-badges .ai-zone,
       .av-badges .ai-index {
         font-size: 10.5px;
@@ -382,11 +406,15 @@
         color: var(--up);
         background: var(--rowup);
       }
-      .av-badges .ai-verify.yes {
+      .av-badges .ai-review.approved {
         color: var(--up);
         background: var(--rowup);
       }
-      .av-badges .ai-verify.no {
+      .av-badges .ai-review.rejected {
+        color: var(--down);
+        background: var(--rowdown);
+      }
+      .av-badges .ai-review.raw {
         color: var(--warn);
         background: var(--warn-tint);
       }

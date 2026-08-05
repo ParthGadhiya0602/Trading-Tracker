@@ -677,7 +677,7 @@ async function handleAlertsApi(req, res, url, method, user) {
     return true;
   }
   const m = url.match(
-    /^\/api\/alerts\/([^/]+)(?:\/(snooze|close|verify|unverify|rearm))?$/,
+    /^\/api\/alerts\/([^/]+)(?:\/(snooze|close|approve|reject|rearm))?$/,
   );
   if (m) {
     const id = decodeURIComponent(m[1]);
@@ -692,8 +692,14 @@ async function handleAlertsApi(req, res, url, method, user) {
       const cp = a ? latestPrices[a.symbol] : undefined;
       return finishAlert(res, alerts.rearm(id, cp)), true;
     }
-    if (action === "verify" && method === "POST") return finishAlert(res, alerts.setVerified(id, true)), true;
-    if (action === "unverify" && method === "POST") return finishAlert(res, alerts.setVerified(id, false)), true;
+    if ((action === "approve" || action === "reject") && method === "POST") {
+      const body = await readJson(req);
+      const reviewer = (user && user.username) || ""; // server-authoritative, like zoneCreator
+      return (
+        finishAlert(res, alerts.review(id, action, body.reason, reviewer)),
+        true
+      );
+    }
     if (!action && method === "PATCH") {
       const body = await readJson(req);
       delete body.zoneCreator; // creator is fixed at create time; edits never reassign it

@@ -429,6 +429,51 @@
       </div>
       <!-- /#alertModal -->
 
+      <!-- review (approve/reject) modal - minimal reuse of the #alertModal chrome -->
+      <div id="reviewModal" role="dialog" aria-modal="true" aria-label="Review alert">
+        <div class="am-card">
+          <div class="am-head">
+            <i data-lucide="shield-check" aria-hidden="true"></i>
+            <h2 id="rv-title">Review alert</h2>
+            <button
+              type="button"
+              id="rv-modal-close"
+              class="am-close"
+              aria-label="Close"
+            >
+              <i data-lucide="x" aria-hidden="true"></i>
+            </button>
+          </div>
+          <form class="alert-form" id="reviewForm" autocomplete="off">
+            <label>
+              Reviewer
+              <input id="rv-reviewer" type="text" readonly title="Signed-in user" />
+            </label>
+            <label>
+              Reason
+              <textarea
+                id="rv-reason"
+                rows="3"
+                maxlength="280"
+                placeholder="Why is this alert being approved/rejected?"
+                required
+              ></textarea>
+            </label>
+            <div class="form-err" id="rv-err"></div>
+            <div class="form-actions">
+              <button type="submit" class="primary" id="rv-submit">
+                <i data-lucide="check" aria-hidden="true"></i>
+                <span id="rv-submit-text">Confirm</span>
+              </button>
+              <button type="button" id="rv-cancel">
+                <i data-lucide="x" aria-hidden="true"></i>Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+      <!-- /#reviewModal -->
+
       <!-- alert detail (read-only) modal, opened by clicking an alert row -->
       <div
         id="alertViewModal"

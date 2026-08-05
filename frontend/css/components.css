@@ -655,12 +655,12 @@
         font-weight: 750;
         font-size: 14px;
       }
-      /* ---- shared pill look across side/index/status/zone/verify badges ---- */
+      /* ---- shared pill look across side/index/status/zone/review badges ---- */
       .alert-item .ai-side,
       .alert-item .ai-index,
       .alert-item .ai-zone,
       .alert-item .ai-status,
-      .alert-item .ai-verify {
+      .alert-item .ai-review {
         font-size: 10.5px;
         font-weight: 700;
         letter-spacing: 0.3px;
@@ -711,11 +711,15 @@
         text-transform: uppercase;
         letter-spacing: 0.4px;
       }
-      .ai-verify.yes {
+      .ai-review.approved {
         color: var(--up);
         background: var(--rowup);
       }
-      .ai-verify.no {
+      .ai-review.rejected {
+        color: var(--down);
+        background: var(--rowdown);
+      }
+      .ai-review.raw {
         color: var(--warn);
         background: var(--warn-tint);
       }

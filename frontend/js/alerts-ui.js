@@ -61,11 +61,12 @@
             opts: TF_GROUPS.flatMap(([, vals]) => vals.map((v) => [v, v])),
           },
           {
-            key: "verify",
-            label: "Zone",
+            key: "review",
+            label: "Review",
             opts: [
-              ["yes", "Verified"],
-              ["no", "Unverified"],
+              ["raw", "Raw"],
+              ["approved", "Approved"],
+              ["rejected", "Rejected"],
             ],
           },
           {
@@ -84,7 +85,7 @@
           status: new Set(),
           side: new Set(),
           tf: new Set(),
-          verify: new Set(),
+          review: new Set(),
           outcome: new Set(),
         };
         const optsOf = (def) =>
@@ -226,6 +227,10 @@
             partial: "🟡 Partial",
             success: "✅ Success",
           })[o] || "Pending";
+        const REVIEW_LABEL = { approved: "Approved", rejected: "Rejected" };
+        const reviewLabel = (r) => REVIEW_LABEL[r] || "Raw";
+        const reviewBadgeHtml = (a) =>
+          `<span class="ai-review ${a.reviewState || "raw"}">${reviewLabel(a.reviewState).toUpperCase()}</span>`;
         function fmtRs(v) {
           return v == null || isNaN(v)
             ? "-"
@@ -445,7 +450,7 @@
             `<span class="ai-index">${a.index}</span>` +
             `<span class="ai-side ${a.side === "BUY" ? "buy" : "sell"}">${a.side}</span>` +
             `<span class="ai-status ${a.status}">${a.status}</span>` +
-            `<span class="ai-verify ${a.zoneVerified ? "yes" : "no"}">${a.zoneVerified ? "✓ Verified" : "⚠ Unverified"}</span>` +
+            reviewBadgeHtml(a) +
             `<span class="ai-zone ${a.zoneOutcome || "pending"}">${zoneLabel(a.zoneOutcome)}</span>`;
           const cell = (k, v, cls, wide) =>
             `<div class="cell${wide ? " wide" : ""}"><span class="k">${k}</span><span class="v ${cls || ""}">${v}</span></div>`;
@@ -471,7 +476,10 @@
             cell("Alert offset", pctTxt(a.offsetPct)),
             cell("Re-alert step", pctTxt(a.stepPct)),
             cell("Zone outcome", zoneLabel(a.zoneOutcome)),
-            cell("Verified", a.zoneVerified ? "Yes" : "No"),
+            cell("Review state", reviewLabel(a.reviewState)),
+            cell("Reviewer", esc(a.reviewer) || "-"),
+            cell("Review reason", a.reviewReason ? esc(a.reviewReason) : "-", "note", true),
+            cell("Reviewed at", fmtDateTime(a.reviewedAt)),
             cell("Creator", esc(a.zoneCreator) || "-", "", true),
             cell("Note", a.note ? esc(a.note) : "-", "note", true),
             cell("Candle", cand),
@@ -519,13 +527,18 @@
             );
             acts.appendChild(
               btn(
-                a.zoneVerified ? "Unverify" : "Verify",
+                "Approve",
                 "btn-sm",
-                async () => {
-                  await act(a.id, a.zoneVerified ? "unverify" : "verify");
-                  closeAlertView();
-                },
-                a.zoneVerified ? "shield-off" : "shield-check",
+                () => openReviewModal(a, "approve"),
+                "shield-check",
+              ),
+            );
+            acts.appendChild(
+              btn(
+                "Reject",
+                "btn-sm",
+                () => openReviewModal(a, "reject"),
+                "shield-off",
               ),
             );
             acts.appendChild(
@@ -558,6 +571,52 @@
         }
         function closeAlertView() {
           $("#alertViewModal").classList.remove("show");
+        }
+        // ---------- review (approve/reject) modal ----------
+        // Minimal reuse of the #alertModal chrome (am-card/am-head/alert-form/form-err/
+        // form-actions) via a separate #reviewModal element - a full create/edit form
+        // doesn't fit this flow, so a small dedicated modal is used instead.
+        let reviewTarget = null; // { alert, action: "approve" | "reject" }
+        function openReviewModal(a, action) {
+          reviewTarget = { alert: a, action };
+          $("#rv-title").textContent =
+            (action === "approve" ? "Approve" : "Reject") + " alert - " + a.symbol;
+          $("#rv-reviewer").value =
+            (window.APP_AUTH && window.APP_AUTH.user && window.APP_AUTH.user.username) ||
+            "";
+          $("#rv-reason").value = "";
+          $("#rv-err").textContent = "";
+          $("#rv-submit-text").textContent =
+            action === "approve" ? "Approve" : "Reject";
+          $("#reviewModal").classList.add("show");
+          setTimeout(() => $("#rv-reason").focus(), 50);
+        }
+        function closeReviewModal() {
+          $("#reviewModal").classList.remove("show");
+          reviewTarget = null;
+        }
+        async function submitReview(e) {
+          e.preventDefault();
+          if (!reviewTarget) return;
+          const reason = $("#rv-reason").value.trim();
+          if (!reason) {
+            $("#rv-err").textContent = "A reason is required.";
+            return;
+          }
+          const { alert: a, action } = reviewTarget;
+          try {
+            await api(
+              "/api/alerts/" + a.id + "/" + action,
+              "POST",
+              { reason },
+            );
+          } catch (err) {
+            $("#rv-err").textContent = err.message;
+            return;
+          }
+          closeReviewModal();
+          closeAlertView();
+          loadList();
         }
         // called from the dashboard's stock modal: switch to Alerts + open create,
         // prefilled with the given index + symbol
@@ -680,8 +739,8 @@
           if (sel.status.size) list = list.filter((a) => sel.status.has(a.status));
           if (sel.side.size) list = list.filter((a) => sel.side.has(a.side));
           if (sel.tf.size) list = list.filter((a) => sel.tf.has(a.timeframe));
-          if (sel.verify.size)
-            list = list.filter((a) => sel.verify.has(a.zoneVerified ? "yes" : "no"));
+          if (sel.review.size)
+            list = list.filter((a) => sel.review.has(a.reviewState || "raw"));
           if (sel.outcome.size)
             list = list.filter((a) => sel.outcome.has(a.zoneOutcome || "pending"));
           renderList(list);
@@ -717,7 +776,7 @@
               `<span class="ai-side ${a.side === "BUY" ? "buy" : "sell"}">${a.side}</span>` +
               `<span class="ai-status ${a.status}">${a.status}</span>` +
               (isArch ? `<span class="ai-archived">Archived</span>` : "") +
-              `<span class="ai-verify ${a.zoneVerified ? "yes" : "no"}">${a.zoneVerified ? "✓ Verified" : "⚠ Unverified"}</span>` +
+              reviewBadgeHtml(a) +
               `<span class="ai-zone ${a.zoneOutcome || "pending"}">${zoneLabel(a.zoneOutcome)}</span>` +
               `</div>` +
               `<span class="ai-nums">Entry ${fmtRs(a.alertPrice)} · Alert ${fmtRs(a.triggerPrice)} · SL ${fmtRs(a.stopLoss)} · ${a.timeframe || "-"}</span>` +
@@ -751,10 +810,18 @@
             } else {
               acts.appendChild(
                 btn(
-                  a.zoneVerified ? "Unverify" : "Verify",
+                  "Approve",
                   "btn-sm",
-                  () => act(a.id, a.zoneVerified ? "unverify" : "verify"),
-                  a.zoneVerified ? "shield-off" : "shield-check",
+                  () => openReviewModal(a, "approve"),
+                  "shield-check",
+                ),
+              );
+              acts.appendChild(
+                btn(
+                  "Reject",
+                  "btn-sm",
+                  () => openReviewModal(a, "reject"),
+                  "shield-off",
                 ),
               );
               if (a.ringing)
@@ -1180,6 +1247,13 @@
         $("#alertViewModal").addEventListener("click", (e) => {
           if (e.target.id === "alertViewModal") closeAlertView();
         });
+        // review (approve/reject) modal wiring
+        $("#rv-cancel").onclick = closeReviewModal;
+        $("#rv-modal-close").onclick = closeReviewModal;
+        $("#reviewModal").addEventListener("click", (e) => {
+          if (e.target.id === "reviewModal") closeReviewModal();
+        });
+        $("#reviewForm").onsubmit = submitReview;
         // notification center wiring
         $("#notifBtn").onclick = () =>
           $("#notifPanel").classList.contains("show")
@@ -1192,6 +1266,7 @@
           if (e.key === "Escape") {
             closeAlertModal();
             closeAlertView();
+            closeReviewModal();
             closeNotifPanel();
           }
         });

@@ -119,19 +119,31 @@ Snooze/Close prompt); only TRIGGER/RE-ALERT ring (`RINGS` in `alerts.js`). At cr
 if the live price is **already past the entry**, the alert is marked `entered`
 (`markEnteredIfPastEntry`); the create form confirms this first.
 
-Every fire goes to **Telegram** (all recipients) **and** the in-page notification center;
-ringing fires also toast + beep. **Snooze** clears the current ring; **Close** deactivates.
-On close (manual, or auto via success/fail) the alert is **moved from `alerts` to
-`archived_alerts`** (Mongo) / `store.archived` (file) — see Storage. Each alert has a
-**`zoneVerified`** review flag and metadata **`createdAt` / `updatedAt` / `lastFiredAt`**
-(shown in the detail modal). The list has **multi-select filter dropdowns** (index /
-status [armed/triggered/active/closed] / side / time frame / zone-verified / outcome) +
-a **Show archived** toggle; active selections show as removable **chips**.
+**Review gate (`reviewState`): fires are gated by an approve/reject workflow.** Each alert
+carries **`reviewState`** (`raw` | `approved` | `rejected`) + **`reviewer`** (set
+server-side from the signed-in user) + **`reviewReason`** (required) + **`reviewedAt`**.
+The FSM always advances (state is tracked for every alert), but **`fire()` is gated**:
+**approved** → full raising (rings + Telegram + in-page, as below); **raw** → **dormant**
+(FSM advances silently, emits nothing — can even auto-close on a terminal outcome with no
+notification); **rejected** → only the **terminal zone outcome** (success/partial/fail)
+fires, **in-page only** (no ring, no Telegram). Set via `POST /api/alerts/:id/{approve,reject}`
+(body `{reason}`, editor/admin) — replaces the old verify/unverify boolean; toggling
+raw↔approved↔rejected is allowed (each needs a fresh reason). `migrate()` maps legacy
+`zoneVerified` true→approved / false→raw.
+
+Every (non-gated) fire goes to **Telegram** (all recipients) **and** the in-page notification
+center; ringing fires also toast + beep. **Snooze** clears the current ring; **Close**
+deactivates. On close (manual, or auto via success/fail) the alert is **moved from `alerts`
+to `archived_alerts`** (Mongo) / `store.archived` (file) — see Storage; the archived record
+keeps its `reviewState`. Metadata **`createdAt` / `updatedAt` / `lastFiredAt`** shows in the
+detail modal. The list has **multi-select filter dropdowns** (index /
+status [armed/triggered/active/closed] / side / time frame / review [raw/approved/rejected] /
+outcome) + a **Show archived** toggle; active selections show as removable **chips**.
 
 Telegram is optional/dormant until configured in `config.json`
 (`{ "telegram": { "botToken": "...", "recipients": [{ "chatId": "...", "label": "..." }] } }`);
 missing config → in-page only. Alert API: `GET/POST /api/alerts`, `PATCH/DELETE
-/api/alerts/:id`, `POST /api/alerts/:id/{snooze,close,verify,unverify}`,
+/api/alerts/:id`, `POST /api/alerts/:id/{snooze,close,approve,reject}`,
 `GET /api/alerts/active`, **`GET /api/alerts/all`** (active + archived, used by the
 notification center), **`GET /api/alerts/archived`**, `GET /api/symbols`,
 `GET /api/alert-config`, `GET /api/price`. **`ALERTS_NO_TICK=1`** env pauses the server's
