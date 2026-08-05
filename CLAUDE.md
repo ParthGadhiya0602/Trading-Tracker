@@ -77,6 +77,13 @@ preserved on edit) — not a manual field.
 time (HH:MM IST, 24h). The form's trigger preview stays blank until side + alert price +
 time frame are all chosen (Side/Time frame default to an empty "Select…").
 
+**UI label mapping (display-only; internal field names unchanged):** the `alertPrice`
+field is shown to users as **"Entry price"**, and the `triggerPrice` field is shown as
+**"Alert price"** (the offset% level that pings you as price approaches). Fire events and
+the `triggered` status display as **"Alert" / "Re-alert" / "Alerted"**. Code, storage, and
+the `/api/alerts` payload still use `alertPrice`/`triggerPrice`/`status:"triggered"`; the
+paragraph below describes those internal fields.
+
 **Model: the alert price is the entry/target; the trigger is offset% away from it, and
 re-alerts step BACK toward the alert price.** BUY trigger = `alertPrice + offset%`
 (above); SELL trigger = `alertPrice − offset%` (below). The offset **scales with the time

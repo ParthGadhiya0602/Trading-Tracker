@@ -42,7 +42,7 @@
             label: "Status",
             opts: [
               ["armed", "Armed"],
-              ["triggered", "Triggered"],
+              ["triggered", "Alerted"],
               ["active", "Active (entered)"],
               ["closed", "Closed"],
             ],
@@ -362,7 +362,7 @@
           // don't compute the trigger until side + alert price + time frame are all set
           if (!side || !tf || !(p > 0)) {
             el.innerHTML =
-              "Trigger: - <span class='opt'>(pick side, alert price & time frame)</span>";
+              "Alert: - <span class='opt'>(pick side, entry price & time frame)</span>";
             return;
           }
           const pct = OFFSETS[tf] != null ? OFFSETS[tf] : DEFAULT_OFFSET;
@@ -382,7 +382,7 @@
             }
           }
           const when = side === "BUY" ? "rises to" : "falls to";
-          el.innerHTML = `Trigger (${tf} · ${side} ${sign}${pct}%): <b>${fmtRs(t)}</b> - fires when price ${when} it, then steps to alert ${fmtRs(p)}${note}`;
+          el.innerHTML = `Alert (${tf} · ${side} ${sign}${pct}%): <b>${fmtRs(t)}</b> - fires when price ${when} it, then steps to entry ${fmtRs(p)}${note}`;
         }
         // live 3x/5x profit targets from alert price + stop loss
         function updateTargets() {
@@ -392,7 +392,7 @@
           const el = $("#al-targets");
           if (!side || !(p > 0) || !(slv > 0)) {
             el.innerHTML =
-              "Targets: — <span class='opt'>(needs side, alert price & stop loss)</span>";
+              "Targets: — <span class='opt'>(needs side, entry price & stop loss)</span>";
             return;
           }
           const R = Math.abs(p - slv);
@@ -460,15 +460,15 @@
               ? `${fmtRs(a.profit3)} · ${fmtRs(a.profit5)}`
               : "-";
           $("#av-grid").innerHTML = [
-            cell("Alert price", fmtRs(a.alertPrice)),
-            cell("Trigger", fmtRs(a.triggerPrice)),
+            cell("Entry price", fmtRs(a.alertPrice)),
+            cell("Alert price", fmtRs(a.triggerPrice)),
             cell("Stop loss", fmtRs(a.stopLoss)),
             cell("Time frame", a.timeframe || "-"),
             cell("3× target", fmtRs(a.target3)),
             cell("5× target", fmtRs(a.target5)),
             cell("Risk (R)", fmtRs(a.riskR)),
             cell("Reward (3× · 5×)", reward),
-            cell("Trigger offset", pctTxt(a.offsetPct)),
+            cell("Alert offset", pctTxt(a.offsetPct)),
             cell("Re-alert step", pctTxt(a.stepPct)),
             cell("Zone outcome", zoneLabel(a.zoneOutcome)),
             cell("Verified", a.zoneVerified ? "Yes" : "No"),
@@ -720,7 +720,7 @@
               `<span class="ai-verify ${a.zoneVerified ? "yes" : "no"}">${a.zoneVerified ? "✓ Verified" : "⚠ Unverified"}</span>` +
               `<span class="ai-zone ${a.zoneOutcome || "pending"}">${zoneLabel(a.zoneOutcome)}</span>` +
               `</div>` +
-              `<span class="ai-nums">Alert ${fmtRs(a.alertPrice)} · Trigger ${fmtRs(a.triggerPrice)} · SL ${fmtRs(a.stopLoss)} · ${a.timeframe || "-"}</span>` +
+              `<span class="ai-nums">Entry ${fmtRs(a.alertPrice)} · Alert ${fmtRs(a.triggerPrice)} · SL ${fmtRs(a.stopLoss)} · ${a.timeframe || "-"}</span>` +
               `<span class="ai-sub">3× ${fmtRs(a.target3)} · 5× ${fmtRs(a.target5)} · R ${fmtRs(a.riskR)} · by ${esc(a.zoneCreator) || "-"}${a.note ? ` · ${esc(a.note)}` : ""}${a.candleDate ? ` · candle ${a.candleDate}${a.candleTime ? " " + a.candleTime : ""}` : ""}${a.createdAt ? ` · created ${fmtDateShort(a.createdAt)}` : ""}${last}</span>` +
               `</div>` +
               `<div class="ai-actions"></div>`;
@@ -1033,7 +1033,7 @@
             ? `${unreadCount()} unread · ${notifItems.length} total`
             : "";
           if (!notifItems.length) {
-            host.innerHTML = `<div class="notif-empty">No notifications yet.<br>Triggered alerts show up here.</div>`;
+            host.innerHTML = `<div class="notif-empty">No notifications yet.<br>Fired alerts show up here.</div>`;
             return;
           }
           host.innerHTML = "";

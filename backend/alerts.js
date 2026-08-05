@@ -728,9 +728,9 @@ function updateSymbols(payload) {
 
 // ---------- notifications ----------
 const EVENT_HEAD = {
-  TRIGGER: "🔔 Trigger",
-  REALERT: "🔁 Re-trigger",
-  ENTRY: "🎯 Entry (alert price reached)",
+  TRIGGER: "🔔 Alert",
+  REALERT: "🔁 Re-alert",
+  ENTRY: "🎯 Entry (entry price reached)",
   PARTIAL: "🟡 Partial (3× hit)",
   SUCCESS: "✅ Success (5× hit)",
   FAIL: "❌ Fail (stop loss hit)",
