@@ -96,20 +96,36 @@
           return o ? o[1] : val;
         };
         function closeMenus() {
-          $$("#alertFilters .ms-menu").forEach((m) => (m.hidden = true));
+          $$("#alertFilters .ms-menu").forEach((m) => {
+            m.hidden = true;
+            const btn = m.parentElement.querySelector(".ms-btn");
+            if (btn) btn.setAttribute("aria-expanded", "false");
+          });
         }
         function buildFilters() {
           const host = $("#alertFilters");
           host.innerHTML = "";
+          const advancedKeys = new Set(["tf", "review", "outcome"]);
+          const advanced = document.createElement("div");
+          advanced.className = "ms-advanced";
+          advanced.id = "advancedFilters";
+          advanced.hidden = true;
           for (const def of FILTER_DEFS) {
             const wrap = document.createElement("div");
             wrap.className = "ms";
+            wrap.dataset.filterKey = def.key;
             const btn = document.createElement("button");
             btn.type = "button";
             btn.className = "ms-btn";
+            btn.id = `filter-${def.key}-button`;
+            btn.setAttribute("aria-expanded", "false");
+            btn.setAttribute("aria-controls", `filter-${def.key}-menu`);
             btn.innerHTML = `<span>${def.label} <span class="ms-count"></span></span><i data-lucide="chevron-down"></i>`;
             const menu = document.createElement("div");
             menu.className = "ms-menu";
+            menu.id = `filter-${def.key}-menu`;
+            menu.setAttribute("role", "group");
+            menu.setAttribute("aria-labelledby", btn.id);
             menu.hidden = true;
             menu.onclick = (e) => e.stopPropagation(); // keep menu open while ticking
             for (const [val, lab] of optsOf(def)) {
@@ -135,20 +151,48 @@
               const wasOpen = !menu.hidden;
               closeMenus();
               menu.hidden = wasOpen;
+              btn.setAttribute("aria-expanded", String(!wasOpen));
             };
             wrap.appendChild(btn);
             wrap.appendChild(menu);
-            host.appendChild(wrap);
+            (advancedKeys.has(def.key) ? advanced : host).appendChild(wrap);
           }
+          const more = document.createElement("button");
+          more.type = "button";
+          more.className = "ms-more";
+          more.id = "moreFiltersBtn";
+          more.setAttribute("aria-expanded", "false");
+          more.setAttribute("aria-controls", advanced.id);
+          more.innerHTML = `<span>More filters <span class="ms-more-count"></span></span><i data-lucide="sliders-horizontal" aria-hidden="true"></i>`;
+          more.onclick = (e) => {
+            e.stopPropagation();
+            const open = advanced.hidden;
+            advanced.hidden = !open;
+            more.setAttribute("aria-expanded", String(open));
+            if (!open) closeMenus();
+          };
+          host.appendChild(more);
+          host.appendChild(advanced);
           updateFilterUI();
           drawIcons();
         }
         function updateFilterUI() {
-          $$("#alertFilters .ms").forEach((wrap, i) => {
-            const c = sel[FILTER_DEFS[i].key].size;
+          $$("#alertFilters .ms").forEach((wrap) => {
+            const c = sel[wrap.dataset.filterKey].size;
             wrap.querySelector(".ms-count").textContent = c ? `(${c})` : "";
             wrap.querySelector(".ms-btn").classList.toggle("active", c > 0);
           });
+          const advancedCount = ["tf", "review", "outcome"].reduce(
+            (sum, key) => sum + sel[key].size,
+            0,
+          );
+          const more = $("#moreFiltersBtn");
+          if (more) {
+            more.classList.toggle("active", advancedCount > 0);
+            more.querySelector(".ms-more-count").textContent = advancedCount
+              ? `(${advancedCount})`
+              : "";
+          }
           renderChips();
         }
         function renderChips() {
@@ -187,8 +231,8 @@
           };
         }
         function syncFilterChecks() {
-          $$("#alertFilters .ms").forEach((wrap, i) => {
-            const key = FILTER_DEFS[i].key;
+          $$("#alertFilters .ms").forEach((wrap) => {
+            const key = wrap.dataset.filterKey;
             wrap
               .querySelectorAll(".ms-item input")
               .forEach((cb) => (cb.checked = sel[key].has(cb.value)));
@@ -227,6 +271,9 @@
             partial: "🟡 Partial",
             success: "✅ Success",
           })[o] || "Pending";
+        const zoneText = (o) =>
+          ({ fail: "Failed", partial: "Partial", success: "Successful" })[o] ||
+          "Pending";
         const REVIEW_LABEL = { approved: "Approved", rejected: "Rejected" };
         const reviewLabel = (r) => REVIEW_LABEL[r] || "Raw";
         const reviewBadgeHtml = (a) =>
@@ -405,13 +452,45 @@
           el.innerHTML = `R ${fmtRs(R)} · 3× <b>${fmtRs(p + dir * 3 * R)}</b> (+${fmtRs(3 * R)}) · 5× <b>${fmtRs(p + dir * 5 * R)}</b> (+${fmtRs(5 * R)})`;
         }
         // ---------- create/edit modal ----------
+        let alertReturnFocus = null;
+        let viewReturnFocus = null;
+        let reviewReturnFocus = null;
+        const restoreFocus = (el) => {
+          if (el && el.isConnected)
+            setTimeout(() => {
+              if (!document.querySelector('[role="dialog"].show')) el.focus();
+            }, 0);
+        };
+        const trapDialogFocus = (dialog, e) => {
+          if (e.key !== "Tab" || !dialog.classList.contains("show")) return;
+          const items = Array.from(
+            dialog.querySelectorAll(
+              'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+            ),
+          ).filter((el) => !el.hidden && el.offsetParent !== null);
+          if (!items.length) return;
+          const first = items[0];
+          const last = items[items.length - 1];
+          if (e.shiftKey && document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        };
         function openAlertModal() {
+          alertReturnFocus = document.activeElement;
           $("#alertModal").classList.add("show");
           drawIcons();
           setTimeout(() => $("#al-symbol").focus(), 50);
         }
         function closeAlertModal() {
-          $("#alertModal").classList.remove("show");
+          const modal = $("#alertModal");
+          if (!modal.classList.contains("show")) return;
+          modal.classList.remove("show");
+          restoreFocus(alertReturnFocus);
+          alertReturnFocus = null;
         }
         // ---------- alert detail (view) modal ----------
         const pctTxt = (v) =>
@@ -445,6 +524,7 @@
           });
         };
         function openAlertView(a) {
+          viewReturnFocus = document.activeElement;
           $("#av-sym").textContent = a.symbol;
           $("#av-badges").innerHTML =
             `<span class="ai-index">${a.index}</span>` +
@@ -493,8 +573,8 @@
           acts.innerHTML = "";
           const isArch = a._archived || a.status === "closed";
           if (!canEdit()) {
-            // viewer: read-only
-            acts.innerHTML = `<span class="av-readonly">Read only</span>`;
+            acts.innerHTML =
+              `<span class="av-readonly">Read-only access. An editor can approve or reject this alert.</span>`;
           } else if (isArch) {
             // archived alert: re-open (re-arm) or delete
             acts.appendChild(
@@ -547,7 +627,7 @@
               );
             acts.appendChild(
               btn(
-                "Close",
+                "Close alert",
                 "btn-sm",
                 async () => {
                   await act(a.id, "close");
@@ -572,9 +652,15 @@
           }
           $("#alertViewModal").classList.add("show");
           drawIcons();
+          setTimeout(() => $("#av-close").focus(), 50);
         }
         function closeAlertView() {
-          $("#alertViewModal").classList.remove("show");
+          const modal = $("#alertViewModal");
+          if (!modal.classList.contains("show")) return;
+          modal.classList.remove("show");
+          restoreFocus(viewReturnFocus);
+          viewReturnFocus = null;
+          $("#av-actions").replaceChildren();
         }
         // ---------- review (approve/reject) modal ----------
         // Minimal reuse of the #alertModal chrome (am-card/am-head/alert-form/form-err/
@@ -582,6 +668,7 @@
         // doesn't fit this flow, so a small dedicated modal is used instead.
         let reviewTarget = null; // { alert, action: "approve" | "reject" }
         function openReviewModal(a, action) {
+          reviewReturnFocus = document.activeElement;
           reviewTarget = { alert: a, action };
           $("#rv-title").textContent =
             (action === "approve" ? "Approve" : "Reject") + " alert - " + a.symbol;
@@ -596,8 +683,12 @@
           setTimeout(() => $("#rv-reason").focus(), 50);
         }
         function closeReviewModal() {
-          $("#reviewModal").classList.remove("show");
+          const modal = $("#reviewModal");
+          if (!modal.classList.contains("show")) return;
+          modal.classList.remove("show");
           reviewTarget = null;
+          restoreFocus(reviewReturnFocus);
+          reviewReturnFocus = null;
         }
         async function submitReview(e) {
           e.preventDefault();
@@ -620,7 +711,7 @@
           }
           closeReviewModal();
           closeAlertView();
-          refreshAll();
+          refreshAll(true);
         }
         // called from the dashboard's stock modal: switch to Alerts + open create,
         // prefilled with the given index + symbol
@@ -726,7 +817,7 @@
             alertIndex = body.index; // remember for the next new-alert default
             resetForm();
             closeAlertModal();
-            loadList();
+            refreshAll(true);
           } catch (err) {
             $("#al-err").textContent = err.message;
           }
@@ -738,151 +829,126 @@
           // update the toggle counts
           if ($("#vtActiveCount")) $("#vtActiveCount").textContent = allAlerts.length;
           if ($("#vtClosedCount")) $("#vtClosedCount").textContent = allArchived.length;
-          // base list depends on the Active/Closed view; closed rows are tagged _archived
-          let list =
-            alertView === "closed"
-              ? allArchived.map((a) => ({ ...a, _archived: true }))
-              : allAlerts;
-          if (sel.index.size) list = list.filter((a) => sel.index.has(a.index));
-          if (sel.status.size) list = list.filter((a) => sel.status.has(a.status));
-          if (sel.side.size) list = list.filter((a) => sel.side.has(a.side));
-          if (sel.tf.size) list = list.filter((a) => sel.tf.has(a.timeframe));
-          if (sel.review.size)
-            list = list.filter((a) => sel.review.has(a.reviewState || "raw"));
-          if (sel.outcome.size)
-            list = list.filter((a) => sel.outcome.has(a.zoneOutcome || "pending"));
+          const source = alertView === "closed" ? allArchived : allAlerts;
+          const hasFilters = Object.values(sel).some((values) => values.size);
+          const list = hasFilters
+            ? source.filter(
+                (a) =>
+                  (!sel.index.size || sel.index.has(a.index)) &&
+                  (!sel.status.size || sel.status.has(a.status)) &&
+                  (!sel.side.size || sel.side.has(a.side)) &&
+                  (!sel.tf.size || sel.tf.has(a.timeframe)) &&
+                  (!sel.review.size || sel.review.has(a.reviewState || "raw")) &&
+                  (!sel.outcome.size || sel.outcome.has(a.zoneOutcome || "pending")),
+              )
+            : source;
           renderList(list);
         }
+        const listedAlerts = new Map();
+        const listActionHtml = (label, action, icon, cls = "btn-sm") =>
+          `<button type="button" class="${cls}" data-alert-action="${action}"><i data-lucide="${icon}"></i>${label}</button>`;
         function renderList(alerts) {
           const host = $("#alertList");
+          listedAlerts.clear();
           if (!alerts.length) {
             const base = alertView === "closed" ? allArchived : allAlerts;
             host.innerHTML = base.length
               ? `<div class="empty">No alerts match the current filters.</div>`
               : alertView === "closed"
                 ? `<div class="empty">No closed alerts yet.</div>`
-                : `<div class="empty">No active alerts. Click "New alert" to create one.</div>`;
+                : canEdit()
+                  ? `<div class="empty">No active alerts. Click "New alert" to create one.</div>`
+                  : `<div class="empty">No active alerts to view.</div>`;
             return;
           }
           host.innerHTML = "";
           for (const a of alerts) {
+            listedAlerts.set(String(a.id), a);
             const isArch = a._archived || a.status === "closed";
+            const editable = canEdit();
             const div = document.createElement("div");
+            div.dataset.alertId = a.id;
             div.className =
               "alert-item " +
               (a.side === "BUY" ? "side-buy" : "side-sell") +
               (a.ringing ? " ringing" : "") +
               (isArch ? " archived" : "");
-            const last = a.lastEvent
-              ? ` · last ${a.lastEvent.type} @ ${fmtRs(a.lastEvent.price)}`
-              : "";
             div.innerHTML =
               `<div class="ai-body">` +
               `<div class="ai-line1">` +
               `<span class="ai-sym">${a.symbol}</span>` +
-              `<span class="ai-index">${a.index}</span>` +
-              `<span class="ai-side ${a.side === "BUY" ? "buy" : "sell"}">${a.side}</span>` +
               `<span class="ai-status ${a.status}">${a.status}</span>` +
+              `<span class="ai-side ${a.side === "BUY" ? "buy" : "sell"}">${a.side}</span>` +
+              `<span class="ai-index">${a.index}</span>` +
               (isArch ? `<span class="ai-archived">Archived</span>` : "") +
-              reviewBadgeHtml(a) +
-              `<span class="ai-zone ${a.zoneOutcome || "pending"}">${zoneLabel(a.zoneOutcome)}</span>` +
               `</div>` +
+              `<span class="ai-state-meta">${reviewLabel(a.reviewState)} review · ${zoneText(a.zoneOutcome)} outcome</span>` +
               `<span class="ai-nums">Entry ${fmtRs(a.alertPrice)} · Alert ${fmtRs(a.triggerPrice)} · SL ${fmtRs(a.stopLoss)} · ${a.timeframe || "-"}</span>` +
-              `<span class="ai-sub">3× ${fmtRs(a.target3)} · 5× ${fmtRs(a.target5)} · R ${fmtRs(a.riskR)} · by ${esc(a.zoneCreator) || "-"}${a.note ? ` · ${esc(a.note)}` : ""}${a.candleDate ? ` · candle ${a.candleDate}${a.candleTime ? " " + a.candleTime : ""}` : ""}${a.createdAt ? ` · created ${fmtDateShort(a.createdAt)}` : ""}${last}</span>` +
+              `<span class="ai-sub">Targets: 3× ${fmtRs(a.target3)} · 5× ${fmtRs(a.target5)} · Risk ${fmtRs(a.riskR)}</span>` +
               `</div>` +
-              `<div class="ai-actions"></div>`;
+              (editable ? `<div class="ai-actions"></div>` : "");
+            if (!editable) {
+              div.setAttribute("role", "button");
+              div.tabIndex = 0;
+              div.setAttribute("aria-label", `View ${a.symbol} alert details`);
+            }
             const acts = div.querySelector(".ai-actions");
-            if (!canEdit()) {
-              // viewer: read-only, just View
-              acts.appendChild(
-                btn("View", "btn-sm", () => openAlertView(a), "eye"),
+            if (editable && isArch) {
+              // Keep the resting row focused. Destructive actions live in details.
+              acts.innerHTML = listActionHtml(
+                "Re-open alert",
+                "rearm",
+                "rotate-ccw",
               );
-            } else if (isArch) {
-              // archived alerts: re-open (re-arm with current-price logic), view, delete
-              acts.appendChild(
-                btn("Re-open", "btn-sm", () => rearmAlert(a), "rotate-ccw"),
-              );
-              acts.appendChild(
-                btn("View", "btn-sm", () => openAlertView(a), "eye"),
-              );
-              acts.appendChild(
-                btn(
-                  "Delete",
-                  "btn-sm danger",
-                  () => {
-                    if (confirm(`Delete archived alert for ${a.symbol}?`)) del(a.id);
-                  },
-                  "trash-2",
-                ),
-              );
-            } else {
-              // list shows Approve/Reject only for raw (unreviewed) alerts;
-              // approved/rejected are toggled from the detail modal (click the row).
+            } else if (editable) {
+              // Only the next consequential action remains visible; edit/close/delete
+              // stay in the detail view where their context is explicit.
               if (a.reviewState === "raw") {
-                acts.appendChild(
-                  btn(
-                    "Approve",
-                    "btn-sm",
-                    () => openReviewModal(a, "approve"),
-                    "shield-check",
-                  ),
+                acts.innerHTML += listActionHtml(
+                  "Approve",
+                  "approve",
+                  "shield-check",
                 );
-                acts.appendChild(
-                  btn(
-                    "Reject",
-                    "btn-sm",
-                    () => openReviewModal(a, "reject"),
-                    "shield-off",
-                  ),
+                acts.innerHTML += listActionHtml(
+                  "Reject",
+                  "reject",
+                  "shield-off",
                 );
               }
               if (a.ringing)
-                acts.appendChild(
-                  btn("Snooze", "btn-sm", () => act(a.id, "snooze"), "clock"),
-                );
-              acts.appendChild(
-                btn("Close", "btn-sm", () => act(a.id, "close"), "circle-x"),
-              );
-              acts.appendChild(
-                btn("Edit", "btn-sm", () => editAlert(a), "pencil"),
-              );
-              acts.appendChild(
-                btn(
-                  "Delete",
-                  "btn-sm danger",
-                  () => {
-                    if (confirm(`Delete alert for ${a.symbol}?`)) del(a.id);
-                  },
-                  "trash-2",
-                ),
-              );
+                acts.innerHTML += listActionHtml("Snooze", "snooze", "clock");
             }
-            // click the row (anywhere but the action buttons) to view details
-            div.addEventListener("click", (e) => {
-              if (e.target.closest(".ai-actions")) return;
-              openAlertView(a);
-            });
+            if (editable)
+              acts.innerHTML += listActionHtml("View details", "view", "eye");
             host.appendChild(div);
           }
           drawIcons();
         }
-        async function loadList() {
-          try {
-            // active + archived together; archived shown only when the toggle is on
-            const { alerts, archived } = await api("/api/alerts/all");
-            allAlerts = alerts || [];
-            allArchived = archived || [];
-            applyFilters();
-          } catch (err) {
-            $("#alertList").innerHTML =
-              `<div class="empty">Failed to load: ${err.message}</div>`;
-          }
-        }
-        // Refresh EVERY surface at once (ringing toasts, notification center, and the
-        // alert list) so an action taken in one place is reflected everywhere.
-        async function refreshAll() {
-          await Promise.allSettled([pollRinging(), pollNotifications()]);
-          if (!$("#alertsView").hidden) loadList();
+        $("#alertList").addEventListener("click", (event) => {
+          const row = event.target.closest(".alert-item");
+          const alert = row && listedAlerts.get(row.dataset.alertId);
+          if (!alert) return;
+          const action = event.target.closest("[data-alert-action]")?.dataset
+            .alertAction;
+          if (action === "rearm") rearmAlert(alert);
+          else if (action === "approve" || action === "reject")
+            openReviewModal(alert, action);
+          else if (action === "snooze") act(alert.id, "snooze");
+          else openAlertView(alert);
+        });
+        $("#alertList").addEventListener("keydown", (event) => {
+          if (event.target.closest(".ai-actions")) return;
+          if (event.key !== "Enter" && event.key !== " ") return;
+          const row = event.target.closest(".alert-item");
+          const alert = row && listedAlerts.get(row.dataset.alertId);
+          if (!alert) return;
+          event.preventDefault();
+          openAlertView(alert);
+        });
+        function updateList(data) {
+          allAlerts = data.alerts || [];
+          allArchived = data.archived || [];
+          applyFilters();
         }
         async function act(id, action) {
           try {
@@ -897,13 +963,13 @@
                 dismissNotif(it.sig);
               }
           }
-          await refreshAll();
+          await refreshAll(true);
         }
         async function del(id) {
           try {
             await api("/api/alerts/" + id, "DELETE");
           } catch (_) {}
-          refreshAll();
+          refreshAll(true);
         }
         // Re-arm a (usually closed) alert with the same data + creation-time logic. Warns
         // if the live price is already past the entry (it'll re-arm already-entered).
@@ -931,12 +997,16 @@
           alertView = "active"; // jump to Active so the re-armed alert is visible
           syncViewToggle();
           closeAlertView();
-          refreshAll();
+          refreshAll(true);
         }
         function syncViewToggle() {
-          $$("#alertViewToggle .vt").forEach((b) =>
-            b.classList.toggle("active", b.dataset.view === alertView),
-          );
+          $$("#alertViewToggle .vt").forEach((b) => {
+            const on = b.dataset.view === alertView;
+            b.classList.toggle("active", on);
+            b.setAttribute("aria-selected", String(on));
+            b.tabIndex = on ? 0 : -1;
+            if (on) $("#alertList").setAttribute("aria-labelledby", b.id);
+          });
         }
 
         // ---------- ringing toasts (any view) ----------
@@ -954,59 +1024,85 @@
             }[t] || "🔔";
           const el = document.createElement("div");
           el.className = "ring-toast";
+          el.dataset.alertId = a.id;
           el.innerHTML =
             `<div class="rt-top">${icon} ${a.symbol} <span class="ai-side ${a.side === "BUY" ? "buy" : "sell"}">${a.side}</span></div>` +
             `<div class="rt-msg"></div>` +
-            `<div class="rt-actions"></div>`;
+            (canEdit()
+              ? `<div class="rt-actions">` +
+                `<button type="button" class="primary" data-toast-action="snooze"><i data-lucide="clock"></i>Snooze</button>` +
+                `<button type="button" data-toast-action="close"><i data-lucide="circle-x"></i>Close</button>` +
+                `</div>`
+              : "");
           el.querySelector(".rt-msg").textContent = a.lastEvent
             ? a.lastEvent.text
             : "";
-          const acts = el.querySelector(".rt-actions");
-          acts.appendChild(
-            btn("Snooze", "primary", () => act(a.id, "snooze"), "clock"),
-          );
-          acts.appendChild(
-            btn("Close", "", () => act(a.id, "close"), "circle-x"),
-          );
+          if (!canEdit()) {
+            el.classList.add("read-only");
+            el.setAttribute("role", "button");
+            el.tabIndex = 0;
+            el.setAttribute("aria-label", `View ${a.symbol} alert details`);
+          }
           return el;
         }
-        async function pollRinging() {
-          let data;
-          try {
-            data = await api("/api/alerts/active");
-          } catch (_) {
-            return;
-          }
-          const ring = data.alerts || [];
-          const byId = new Map(ring.map((a) => [a.id, a]));
-          for (const [id, rec] of [...toasts]) {
-            if (!byId.has(id)) {
-              rec.el.remove();
-              toasts.delete(id);
-            }
-          }
-          for (const a of ring) {
+        function updateRinging(alerts) {
+          const liveIds = new Set();
+          let ringingCount = 0;
+          for (const a of alerts) {
+            if (!a.ringing) continue;
+            ringingCount++;
+            const id = String(a.id);
+            liveIds.add(id);
             const at = a.lastEvent ? a.lastEvent.at : "";
-            const rec = toasts.get(a.id);
+            const rec = toasts.get(id);
             if (!rec) {
               const el = toastEl(a);
               $("#ringHost").appendChild(el);
-              toasts.set(a.id, { el, at });
+              toasts.set(id, { el, at, alert: a });
               beep();
             } else if (rec.at !== at) {
               const el = toastEl(a);
               rec.el.replaceWith(el);
-              toasts.set(a.id, { el, at });
+              toasts.set(id, { el, at, alert: a });
               beep();
+            } else {
+              rec.alert = a;
+            }
+          }
+          for (const [id, rec] of toasts) {
+            if (!liveIds.has(id)) {
+              rec.el.remove();
+              toasts.delete(id);
             }
           }
           const bell = $("#bell");
-          if (ring.length) {
+          if (ringingCount) {
             bell.hidden = false;
-            bell.textContent = ring.length;
+            bell.textContent = ringingCount;
           } else bell.hidden = true;
           drawIcons();
         }
+        function openToastAlert(alert) {
+          activateView("alerts");
+          openAlertView(alert);
+        }
+        $("#ringHost").addEventListener("click", (event) => {
+          const toast = event.target.closest(".ring-toast");
+          const record = toast && toasts.get(toast.dataset.alertId);
+          if (!record) return;
+          const action = event.target.closest("[data-toast-action]")?.dataset
+            .toastAction;
+          if (action) act(record.alert.id, action);
+          else if (!canEdit()) openToastAlert(record.alert);
+        });
+        $("#ringHost").addEventListener("keydown", (event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          const toast = event.target.closest(".ring-toast.read-only");
+          const record = toast && toasts.get(toast.dataset.alertId);
+          if (!record) return;
+          event.preventDefault();
+          openToastAlert(record.alert);
+        });
 
         // ---------- notification center ----------
         // One notification per fired alert (its latest event). Persists until the user
@@ -1052,8 +1148,11 @@
           if (h < 24) return h + "h ago";
           return Math.round(h / 24) + "d ago";
         }
-        const unreadCount = () =>
-          notifItems.filter((it) => !notifRead.has(it.sig)).length;
+        const unreadCount = () => {
+          let count = 0;
+          for (const item of notifItems) if (!notifRead.has(item.sig)) count++;
+          return count;
+        };
         function updateNotifBadge() {
           const n = unreadCount();
           const badge = $("#notifBadge"),
@@ -1067,14 +1166,8 @@
             btn.classList.remove("has-unread");
           }
         }
-        async function pollNotifications() {
-          let data;
-          try {
-            // include archived so Entry/Success/Fail of auto-closed alerts still show here
-            data = await api("/api/alerts/all");
-          } catch (_) {
-            return;
-          }
+        function updateNotifications(data) {
+          // Include archived so Entry/Success/Fail of auto-closed alerts still show here.
           const all = (data.alerts || []).concat(data.archived || []);
           const live = new Set();
           const items = [];
@@ -1087,9 +1180,9 @@
           }
           // prune stale read/dismissed signatures no longer present
           let pruned = false;
-          for (const s of [...notifDismissed])
+          for (const s of notifDismissed)
             if (!live.has(s)) (notifDismissed.delete(s), (pruned = true));
-          for (const s of [...notifRead])
+          for (const s of notifRead)
             if (!live.has(s)) (notifRead.delete(s), (pruned = true));
           if (pruned) {
             saveSet(NOTIF_DISMISS_KEY, notifDismissed);
@@ -1101,6 +1194,36 @@
           notifItems = items;
           updateNotifBadge();
           if ($("#notifPanel").classList.contains("show")) renderNotifs();
+        }
+        let alertsRefreshPromise = null;
+        let alertsRefreshQueued = false;
+        // Fetch once per cycle, then update every alert surface from the same snapshot.
+        // A forced refresh requested during an in-flight poll is queued exactly once.
+        function refreshAll(force = false) {
+          if (alertsRefreshPromise) {
+            if (force) alertsRefreshQueued = true;
+            return alertsRefreshPromise;
+          }
+          alertsRefreshPromise = (async () => {
+            do {
+              alertsRefreshQueued = false;
+              let data;
+              try {
+                data = await api("/api/alerts/all");
+              } catch (err) {
+                if (!$("#alertsView").hidden)
+                  $("#alertList").innerHTML =
+                    `<div class="empty">Failed to load: ${esc(err.message)}</div>`;
+                return;
+              }
+              updateRinging(data.alerts || []);
+              updateNotifications(data);
+              if (!$("#alertsView").hidden) updateList(data);
+            } while (alertsRefreshQueued);
+          })().finally(() => {
+            alertsRefreshPromise = null;
+          });
+          return alertsRefreshPromise;
         }
         function markRead(sig) {
           if (!notifRead.has(sig)) {
@@ -1134,6 +1257,7 @@
             const ev = a.lastEvent;
             const item = document.createElement("div");
             item.className = "notif-item" + (notifRead.has(sig) ? "" : " unread");
+            item.dataset.notifSig = sig;
             item.innerHTML =
               `<span class="ni-dot"></span>` +
               `<div class="ni-body">` +
@@ -1145,78 +1269,69 @@
               `<span class="ni-time">${agoText(ev.at)}</span>` +
               `</div>` +
               `<div class="ni-msg"></div>` +
-              `<div class="ni-actions"></div>` +
+              (canEdit()
+                ? `<div class="ni-actions"></div>`
+                : "") +
               `</div>`;
             item.querySelector(".ni-msg").textContent =
               ev.text || `${ev.type} @ ${fmtRs(ev.price)}`;
             const acts = item.querySelector(".ni-actions");
-            // Snooze/Close only make sense for still-open alerts a non-viewer owns;
-            // closed/archived (or viewers) get just a Dismiss (client-side) + View.
-            const closed = a.status === "closed" || !canEdit();
-            if (!closed) {
-              acts.appendChild(
-                btn(
-                  "Snooze",
-                  "btn-sm",
-                  async () => {
-                    markRead(sig);
-                    dismissNotif(sig);
-                    await act(a.id, "snooze");
-                    pollNotifications();
-                  },
-                  "clock",
-                ),
-              );
-              acts.appendChild(
-                btn(
-                  "Close",
-                  "btn-sm",
-                  async () => {
-                    markRead(sig);
-                    dismissNotif(sig);
-                    await act(a.id, "close");
-                    pollNotifications();
-                  },
-                  "circle-x",
-                ),
-              );
-            } else {
-              acts.appendChild(
-                btn(
-                  "Dismiss",
-                  "btn-sm",
-                  () => {
-                    markRead(sig);
-                    dismissNotif(sig);
-                    renderNotifs();
-                  },
-                  "check",
-                ),
-              );
+            const closed = a.status === "closed";
+            if (acts && !closed) {
+              acts.innerHTML =
+                `<button type="button" class="btn-sm" data-notif-action="snooze"><i data-lucide="clock"></i>Snooze</button>` +
+                `<button type="button" class="btn-sm" data-notif-action="close"><i data-lucide="circle-x"></i>Close alert</button>`;
+            } else if (acts) {
+              acts.innerHTML = `<button type="button" class="btn-sm" data-notif-action="dismiss"><i data-lucide="check"></i>Dismiss</button>`;
             }
-            acts.appendChild(
-              btn(
-                "View",
-                "btn-sm",
-                () => {
-                  markRead(sig);
-                  closeNotifPanel();
-                  activateView("alerts"); // modal lives in #alertsView - make it visible
-                  openAlertView(a);
-                },
-                "eye",
-              ),
-            );
-            item.addEventListener("click", (e) => {
-              if (e.target.closest(".ni-actions")) return;
-              markRead(sig);
-              item.classList.remove("unread");
-              $("#np-count").textContent = `${unreadCount()} unread · ${notifItems.length} total`;
-            });
+            if (acts)
+              acts.innerHTML += `<button type="button" class="btn-sm" data-notif-action="view"><i data-lucide="eye"></i>View</button>`;
+            if (!acts) {
+              item.setAttribute("role", "button");
+              item.tabIndex = 0;
+              item.setAttribute("aria-label", `View ${a.symbol} alert details`);
+            }
             host.appendChild(item);
           }
           drawIcons();
         }
+        function notificationFromEvent(event) {
+          const item = event.target.closest(".notif-item");
+          if (!item) return null;
+          const record = notifItems.find((entry) => entry.sig === item.dataset.notifSig);
+          return record || null;
+        }
+        function viewNotification(record) {
+          markRead(record.sig);
+          closeNotifPanel();
+          activateView("alerts");
+          openAlertView(record.a);
+        }
+        $("#np-list").addEventListener("click", (event) => {
+          const record = notificationFromEvent(event);
+          if (!record) return;
+          const action = event.target.closest("[data-notif-action]")?.dataset
+            .notifAction;
+          if (action === "snooze" || action === "close") {
+            markRead(record.sig);
+            dismissNotif(record.sig);
+            act(record.a.id, action);
+          } else if (action === "dismiss") {
+            markRead(record.sig);
+            dismissNotif(record.sig);
+            renderNotifs();
+          } else {
+            viewNotification(record);
+          }
+        });
+        $("#np-list").addEventListener("keydown", (event) => {
+          if (event.target.closest(".ni-actions")) return;
+          if (event.key !== "Enter" && event.key !== " ") return;
+          const record = notificationFromEvent(event);
+          if (!record) return;
+          event.preventDefault();
+          viewNotification(record);
+        });
         function openNotifPanel() {
           $("#notifPanel").classList.add("show");
           renderNotifs();
@@ -1227,25 +1342,43 @@
         }
 
         // ---------- view switch ----------
-        // Activate a top-level view ("dash" | "alerts"). Exposed so other surfaces (e.g.
+        // Activate a top-level view ("dash" | "alerts" | "users"). Exposed so other surfaces (e.g.
         // the global notification center's "View") can switch to Alerts before opening a
         // modal that lives inside #alertsView (hidden while on the dashboard).
         function activateView(view) {
           const alertsOn = view === "alerts";
+          const usersOn = view === "users";
           $$(".viewnav .tab").forEach((x) => {
             const on = x.dataset.view === view;
             x.classList.toggle("active", on);
             x.setAttribute("aria-selected", String(on));
+            x.tabIndex = on ? 0 : -1;
           });
-          $("#dashView").hidden = alertsOn;
+          $("#dashView").hidden = alertsOn || usersOn;
           $("#alertsView").hidden = !alertsOn;
+          $("#usersView").hidden = !usersOn;
           if (alertsOn) {
             loadSymbols();
-            loadList();
+            refreshAll(true);
           }
+          if (usersOn && window.__openUsersView) window.__openUsersView();
         }
         $$(".viewnav .tab").forEach((b) => {
           b.onclick = () => activateView(b.dataset.view);
+        });
+        $(".viewnav").addEventListener("keydown", (e) => {
+          const tabs = Array.from($$(".viewnav .tab")).filter((tab) => !tab.hidden);
+          const current = tabs.indexOf(document.activeElement);
+          if (current < 0) return;
+          let next = current;
+          if (e.key === "ArrowRight") next = (current + 1) % tabs.length;
+          else if (e.key === "ArrowLeft") next = (current - 1 + tabs.length) % tabs.length;
+          else if (e.key === "Home") next = 0;
+          else if (e.key === "End") next = tabs.length - 1;
+          else return;
+          e.preventDefault();
+          activateView(tabs[next].dataset.view);
+          tabs[next].focus();
         });
 
         // ---------- wire up ----------
@@ -1284,6 +1417,10 @@
         $("#reviewModal").addEventListener("click", (e) => {
           if (e.target.id === "reviewModal") closeReviewModal();
         });
+        [$("#alertModal"), $("#alertViewModal"), $("#reviewModal")].forEach(
+          (dialog) =>
+            dialog.addEventListener("keydown", (e) => trapDialogFocus(dialog, e)),
+        );
         $("#reviewForm").onsubmit = submitReview;
         // notification center wiring
         $("#notifBtn").onclick = () =>
@@ -1295,10 +1432,11 @@
         $("#np-readall").onclick = markAllNotifsRead;
         document.addEventListener("keydown", (e) => {
           if (e.key === "Escape") {
-            closeAlertModal();
-            closeAlertView();
-            closeReviewModal();
-            closeNotifPanel();
+            if ($("#reviewModal").classList.contains("show")) closeReviewModal();
+            else if ($("#alertModal").classList.contains("show")) closeAlertModal();
+            else if ($("#alertViewModal").classList.contains("show"))
+              closeAlertView();
+            else closeNotifPanel();
           }
         });
         $("#alertForm").onsubmit = submitForm;
@@ -1309,16 +1447,33 @@
             applyFilters();
           };
         });
+        $("#alertViewToggle").addEventListener("keydown", (e) => {
+          const tabs = Array.from($$("#alertViewToggle .vt"));
+          const current = tabs.indexOf(document.activeElement);
+          if (current < 0) return;
+          let next = current;
+          if (e.key === "ArrowRight") next = (current + 1) % tabs.length;
+          else if (e.key === "ArrowLeft")
+            next = (current - 1 + tabs.length) % tabs.length;
+          else if (e.key === "Home") next = 0;
+          else if (e.key === "End") next = tabs.length - 1;
+          else return;
+          e.preventDefault();
+          alertView = tabs[next].dataset.view;
+          syncViewToggle();
+          applyFilters();
+          tabs[next].focus();
+        });
 
         buildFilters(); // build the multi-select filter dropdowns + chips
 
-        // role gating: viewers can't create/modify alerts (server also enforces this)
+        // Only editors can create or modify alerts (server also enforces this).
         const canEdit = () => {
           const r = window.APP_AUTH && window.APP_AUTH.user && window.APP_AUTH.user.role;
-          return r === "admin" || r === "editor";
+          return r === "editor";
         };
         window.__alertsCanEdit = canEdit;
-        window.__reloadAlerts = loadList; // let the auth controller refresh after login
+        window.__reloadAlerts = () => refreshAll(true); // refresh after login
         // open a specific alert's detail view from another surface (e.g. the dashboard
         // stock modal) — switch to the Alerts view first so the modal is visible.
         window.__viewAlert = function (a) {
@@ -1336,18 +1491,14 @@
           } catch (_) {}
           resetForm();
           loadSymbols();
-          loadList();
           updatePreview();
           drawIcons();
-          pollRinging();
-          pollNotifications();
+          refreshAll(true);
           if (!alertsPollStarted) {
             alertsPollStarted = true;
             setInterval(() => {
               if (!window.APP_AUTH || !window.APP_AUTH.user) return; // paused until signed in
-              pollRinging();
-              pollNotifications();
-              if (!$("#alertsView").hidden) loadList();
+              refreshAll();
             }, 3000);
           }
         };

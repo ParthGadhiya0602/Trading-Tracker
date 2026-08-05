@@ -5,18 +5,19 @@
  * - Users live in a `users` collection (MongoDB Atlas, if `mongo.uri` is set in
  *   config.json and reachable) or the local `users.json` file (offline cache / fallback).
  *   Mirrors alerts.js: in-memory `store` is the source of truth; save() writes through.
- * - Passwords are hashed with the built-in `crypto.scrypt` + a per-user random salt and
- *   verified with `timingSafeEqual` - never stored or returned in plaintext.
+ * - Passwords are hashed with the built-in `crypto.scrypt`, a per-user random salt, and
+ *   a required secret pepper from config.json. Hashes are verified with
+ *   `timingSafeEqual`; plaintext passwords and the pepper are never stored with users.
  * - Sessions are random 256-bit tokens kept in memory (cleared on restart), 12h idle TTL.
  *
- * Roles: admin (manages users + full app) | editor (full alerts) | viewer (read-only).
+ * Roles: admin (manages users, views alerts) | editor (manages alerts) |
+ * viewer (read-only).
  */
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
-const HERE = __dirname;
-const ROOT = path.join(HERE, ".."); // repo root (config lives here)
+const ROOT = path.join(__dirname, ".."); // repo root (config lives here)
 const STORE_DIR = path.join(ROOT, "store"); // alert + user data files live here
 const STORE_FILE = path.join(STORE_DIR, "users.json");
 const CONFIG_FILE = path.join(ROOT, "config.json");
@@ -35,10 +36,10 @@ let backend = "file"; // "file" | "mongo"
 let usersColl = null;
 let mongoBusy = false,
   mongoDirty = false;
-let mongoConfUri = null;
+let passwordPepper = "";
 
 const sessions = new Map(); // token -> { userId, role, username, lastSeen }
-const fails = new Map(); // usernameLower -> { count, until }
+const fails = new Map(); // usernameLower -> { count, until, expiresAt }
 
 // ---------- small error log (shared file with alerts, "auth.*" scopes) ----------
 function logTs() {
@@ -68,16 +69,25 @@ function logError(scope, err) {
 }
 
 // ---------- hashing ----------
-function hashPassword(password, salt) {
+function passwordMaterial(password, pepper) {
+  return crypto
+    .createHmac("sha256", pepper)
+    .update(String(password), "utf8")
+    .digest();
+}
+function hashPassword(password, salt, pepper = passwordPepper) {
+  if (!pepper) throw new Error("auth.passwordPepper is required");
   const s = salt || crypto.randomBytes(16).toString("hex");
-  const hash = crypto.scryptSync(String(password), s, SCRYPT_KEYLEN).toString("hex");
+  const hash = crypto
+    .scryptSync(passwordMaterial(password, pepper), s, SCRYPT_KEYLEN)
+    .toString("hex");
   return { salt: s, hash };
 }
-function verifyPassword(password, salt, hash) {
-  if (!salt || !hash) return false;
+function verifyPassword(password, salt, hash, pepper = passwordPepper) {
+  if (!salt || !hash || !pepper) return false;
   let derived;
   try {
-    derived = crypto.scryptSync(String(password), salt, SCRYPT_KEYLEN);
+    derived = crypto.scryptSync(passwordMaterial(password, pepper), salt, SCRYPT_KEYLEN);
   } catch (_) {
     return false;
   }
@@ -89,13 +99,23 @@ function verifyPassword(password, salt, hash) {
 
 // ---------- persistence (mirrors alerts.js) ----------
 function loadConfig() {
-  mongoConfUri = null;
+  passwordPepper = "";
+  let cfg;
   try {
-    const cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
-    if (cfg && cfg.mongo && cfg.mongo.uri) mongoConfUri = String(cfg.mongo.uri).trim();
-  } catch (_) {
-    /* no config.json -> file mode */
+    cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
+  } catch (error) {
+    throw new Error(`cannot read config.json: ${error.message}`);
   }
+  const mongoUri =
+    cfg && cfg.mongo && cfg.mongo.uri ? String(cfg.mongo.uri).trim() : "";
+  const configuredPepper =
+    cfg && cfg.auth && cfg.auth.passwordPepper
+      ? String(cfg.auth.passwordPepper).trim()
+      : "";
+  if (configuredPepper.length < 32)
+    throw new Error("auth.passwordPepper must contain at least 32 characters");
+  passwordPepper = configuredPepper;
+  return mongoUri;
 }
 function readFileStore() {
   try {
@@ -106,14 +126,14 @@ function readFileStore() {
   }
 }
 async function load() {
-  loadConfig();
-  if (mongoConfUri) {
+  const mongoUri = loadConfig();
+  if (mongoUri) {
     try {
       const { MongoClient } = require("mongodb"); // lazy: only for Mongo mode
-      const client = new MongoClient(mongoConfUri, { serverSelectionTimeoutMS: 8000 });
+      const client = new MongoClient(mongoUri, { serverSelectionTimeoutMS: 8000 });
       await client.connect();
       const dbName =
-        (mongoConfUri.match(/mongodb(?:\+srv)?:\/\/[^/]+\/([^/?]+)/) || [])[1] ||
+        (mongoUri.match(/mongodb(?:\+srv)?:\/\/[^/]+\/([^/?]+)/) || [])[1] ||
         "trading_tracker";
       const db = client.db(dbName);
       usersColl = db.collection("users");
@@ -147,6 +167,9 @@ async function load() {
 }
 function backendName() {
   return backend;
+}
+function passwordPepperConfigured() {
+  return !!passwordPepper;
 }
 function save() {
   try {
@@ -315,18 +338,32 @@ function pickerUsers() {
 
 // ---------- login + sessions ----------
 function isLocked(username) {
-  const r = fails.get(lower(username));
-  return !!(r && r.until > Date.now());
+  const key = lower(username);
+  const record = fails.get(key);
+  if (!record) return false;
+  const now = Date.now();
+  if (record.expiresAt <= now) {
+    fails.delete(key);
+    return false;
+  }
+  return record.until > now;
 }
 function noteFail(username) {
-  const l = lower(username);
-  const r = fails.get(l) || { count: 0, until: 0 };
-  r.count++;
-  if (r.count >= RL_MAX_FAILS) {
-    r.until = Date.now() + RL_LOCK_MS;
-    r.count = 0;
+  const key = lower(username);
+  const now = Date.now();
+  for (const [name, record] of fails) {
+    if (record.expiresAt <= now) fails.delete(name);
   }
-  fails.set(l, r);
+  if (!fails.has(key) && fails.size >= 1024)
+    fails.delete(fails.keys().next().value);
+  const record = fails.get(key) || { count: 0, until: 0, expiresAt: 0 };
+  record.count++;
+  record.expiresAt = now + RL_LOCK_MS;
+  if (record.count >= RL_MAX_FAILS) {
+    record.until = record.expiresAt;
+    record.count = 0;
+  }
+  fails.set(key, record);
 }
 function clearFails(username) {
   fails.delete(lower(username));
@@ -338,7 +375,9 @@ function login(username, password) {
   const u = findByName(username);
   // constant-ish behaviour: run a hash even if user missing / disabled
   const ok =
-    u && !u.disabled && verifyPassword(password, u.salt, u.hash);
+    u &&
+    !u.disabled &&
+    verifyPassword(password, u.salt, u.hash);
   if (!ok) {
     noteFail(username);
     return { error: "invalid username or password" };
@@ -346,12 +385,16 @@ function login(username, password) {
   clearFails(username);
   u.lastLoginAt = new Date().toISOString();
   save();
+  const now = Date.now();
+  for (const [sessionToken, session] of sessions) {
+    if (now - session.lastSeen > SESSION_TTL_MS) sessions.delete(sessionToken);
+  }
   const token = crypto.randomBytes(32).toString("hex");
   sessions.set(token, {
     userId: u.id,
     role: u.role,
     username: u.username,
-    lastSeen: Date.now(),
+    lastSeen: now,
   });
   return { token, user: pub(u) };
 }
@@ -381,6 +424,7 @@ function logout(token) {
 module.exports = {
   load,
   backendName,
+  passwordPepperConfigured,
   needsSetup,
   setupAdmin,
   createUser,

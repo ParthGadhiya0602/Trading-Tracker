@@ -94,7 +94,10 @@ function normalize(raw, index, kind) {
 
 function scheduleReconnect(entry) {
   if (!running || entry.closedByUs) return;
-  entry.timer = setTimeout(() => connect(entry), entry.backoffMs);
+  entry.timer = setTimeout(() => {
+    entry.timer = null;
+    connect(entry);
+  }, entry.backoffMs);
   entry.backoffMs = Math.min(entry.backoffMs * 2, MAX_BACKOFF_MS);
 }
 
@@ -117,7 +120,7 @@ function connect(entry) {
   ws.addEventListener("message", (ev) => {
     try {
       const tick = normalize(ev.data, entry.index, entry.kind);
-      if (tick && opts.onTick) opts.onTick(tick);
+      if (tick && opts && opts.onTick) opts.onTick(tick);
     } catch (_) {
       /* defensive: never let a bad message kill the socket */
     }
@@ -155,29 +158,54 @@ function teardown() {
 // (feed.stream holds wsBase/origin/constituents/levels). Safe to call when feed.stream is
 // missing/incomplete: it simply connects nothing.
 function start(o) {
-  opts = o || {};
-  const stream = opts.feed && opts.feed.stream;
   if (running) stop();
+  const input = o || {};
+  const stream = input.feed && input.feed.stream;
+  opts = {
+    onTick: input.onTick,
+    isOpen: typeof input.isOpen === "function" ? input.isOpen : () => false,
+    log: input.log,
+    userAgent: input.userAgent,
+  };
   running = true;
   if (!stream || !stream.wsBase || !stream.constituents) return;
   const entries = [];
   for (const [dashIndex, cfg] of Object.entries(stream.constituents)) {
     if (!cfg || !cfg.path || !cfg.index) continue;
-    entries.push({ key: `${dashIndex}/constituents`, index: dashIndex, kind: "stock", url: buildUrl(stream, cfg), origin: stream.origin });
+    entries.push({
+      key: `${dashIndex}/constituents`,
+      index: dashIndex,
+      kind: "stock",
+      url: buildUrl(stream, cfg),
+      origin: stream.origin,
+    });
   }
   if (stream.levels) {
     for (const [dashIndex, cfg] of Object.entries(stream.levels)) {
       if (!cfg || !cfg.path || !cfg.index) continue;
-      entries.push({ key: `${dashIndex}/level`, index: dashIndex, kind: "level", url: buildUrl(stream, cfg), origin: stream.origin });
+      entries.push({
+        key: `${dashIndex}/level`,
+        index: dashIndex,
+        kind: "level",
+        url: buildUrl(stream, cfg),
+        origin: stream.origin,
+      });
     }
   }
-  sockets = entries.map((e) => ({ ...e, ws: null, backoffMs: BASE_BACKOFF_MS, timer: null, closedByUs: false }));
+  sockets = entries.map((e) => ({
+    ...e,
+    ws: null,
+    backoffMs: BASE_BACKOFF_MS,
+    timer: null,
+    closedByUs: false,
+  }));
   for (const entry of sockets) connect(entry);
 }
 
 function stop() {
   running = false;
   teardown();
+  opts = null;
 }
 
 module.exports = { start, stop };

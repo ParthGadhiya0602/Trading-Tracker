@@ -59,19 +59,13 @@
       }
       .kpis .idxcard:hover {
         border-color: var(--line-strong);
-        transform: translateY(-2px);
-        box-shadow: var(--shadow);
+        transform: translateY(-1px);
+        box-shadow: var(--shadow-sm);
       }
       .kpis .idxcard.active {
-        border-color: transparent;
-        box-shadow:
-          0 0 0 1.5px var(--accent),
-          var(--shadow);
-        background: linear-gradient(
-          180deg,
-          color-mix(in srgb, var(--accent) 9%, var(--panel)),
-          var(--panel)
-        );
+        border-color: var(--accent);
+        box-shadow: var(--shadow-sm);
+        background: color-mix(in srgb, var(--accent) 6%, var(--panel));
       }
       .kpis .idxcard.active::before {
         content: "";
@@ -79,11 +73,19 @@
         left: 0;
         top: 0;
         bottom: 0;
-        width: 3px;
-        background: linear-gradient(180deg, var(--accent), var(--accent-2));
+        width: 1px;
+        background: var(--accent);
       }
       .kpis .idxcard.active .idxcard-name {
         color: var(--accent);
+      }
+      .kpis .idxcard.active .idxcard-pts {
+        font-size: 23px;
+        font-weight: 760;
+        letter-spacing: 0.3px;
+      }
+      .kpis .idxcard.active .idxcard-stats b {
+        font-weight: 750;
       }
       /* ---- skeleton shimmer helper for loading shells ---- */
       .skel {
@@ -289,7 +291,8 @@
         align-items: center;
         justify-content: space-between;
         gap: 8px 14px;
-        padding: 13px 16px;
+        padding: 14px 16px;
+        background: var(--panel);
         border-bottom: 1px solid var(--line);
       }
       .panel-title {
@@ -299,10 +302,7 @@
         letter-spacing: 0.2px;
       }
       .panel-title #idxName {
-        background: linear-gradient(90deg, var(--accent), var(--accent-2));
-        -webkit-background-clip: text;
-        background-clip: text;
-        color: transparent;
+        color: var(--accent);
       }
       .panel-meta {
         display: flex;
@@ -314,6 +314,10 @@
       }
       .panel-meta .upd {
         font-variant-numeric: tabular-nums;
+      }
+      .panel-meta #adv {
+        color: var(--muted-ink);
+        font-weight: 650;
       }
       /* the panel owns the border/radius/shadow; strip them from nested pieces */
       .panel .tablewrap {
@@ -341,4 +345,74 @@
         }
       }
 
-      
+      @media (max-width: 680px) {
+        .toolbar {
+          align-items: stretch;
+        }
+        .toolbar-left,
+        .tools {
+          width: 100%;
+        }
+        .tools {
+          justify-content: space-between;
+        }
+      }
+
+      @media (min-width: 681px) and (max-width: 1280px) {
+        .toolbar-left,
+        .tools {
+          width: 100%;
+        }
+        .toolbar-left {
+          justify-content: space-between;
+        }
+        .tools {
+          align-items: center;
+          justify-content: flex-end;
+          padding-top: 10px;
+          border-top: 1px solid var(--line);
+        }
+        .tools::before {
+          content: "Data freshness";
+          margin-right: auto;
+          color: var(--muted);
+          font-size: 10.5px;
+          font-weight: 750;
+          letter-spacing: 0.7px;
+          text-transform: uppercase;
+        }
+      }
+
+      @media (max-width: 560px) {
+        .toolbar-left {
+          align-items: stretch;
+          width: 100%;
+        }
+        .toolbar .tabs {
+          flex-wrap: nowrap;
+          max-width: 100%;
+          overflow-x: auto;
+          overscroll-behavior-x: contain;
+          padding-bottom: 2px;
+        }
+        .search {
+          width: 100%;
+        }
+        .search input {
+          width: 100%;
+        }
+        .kpis {
+          gap: 10px;
+          margin-bottom: 14px;
+        }
+        .kpis .idxcard.active .idxcard-pts {
+          font-size: 20px;
+        }
+        .panel-head {
+          padding: 12px;
+        }
+        .panel-meta {
+          gap: 4px 8px;
+          font-size: 11.5px;
+        }
+      }

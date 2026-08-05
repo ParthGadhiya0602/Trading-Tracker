@@ -16,9 +16,9 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { connectMongoWithRetry } = require("./mongo-retry");
 
-const HERE = __dirname;
-const ROOT = path.join(HERE, ".."); // repo root (config lives here)
+const ROOT = path.join(__dirname, ".."); // repo root (config lives here)
 const STORE_DIR = path.join(ROOT, "store"); // alert + user data files live here
 const STORE_FILE = path.join(STORE_DIR, "alerts.json");
 const CONFIG_FILE = path.join(ROOT, "config.json");
@@ -154,11 +154,6 @@ let archivedColl = null; // per-alert documents (closed / archived)
 let metaColl = null; // small meta docs (symbol cache)
 let mongoBusy = false,
   mongoDirty = false;
-let mongoConfUri = null; // mongo.uri from config.json (loaded in loadConfig)
-
-function mongoUri() {
-  return mongoConfUri;
-}
 function readFileStore() {
   try {
     const raw = JSON.parse(fs.readFileSync(STORE_FILE, "utf8"));
@@ -241,15 +236,25 @@ function migrate() {
     store.archived.push(...stillClosed);
     store.alerts = store.alerts.filter((a) => a.status !== "closed");
   }
+  store.archived.sort((x, y) =>
+    (y.archivedAt || "").localeCompare(x.archivedAt || ""),
+  );
 }
 async function load() {
-  loadConfig();
-  const uri = mongoUri();
+  const uri = loadConfig();
   if (uri) {
+    const retryCount = 3;
     try {
-      const { MongoClient } = require("mongodb"); // lazy: only needed for Mongo mode
-      const client = new MongoClient(uri, { serverSelectionTimeoutMS: 8000 });
-      await client.connect();
+      const client = await connectMongoWithRetry(uri, {
+        retries: retryCount,
+        retryDelayMs: 3000,
+        serverSelectionTimeoutMS: 8000,
+        onRetry: ({ retry, retries, retryDelayMs }) => {
+          console.warn(
+            `  alerts: MongoDB unavailable; retry ${retry}/${retries} in ${retryDelayMs / 1000}s`,
+          );
+        },
+      });
       // db name from the URI path (…mongodb.net/<db>[?…]); default if none
       const dbName =
         (uri.match(/mongodb(?:\+srv)?:\/\/[^/]+\/([^/?]+)/) || [])[1] ||
@@ -297,7 +302,10 @@ async function load() {
         );
       }
     } catch (e) {
-      logError("mongo.connect", `${(e && e.message) || e} - using local alerts.json`);
+      logError(
+        "mongo.connect",
+        `failed after ${retryCount + 1} attempts: ${(e && e.message) || e} - using local alerts.json`,
+      );
       alertsColl = null;
       metaColl = null;
       backend = "file";
@@ -368,7 +376,7 @@ async function persistMongo() {
 }
 function loadConfig() {
   telegram = null;
-  mongoConfUri = null;
+  let mongoUri = "";
   try {
     const cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
     const t = cfg && cfg.telegram;
@@ -379,10 +387,11 @@ function loadConfig() {
       };
     }
     if (cfg && cfg.mongo && cfg.mongo.uri)
-      mongoConfUri = String(cfg.mongo.uri).trim();
+      mongoUri = String(cfg.mongo.uri).trim();
   } catch (_) {
     /* no config.json -> Telegram + Mongo stay disabled (file mode) */
   }
+  return mongoUri;
 }
 function telegramConfigured() {
   return !!(telegram && telegram.recipients.length);
@@ -447,10 +456,9 @@ function list(index) {
 }
 // archived (closed) alerts, newest-closed first
 function listArchived(index) {
-  const a = [...store.archived].sort((x, y) =>
-    (y.archivedAt || "").localeCompare(x.archivedAt || ""),
-  );
-  return index ? a.filter((x) => x.index === index) : a;
+  return index
+    ? store.archived.filter((alert) => alert.index === index)
+    : store.archived;
 }
 function symbols() {
   return store.symbols;
@@ -676,7 +684,7 @@ function archiveAlert(id) {
   alert.status = "closed";
   alert.ringing = false;
   alert.archivedAt = new Date().toISOString();
-  store.archived.push(alert);
+  store.archived.unshift(alert);
   return alert;
 }
 

@@ -1,5 +1,28 @@
       "use strict";
       const API = "/api/indices";
+      const IST_PARTS_FORMATTER = new Intl.DateTimeFormat("en-US", {
+        timeZone: "Asia/Kolkata",
+        hour12: false,
+        weekday: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      const IST_CLOCK_FORMATTERS = {
+        12: new Intl.DateTimeFormat("en-GB", {
+          timeZone: "Asia/Kolkata",
+          hour12: true,
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        }),
+        24: new Intl.DateTimeFormat("en-GB", {
+          timeZone: "Asia/Kolkata",
+          hour12: false,
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        }),
+      };
       // default list; replaced at startup by the server's index list (/api/alert-config)
       let INDEX_NAMES = [
         "NIFTY 50",
@@ -210,13 +233,15 @@
         const sumBS = totalBuy + totalSell;
         const buyPct = sumBS > 0 ? Math.round((totalBuy / sumBS) * 100) : 0;
         const sellPct = sumBS > 0 ? 100 - buyPct : 0;
-        const maxQty = Math.max(
-          1,
-          ...ladder.flatMap((l) => [+l.buyQty || 0, +l.sellQty || 0]),
-        );
-        const ladderHasQty = ladder.some(
-          (l) => (+l.buyQty || 0) + (+l.sellQty || 0) > 0,
-        );
+        let maxQty = 1;
+        let ladderHasQty = false;
+        for (const level of ladder) {
+          const buyQty = +level.buyQty || 0;
+          const sellQty = +level.sellQty || 0;
+          if (buyQty || sellQty) ladderHasQty = true;
+          if (buyQty > maxQty) maxQty = buyQty;
+          if (sellQty > maxQty) maxQty = sellQty;
+        }
         const timeHtml = po.lastUpdateTime
           ? `<span class="pob-time num" id="pob-time">${escText(po.lastUpdateTime)}</span>`
           : "";
@@ -274,7 +299,13 @@
       }
 
       let modalSymbol = null; // symbol currently shown in the stock detail modal
+      let stockModalReturnFocus = null;
+      const stockAlertsById = new Map();
       function openStockModal(r) {
+        const stockModal = document.getElementById("stockModal");
+        if (!stockModal.classList.contains("show")) {
+          stockModalReturnFocus = document.activeElement;
+        }
         modalSymbol = r.symbol;
         document.getElementById("sm-sym").textContent = r.symbol;
         document.getElementById("sm-name").textContent = r.companyName || "";
@@ -308,20 +339,39 @@
         renderPreOpen(document.getElementById("sm-preopen"), r.preOpen);
         setStockTab("details"); // always open on Details
         renderStockAlerts(r.symbol);
-        document.getElementById("stockModal").classList.add("show");
+        stockModal.classList.add("show");
+        requestAnimationFrame(() => {
+          document.getElementById("sm-tab-details").focus();
+        });
       }
       // Details / Alerts tab switch inside the stock modal.
-      function setStockTab(tab) {
+      function setStockTab(tab, moveFocus = false) {
+        const nextTab = tab === "alerts" ? "alerts" : "details";
         document.querySelectorAll("#stockModal .sm-tab").forEach((b) => {
-          const on = b.dataset.tab === tab;
+          const on = b.dataset.tab === nextTab;
           b.classList.toggle("active", on);
           b.setAttribute("aria-selected", String(on));
+          b.tabIndex = on ? 0 : -1;
+          if (on && moveFocus) b.focus();
         });
-        document.getElementById("sm-panel-details").hidden = tab !== "details";
-        document.getElementById("sm-panel-alerts").hidden = tab !== "alerts";
+        document.getElementById("sm-panel-details").hidden = nextTab !== "details";
+        document.getElementById("sm-panel-alerts").hidden = nextTab !== "alerts";
       }
       document.querySelectorAll("#stockModal .sm-tab").forEach((b) => {
         b.onclick = () => setStockTab(b.dataset.tab);
+      });
+      document.querySelector("#stockModal .sm-tabs").addEventListener("keydown", (e) => {
+        const tabs = Array.from(document.querySelectorAll("#stockModal .sm-tab"));
+        const current = tabs.indexOf(document.activeElement);
+        if (current < 0) return;
+        let next = current;
+        if (e.key === "ArrowRight") next = (current + 1) % tabs.length;
+        else if (e.key === "ArrowLeft") next = (current - 1 + tabs.length) % tabs.length;
+        else if (e.key === "Home") next = 0;
+        else if (e.key === "End") next = tabs.length - 1;
+        else return;
+        e.preventDefault();
+        setStockTab(tabs[next].dataset.tab, true);
       });
       function setAlertsTabCount(n) {
         const el = document.getElementById("sm-tab-alerts-count");
@@ -336,6 +386,7 @@
       const REVIEW_TXT = { approved: "Approved", rejected: "Rejected", raw: "Raw" };
       async function renderStockAlerts(symbol) {
         const host = document.getElementById("sm-alerts");
+        stockAlertsById.clear();
         host.innerHTML = `<div class="sm-al-msg">Loading…</div>`;
         setAlertsTabCount(0);
         let data;
@@ -357,90 +408,118 @@
           setAlertsTabCount(0);
           return;
         }
-        const rowsHtml = mine
-          .map((a) => {
-            const rv = a.reviewState || "raw";
-            return (
-              `<button type="button" class="sm-alert" data-id="${a.id}">` +
-              `<span class="sm-alert-top">` +
-              `<span class="ai-side ${a.side === "BUY" ? "buy" : "sell"}">${a.side}</span>` +
-              `<span class="ai-status ${a.status}">${a.status}</span>` +
-              `<span class="ai-review ${rv}">${REVIEW_TXT[rv] || rv}</span>` +
-              `<span class="sm-alert-tf">${escText(a.timeframe || "-")}</span>` +
-              `</span>` +
-              `<span class="sm-alert-nums">Entry ${rs(a.alertPrice)} · Alert ${rs(a.triggerPrice)} · SL ${rs(a.stopLoss)}</span>` +
-              `</button>`
-            );
-          })
-          .join("");
+        let rowsHtml = "";
+        for (const alert of mine) {
+          const rv = alert.reviewState || "raw";
+          stockAlertsById.set(String(alert.id), alert);
+          rowsHtml +=
+            `<button type="button" class="sm-alert" data-id="${alert.id}">` +
+            `<span class="sm-alert-top">` +
+            `<span class="ai-side ${alert.side === "BUY" ? "buy" : "sell"}">${alert.side}</span>` +
+            `<span class="ai-status ${alert.status}">${alert.status}</span>` +
+            `<span class="ai-review ${rv}">${REVIEW_TXT[rv] || rv}</span>` +
+            `<span class="sm-alert-tf">${escText(alert.timeframe || "-")}</span>` +
+            `</span>` +
+            `<span class="sm-alert-nums">Entry ${rs(alert.alertPrice)} · Alert ${rs(alert.triggerPrice)} · SL ${rs(alert.stopLoss)}</span>` +
+            `</button>`;
+        }
         host.innerHTML = `<div class="sm-al-list">${rowsHtml}</div>`;
         setAlertsTabCount(mine.length);
-        const byId = new Map(mine.map((a) => [a.id, a]));
-        host.querySelectorAll(".sm-alert").forEach((el) => {
-          el.onclick = () => {
-            const a = byId.get(el.dataset.id);
-            closeStockModal();
-            if (window.__viewAlert) window.__viewAlert(a);
-          };
-        });
       }
-      function closeStockModal() {
-        document.getElementById("stockModal").classList.remove("show");
+      document.getElementById("sm-alerts").addEventListener("click", (event) => {
+        const button = event.target.closest(".sm-alert");
+        if (!button) return;
+        const alert = stockAlertsById.get(button.dataset.id);
+        if (!alert) return;
+        closeStockModal(false);
+        if (window.__viewAlert) window.__viewAlert(alert);
+      });
+      function closeStockModal(restoreFocus = true) {
+        const stockModal = document.getElementById("stockModal");
+        if (!stockModal.classList.contains("show")) return;
+        stockModal.classList.remove("show");
+        if (
+          restoreFocus &&
+          stockModalReturnFocus &&
+          stockModalReturnFocus.isConnected
+        ) {
+          stockModalReturnFocus.focus();
+        }
+        stockModalReturnFocus = null;
       }
       document.getElementById("sm-close").onclick = closeStockModal;
       // "Add alert" → close this modal, open the create-alert modal prefilled
       document.getElementById("sm-addalert").onclick = () => {
-        closeStockModal();
+        closeStockModal(false);
         if (window.openCreateAlert) window.openCreateAlert(activeIndex, modalSymbol);
       };
       document.getElementById("stockModal").addEventListener("click", (e) => {
         if (e.target.id === "stockModal") closeStockModal();
       });
       document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape") closeStockModal();
+        const stockModal = document.getElementById("stockModal");
+        if (!stockModal.classList.contains("show")) return;
+        if (e.key === "Escape") {
+          e.preventDefault();
+          closeStockModal();
+          return;
+        }
+        if (e.key !== "Tab") return;
+        const focusable = Array.from(
+          stockModal.querySelectorAll(
+            'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          ),
+        ).filter((el) => !el.hidden && el.offsetParent !== null);
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
       });
 
       // ---------- IST market-hours (correct regardless of viewer timezone) ----------
       function istParts(d) {
-        const f = new Intl.DateTimeFormat("en-US", {
-          timeZone: "Asia/Kolkata",
-          hour12: false,
-          weekday: "short",
-          hour: "2-digit",
-          minute: "2-digit",
-        });
         const o = {};
-        f.formatToParts(d).forEach((p) => (o[p.type] = p.value));
+        IST_PARTS_FORMATTER.formatToParts(d).forEach((p) => (o[p.type] = p.value));
         return o;
       }
-      // pre-open 09:00-09:15, open 09:15-15:30, else closed (IST, Mon-Fri)
+      // Operational data windows (IST, Mon-Fri): regular pre-open
+      // 09:00-09:15, live market 09:15-15:30, else closed.
       function marketState(d) {
         const p = istParts(d);
         if (p.weekday === "Sat" || p.weekday === "Sun") return "closed";
         const mins = (parseInt(p.hour, 10) % 24) * 60 + parseInt(p.minute, 10);
         if (mins >= 9 * 60 && mins < 9 * 60 + 15) return "pre-open";
-        if (mins >= 9 * 60 + 15 && mins <= 15 * 60 + 30) return "open";
+        if (mins >= 9 * 60 + 15 && mins < 15 * 60 + 30) return "open";
+        return "closed";
+      }
+      // Header phase spans every supplied NSE session: the first block-deal
+      // opening through the final trade-modification cutoff.
+      function marketSessionPhase(d) {
+        const p = istParts(d);
+        if (p.weekday === "Sat" || p.weekday === "Sun") return "closed";
+        const mins = (parseInt(p.hour, 10) % 24) * 60 + parseInt(p.minute, 10);
+        if (mins >= 8 * 60 + 45 && mins < 9 * 60 + 15) return "premarket";
+        if (mins >= 9 * 60 + 15 && mins < 15 * 60 + 30) return "live";
+        if (mins >= 15 * 60 + 30 && mins < 16 * 60 + 15)
+          return "postmarket";
         return "closed";
       }
       function fmtClock(d) {
         const h12 = document.getElementById("tf").value === "12";
-        return (
-          new Intl.DateTimeFormat("en-GB", {
-            timeZone: "Asia/Kolkata",
-            hour12: h12,
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-          }).format(d) + " IST"
-        );
+        return IST_CLOCK_FORMATTERS[h12 ? 12 : 24].format(d) + " IST";
       }
 
       // ---------- transform the feed payload -> rows with ₹ + % diffs + row color ----------
       function computeRows(payload) {
-        const rows = (payload.data || []).filter(
-          (r) => r.symbol && !INDEX_NAMES.includes(r.symbol),
-        );
-        return rows.map((r) => {
+        const rows = [];
+        for (const r of payload.data || []) {
+          if (!r.symbol || INDEX_NAMES.includes(r.symbol)) continue;
           const open = +r.open,
             high = +r.dayHigh,
             low = +r.dayLow,
@@ -468,25 +547,27 @@
               rowClass = "up-row";
             } // open == low -> green
           }
-          const nf = (v) => (v != null ? +v : NaN);
-          return {
+          rows.push({
             symbol: r.symbol,
             companyName: r.companyName || "",
             open,
             dayHigh: high,
             dayLow: low,
             lastPrice: last,
-            prevClose: nf(r.prevClose),
-            change: nf(r.change),
-            pChange: nf(r.pChange),
-            totalTradedVolume: nf(r.totalTradedVolume),
-            totalTradedValue: nf(r.totalTradedValue),
-            yearHigh: nf(r.yearHigh),
-            yearLow: nf(r.yearLow),
-            nearWKH: nf(r.nearWKH),
-            nearWKL: nf(r.nearWKL),
-            perChange30d: nf(r.perChange30d),
-            perChange365d: nf(r.perChange365d),
+            prevClose: r.prevClose != null ? +r.prevClose : NaN,
+            change: r.change != null ? +r.change : NaN,
+            pChange: r.pChange != null ? +r.pChange : NaN,
+            totalTradedVolume:
+              r.totalTradedVolume != null ? +r.totalTradedVolume : NaN,
+            totalTradedValue:
+              r.totalTradedValue != null ? +r.totalTradedValue : NaN,
+            yearHigh: r.yearHigh != null ? +r.yearHigh : NaN,
+            yearLow: r.yearLow != null ? +r.yearLow : NaN,
+            nearWKH: r.nearWKH != null ? +r.nearWKH : NaN,
+            nearWKL: r.nearWKL != null ? +r.nearWKL : NaN,
+            perChange30d: r.perChange30d != null ? +r.perChange30d : NaN,
+            perChange365d:
+              r.perChange365d != null ? +r.perChange365d : NaN,
             ohRs,
             olRs,
             ohPct,
@@ -494,8 +575,9 @@
             rowClass,
             colorRank,
             ...(r.preOpen ? { preOpen: r.preOpen } : {}),
-          };
-        });
+          });
+        }
+        return rows;
       }
 
       // ---------- render ----------
@@ -543,12 +625,12 @@
         return `<span class="delta ${c}">${rs(absRs)}<span class="pc">${pct(pcVal)}</span></span>`;
       }
       function renderTabs(all) {
-        const c = {
-          all: all.length,
-          high: all.filter((r) => r.colorRank === 1).length,
-          low: all.filter((r) => r.colorRank === -1).length,
-          neutral: all.filter((r) => r.colorRank === 0).length,
-        };
+        const c = { all: all.length, high: 0, low: 0, neutral: 0 };
+        for (const row of all) {
+          if (row.colorRank === 1) c.high++;
+          else if (row.colorRank === -1) c.low++;
+          else c.neutral++;
+        }
         document.querySelectorAll("#tabs .tab").forEach((b) => {
           const active = b.dataset.tab === activeTab;
           b.classList.toggle("active", active);
@@ -557,10 +639,12 @@
           if (cnt) cnt.textContent = c[b.dataset.tab];
         });
       }
+      const renderedRows = new Map();
       function renderBody() {
         const body = document.getElementById("body");
         const payload = cache && cache[activeIndex];
         if (!payload) return;
+        renderedRows.clear();
         const all = computeRows(payload);
         if (all.length === 0) {
           renderTabs(all);
@@ -568,7 +652,7 @@
           return;
         }
         renderTabs(all);
-        const rows = all.filter(tabMatch).filter(searchMatch);
+        const rows = all.filter((row) => tabMatch(row) && searchMatch(row));
         if (rows.length === 0) {
           const msg = searchQuery
             ? `No stocks match “${searchQuery}” in ${activeIndex}.`
@@ -590,16 +674,22 @@
         });
         body.innerHTML = "";
         for (const r of rows) {
+          renderedRows.set(r.symbol, r);
           const tr = document.createElement("tr");
-          tr.className = r.rowClass;
-          tr.style.cursor = "pointer";
-          tr.onclick = () => openStockModal(r);
+          tr.className = r.rowClass ? r.rowClass + " stock-row" : "stock-row";
+          tr.dataset.symbol = r.symbol;
+          tr.tabIndex = 0;
+          tr.setAttribute(
+            "aria-label",
+            `Open ${r.symbol}${r.companyName ? `, ${r.companyName}` : ""} stock details`,
+          );
           COLS.forEach((c) => {
             const td = document.createElement("td");
             if (c.type === "sym") {
               td.className = "sym";
               const wrap = document.createElement("span");
               wrap.className = "symwrap hint";
+              wrap.dataset.symbol = r.symbol;
               wrap.setAttribute(
                 "data-tip",
                 `Open→High ${pct(r.ohPct)} · Open→Low ${pct(r.olPct)} · click to copy`,
@@ -607,17 +697,6 @@
               wrap.tabIndex = 0;
               wrap.setAttribute("role", "button");
               wrap.setAttribute("aria-label", `Copy ${r.symbol}`);
-              wrap.onclick = (e) => {
-                e.stopPropagation(); // don't open the detail modal when copying
-                copySymbol(r.symbol, wrap);
-              };
-              wrap.onkeydown = (e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  copySymbol(r.symbol, wrap);
-                }
-              };
               const dot = document.createElement("span");
               dot.className =
                 "dotmark " +
@@ -644,6 +723,35 @@
           body.appendChild(tr);
         }
       }
+      const tableBody = document.getElementById("body");
+      tableBody.addEventListener("click", (event) => {
+        const symbolButton = event.target.closest(".symwrap");
+        if (symbolButton) {
+          event.stopPropagation();
+          copySymbol(symbolButton.dataset.symbol, symbolButton);
+          return;
+        }
+        const row = event.target.closest("tr.stock-row");
+        const data = row && renderedRows.get(row.dataset.symbol);
+        if (data) openStockModal(data);
+      });
+      tableBody.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        const symbolButton = event.target.closest(".symwrap");
+        if (symbolButton) {
+          event.preventDefault();
+          event.stopPropagation();
+          copySymbol(symbolButton.dataset.symbol, symbolButton);
+          return;
+        }
+        const row = event.target.closest("tr.stock-row");
+        if (!row || event.target !== row) return;
+        const data = renderedRows.get(row.dataset.symbol);
+        if (data) {
+          event.preventDefault();
+          openStockModal(data);
+        }
+      });
       // ---------- index headline cards: BOTH indices' own points values, always
       // shown side by side (independent of which tab is active) ----------
       function renderIndexCards() {
@@ -704,13 +812,15 @@
         const payload = cache && cache[activeIndex];
         if (lastGoodAt) {
           const secsAgo = Math.round((Date.now() - lastGoodAt) / 1000);
+          const state = marketState(new Date());
+          const activeSession = state === "pre-open" || state === "open";
           upd.textContent =
-            `Updated ${fmtClock(new Date(lastGoodAt))}` +
+            `${activeSession ? "Updated" : "Last close loaded"} ${fmtClock(new Date(lastGoodAt))}` +
             (payload && payload.timestamp
               ? ` · stamp ${payload.timestamp}`
               : "");
           const pollMs = (+document.getElementById("poll").value || 5) * 1000;
-          if (secsAgo * 1000 > 3 * pollMs) {
+          if (activeSession && secsAgo * 1000 > 3 * pollMs) {
             staleEl.className = "stale";
             staleEl.textContent = `⚠ stale - ${secsAgo}s old`;
           } else staleEl.textContent = "";
@@ -724,15 +834,19 @@
       }
       function renderMarketStatus() {
         const st = marketState(new Date());
-        document.getElementById("dot").className =
-          "dot " + (st === "open" ? "open" : st === "pre-open" ? "preopen" : "closed");
+        const session = marketSessionPhase(new Date());
+        const status = document.querySelector(".status");
+        status.dataset.session = session;
+        document.getElementById("dot").className = "dot";
         document.getElementById("mktText").textContent =
-          st === "open"
-            ? "Market OPEN"
-            : st === "pre-open"
-              ? "PRE-OPEN"
-              : "Market CLOSED";
-        return st !== "closed"; // poll during pre-open + open
+          session === "live"
+            ? "LIVE MARKET"
+            : session === "premarket"
+              ? "PRE-MARKET"
+              : session === "postmarket"
+                ? "POST-MARKET"
+                : "MARKET CLOSED";
+        return st === "pre-open" || st === "open";
       }
 
       // ---------- live stream (SSE) helpers ----------
@@ -884,9 +998,12 @@
             try {
               es.close();
             } catch (_) {}
+            es.onopen = null;
+            es.onerror = null;
+            es = null;
           }
           const st = marketState(new Date());
-          if (st === "closed") {
+          if (st !== "pre-open" && st !== "open") {
             setStreamStatus("paused");
           } else {
             const secs = Math.max(
@@ -975,7 +1092,7 @@
       // ---------- scheduler: auto-poll only in market hours; manual always allowed ----------
       // when the live stream is up, this demotes to a 45s top-up (SLOW_REFRESH_MS)
       // instead of the 1-10s REST poll - the stream keeps prices fresh in between.
-      function schedule() {
+      function schedule(skipRefresh = false) {
         if (timer) clearTimeout(timer);
         const open = renderMarketStatus();
         const secs = Math.max(
@@ -988,18 +1105,18 @@
           return;
         }
         if (streamLive) {
-          slowRefresh();
+          if (!skipRefresh) slowRefresh();
           timer = setTimeout(schedule, SLOW_REFRESH_MS);
         } else {
           setStreamStatus("rest", secs);
-          refresh();
+          if (!skipRefresh) refresh();
           timer = setTimeout(schedule, secs * 1000);
         }
       }
 
       // ---------- wire up ----------
       document.getElementById("refresh").onclick = refresh;
-      document.getElementById("poll").onchange = schedule;
+      document.getElementById("poll").onchange = () => schedule();
       document.getElementById("tf").onchange = renderMeta;
       document.getElementById("search").oninput = (e) => {
         searchQuery = e.target.value.trim().toLowerCase();
@@ -1124,7 +1241,7 @@
         renderHead();
         renderMarketStatus();
         refresh();
-        schedule();
+        schedule(true);
         connectStream();
         setInterval(() => {
           renderMarketStatus();

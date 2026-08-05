@@ -14,78 +14,109 @@
     <link rel="stylesheet" href="css/auth.css" />
   </head>
   <body>
+    <!--
+      THESIS: User access is a live operational ledger, not detached CRUD in a modal.
+      OWN-WORLD: Cool navy layers, compact system type, one-pixel rules, Signal Blue selection, and semantic access colors extend the Structured Market Console.
+      STORY: An administrator scans every account, filters the directory, selects one user, and safely changes role, credentials, or access without losing list context.
+      FIRST VIEWPORT: The Users tab leads to a title/action band, a 68% access ledger, and a persistent 32% account editor rail.
+      FORM: Access Ledger, grounded structure 3, seed bda40d81.
+      FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+    -->
     <header class="appbar">
-      <div class="brand">
-        <span class="brand-mark" aria-hidden="true">
-          <svg
-            width="19"
-            height="19"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2.4"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <polyline points="3 17 9 11 13 15 21 6" />
-            <polyline points="15 6 21 6 21 12" />
-          </svg>
-        </span>
-        <span class="brand-text">
-          <span class="brand-title">Nifty OHL Tracker</span>
-          <span class="brand-sub">Open · High · Low vs day open</span>
-        </span>
+      <div class="appbar-primary">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg
+              width="19"
+              height="19"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <polyline points="3 17 9 11 13 15 21 6" />
+              <polyline points="15 6 21 6 21 12" />
+            </svg>
+          </span>
+          <span class="brand-text">
+            <span class="brand-title">Nifty OHL Tracker</span>
+            <span class="brand-sub">Open · High · Low vs day open</span>
+          </span>
+        </div>
+        <div class="spacer"></div>
+        <div class="status" role="status" aria-live="polite">
+          <span id="dot" class="dot"></span><span id="mktText">…</span>
+        </div>
       </div>
-      <div class="spacer"></div>
-      <div class="status">
-        <span id="dot" class="dot"></span><span id="mktText">…</span>
-      </div>
-      <button
-        class="notif-btn"
-        id="notifBtn"
-        type="button"
-        aria-label="Notifications"
-        title="Notifications"
-      >
-        <i data-lucide="bell" aria-hidden="true"></i>
-        <span class="notif-badge" id="notifBadge" hidden>0</span>
-      </button>
-      <div class="viewnav" role="tablist" aria-label="View">
+      <div class="appbar-actions">
         <button
-          class="tab active"
-          data-view="dash"
-          role="tab"
-          aria-selected="true"
-        >
-          <i data-lucide="layout-grid" aria-hidden="true"></i>Dashboard
-        </button>
-        <button class="tab" data-view="alerts" role="tab" aria-selected="false">
-          <i data-lucide="bell" aria-hidden="true"></i>Alerts<span
-            class="bell"
-            id="bell"
-            hidden
-            >0</span
-          >
-        </button>
-      </div>
-      <div class="usernav" id="userNav" hidden>
-        <button
-          class="user-chip"
-          id="usersBtn"
+          class="notif-btn"
+          id="notifBtn"
           type="button"
-          title="Manage users"
-          hidden
+          aria-label="Notifications"
+          title="Notifications"
         >
-          <i data-lucide="users" aria-hidden="true"></i>Users
+          <i data-lucide="bell" aria-hidden="true"></i>
+          <span class="notif-badge" id="notifBadge" hidden>0</span>
         </button>
-        <span class="who" id="whoami" title="Signed in"></span>
-        <button class="logout-btn" id="logoutBtn" type="button" title="Sign out">
-          <i data-lucide="log-out" aria-hidden="true"></i>
-        </button>
+        <nav class="viewnav" role="tablist" aria-label="View">
+          <button
+            class="tab active"
+            id="view-tab-dash"
+            data-view="dash"
+            role="tab"
+            aria-controls="dashView"
+            aria-selected="true"
+          >
+            <i data-lucide="layout-grid" aria-hidden="true"></i>Dashboard
+          </button>
+          <button
+            class="tab"
+            id="view-tab-alerts"
+            data-view="alerts"
+            role="tab"
+            aria-controls="alertsView"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            <i data-lucide="bell" aria-hidden="true"></i>Alerts<span
+              class="bell"
+              id="bell"
+              hidden
+            >0</span
+            >
+          </button>
+          <button
+            class="tab"
+            id="view-tab-users"
+            data-view="users"
+            role="tab"
+            aria-controls="usersView"
+            aria-selected="false"
+            tabindex="-1"
+            hidden
+          >
+            <i data-lucide="users" aria-hidden="true"></i>Users
+          </button>
+        </nav>
+        <div class="usernav" id="userNav" hidden>
+          <span class="who" id="whoami" title="Signed in"></span>
+          <button
+            class="logout-btn"
+            id="logoutBtn"
+            type="button"
+            title="Sign out"
+            aria-label="Sign out"
+          >
+            <i data-lucide="log-out" aria-hidden="true"></i>
+          </button>
+        </div>
       </div>
     </header>
 
-    <div id="dashView">
+    <div id="dashView" role="tabpanel" aria-labelledby="view-tab-dash">
       <!-- index KPI cards double as the index selector (click to switch) -->
       <section class="kpis" id="idxCards" aria-label="Indices">
         <div class="idxcard skel-card"><div class="skel l1"></div><div class="skel l2"></div><div class="skel l3"></div></div>
@@ -151,7 +182,7 @@
             data-state="paused"
             role="status"
             aria-live="polite"
-            data-tip="Market closed — updates paused. Use Refresh for the latest close."
+            data-tip="Market closed. Updates are paused; use Refresh for the latest close."
           >
             <span class="dot" aria-hidden="true"></span>
             <span class="stream-label">PAUSED</span>
@@ -256,7 +287,12 @@
     </div>
     <!-- /#dashView -->
 
-    <div id="alertsView" hidden>
+    <div
+      id="alertsView"
+      role="tabpanel"
+      aria-labelledby="view-tab-alerts"
+      hidden
+    >
       <div class="alerts-bar">
         <div class="alerts-head">
           <h2 class="alerts-title">
@@ -284,7 +320,7 @@
               type="button"
               id="al-modal-close"
               class="am-close"
-              aria-label="Close"
+              aria-label="Close alert editor"
             >
               <i data-lucide="x" aria-hidden="true"></i>
             </button>
@@ -439,7 +475,7 @@
               type="button"
               id="rv-modal-close"
               class="am-close"
-              aria-label="Close"
+              aria-label="Close alert review"
             >
               <i data-lucide="x" aria-hidden="true"></i>
             </button>
@@ -491,8 +527,8 @@
               <button
                 class="sm-close"
                 id="av-close"
-                aria-label="Close"
-                title="Close"
+                aria-label="Close alert details"
+                title="Close details"
               >
                 <i data-lucide="x" aria-hidden="true"></i>
               </button>
@@ -505,15 +541,32 @@
       <!-- /#alertViewModal -->
 
       <!-- alert list (full width) -->
-      <div class="card">
+      <div class="card alerts-list-card">
           <div class="card-head">
             <i data-lucide="list" aria-hidden="true"></i>
             <h2>Alerts</h2>
             <div class="view-toggle" id="alertViewToggle" role="tablist" aria-label="Alert view">
-              <button type="button" class="vt active" data-view="active" role="tab">
+              <button
+                type="button"
+                class="vt active"
+                id="alert-tab-active"
+                data-view="active"
+                role="tab"
+                aria-controls="alertList"
+                aria-selected="true"
+              >
                 Active <span class="vt-count" id="vtActiveCount"></span>
               </button>
-              <button type="button" class="vt" data-view="closed" role="tab">
+              <button
+                type="button"
+                class="vt"
+                id="alert-tab-closed"
+                data-view="closed"
+                role="tab"
+                aria-controls="alertList"
+                aria-selected="false"
+                tabindex="-1"
+              >
                 Closed <span class="vt-count" id="vtClosedCount"></span>
               </button>
             </div>
@@ -522,10 +575,203 @@
           <div class="alert-filters" id="alertFilters"></div>
           <!-- chips for the active selections (built by JS) -->
           <div class="filter-chips" id="filterChips" hidden></div>
-          <div id="alertList"><div class="empty">Loading…</div></div>
+          <div
+            id="alertList"
+            role="tabpanel"
+            aria-labelledby="alert-tab-active"
+          ><div class="empty">Loading…</div></div>
         </div>
     </div>
     <!-- /#alertsView -->
+
+    <section
+      id="usersView"
+      role="tabpanel"
+      aria-labelledby="view-tab-users"
+      hidden
+    >
+      <div class="users-bar">
+        <div class="users-heading">
+          <h1>User access</h1>
+          <p>Manage who can monitor markets, maintain alerts, and administer accounts.</p>
+        </div>
+        <button class="primary" id="um-new" type="button">
+          <i data-lucide="user-plus" aria-hidden="true"></i>Add user
+        </button>
+      </div>
+
+      <div class="users-workspace">
+        <section class="um-directory" aria-labelledby="um-directory-title">
+          <div class="um-summary" id="um-summary" role="status" aria-live="polite">
+            <h2 id="um-directory-title">Access ledger</h2>
+            <span>Total <b id="um-total">…</b></span>
+            <span>Enabled <b id="um-enabled">…</b></span>
+            <span>Disabled <b id="um-disabled">…</b></span>
+            <span>Admins <b id="um-admins">…</b></span>
+          </div>
+
+          <div class="um-tools">
+            <label class="um-search" for="um-search">
+              <span class="sr-only">Search users</span>
+              <i data-lucide="search" aria-hidden="true"></i>
+              <input
+                id="um-search"
+                type="search"
+                placeholder="Search username"
+                autocomplete="off"
+              />
+            </label>
+            <label class="um-filter" for="um-filter-status">
+              <span>Status</span>
+              <select id="um-filter-status">
+                <option value="all">All access</option>
+                <option value="enabled">Enabled</option>
+                <option value="disabled">Disabled</option>
+              </select>
+            </label>
+            <label class="um-filter" for="um-filter-role">
+              <span>Role</span>
+              <select id="um-filter-role">
+                <option value="all">All roles</option>
+                <option value="admin">Admin</option>
+                <option value="editor">Editor</option>
+                <option value="viewer">Viewer</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="um-tablewrap">
+            <table class="um-table">
+              <thead>
+                <tr>
+                  <th scope="col">User</th>
+                  <th scope="col">Role</th>
+                  <th scope="col">Access</th>
+                  <th scope="col">Last login</th>
+                  <th scope="col">Updated</th>
+                  <th scope="col"><span class="sr-only">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody id="um-list" aria-live="polite">
+                <tr class="um-loading"><td colspan="6">Loading accounts…</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="um-empty" id="um-empty" hidden>
+            <i data-lucide="user-search" aria-hidden="true"></i>
+            <strong>No matching users</strong>
+            <span>Change the search or filters to see more accounts.</span>
+          </div>
+        </section>
+
+        <aside class="um-editor" aria-labelledby="um-form-title">
+          <div class="um-editor-head">
+            <span class="um-editor-icon" aria-hidden="true">
+              <i data-lucide="user-plus"></i>
+            </span>
+            <div>
+              <h2 id="um-form-title">Add user</h2>
+              <p id="um-form-sub">Create an account with the minimum access needed.</p>
+            </div>
+            <span class="um-editor-state" id="um-editor-state">New</span>
+          </div>
+
+          <form class="um-form" id="um-form" novalidate>
+            <label for="um-user">
+              <span>Username</span>
+              <input
+                id="um-user"
+                type="text"
+                minlength="2"
+                maxlength="32"
+                autocomplete="off"
+                required
+                aria-describedby="um-user-help"
+              />
+              <small id="um-user-help">2–32 characters. Letters, numbers, spaces, dot, dash, and underscore.</small>
+            </label>
+
+            <label for="um-pw">
+              <span id="um-pw-label">Password</span>
+              <input
+                id="um-pw"
+                type="password"
+                minlength="6"
+                autocomplete="new-password"
+                required
+                aria-describedby="um-pw-help"
+              />
+              <small id="um-pw-help">Use at least 6 characters.</small>
+            </label>
+
+            <label for="um-role">
+              <span>Role</span>
+              <select id="um-role" aria-describedby="um-role-help">
+                <option value="viewer">Viewer</option>
+                <option value="editor">Editor</option>
+                <option value="admin">Admin</option>
+              </select>
+            </label>
+
+            <div class="um-role-guide" id="um-role-help">
+              <i data-lucide="eye" aria-hidden="true"></i>
+              <div>
+                <strong>Viewer</strong>
+                <span>Read-only access to market data and alerts.</span>
+              </div>
+            </div>
+
+            <section class="um-access" id="um-access" hidden aria-labelledby="um-access-title">
+              <div>
+                <h3 id="um-access-title">Account access</h3>
+                <p id="um-access-copy">This account can sign in.</p>
+              </div>
+              <button
+                class="um-switch"
+                id="um-toggle"
+                type="button"
+                role="switch"
+                aria-checked="true"
+              >
+                <span aria-hidden="true"></span>
+                <b>Enabled</b>
+              </button>
+            </section>
+
+            <dl class="um-meta" id="um-meta" hidden>
+              <div><dt>Last login</dt><dd id="um-meta-login">…</dd></div>
+              <div><dt>Created</dt><dd id="um-meta-created">…</dd></div>
+              <div><dt>Updated</dt><dd id="um-meta-updated">…</dd></div>
+            </dl>
+
+            <div class="um-safety">
+              <i data-lucide="shield-check" aria-hidden="true"></i>
+              <p><strong>Access safety</strong> At least one enabled administrator must remain. The server blocks disabling, demoting, or deleting the final admin.</p>
+            </div>
+
+            <div class="auth-err" id="um-err" role="alert"></div>
+            <div class="um-success" id="um-success" role="status" aria-live="polite"></div>
+
+            <div class="um-form-actions">
+              <button class="primary" id="um-save" type="submit">
+                <i data-lucide="check" aria-hidden="true"></i>
+                <span id="um-save-label">Add user</span>
+              </button>
+              <button id="um-cancel" type="button" hidden>Cancel edit</button>
+            </div>
+
+            <div class="um-danger" id="um-danger" hidden>
+              <div>
+                <strong>Permanent deletion</strong>
+                <span id="um-delete-hint">This action cannot be undone.</span>
+              </div>
+              <button class="danger" id="um-delete" type="button">Delete user</button>
+            </div>
+          </form>
+        </aside>
+      </div>
+    </section>
+    <!-- /#usersView -->
 
     <div id="ringHost" aria-live="assertive"></div>
 
@@ -566,10 +812,31 @@
         <!-- first-run: create admin -->
         <form id="setupPanel" hidden>
           <h2>Create admin account</h2>
-          <p class="auth-hint">First run — set up the admin (you'll manage users).</p>
-          <input id="su-user" type="text" placeholder="Admin username" autocomplete="off" />
-          <input id="su-pw" type="password" placeholder="Password (min 6 chars)" />
-          <input id="su-pw2" type="password" placeholder="Confirm password" />
+          <p class="auth-hint">First run: set up the admin account that will manage users.</p>
+          <label class="auth-field" for="su-user">
+            <span>Admin username</span>
+            <input id="su-user" type="text" autocomplete="username" />
+          </label>
+          <label class="auth-field" for="su-pw">
+            <span>Password</span>
+            <input
+              id="su-pw"
+              type="password"
+              minlength="6"
+              autocomplete="new-password"
+              aria-describedby="su-pw-hint"
+            />
+            <small id="su-pw-hint">Use at least 6 characters.</small>
+          </label>
+          <label class="auth-field" for="su-pw2">
+            <span>Confirm password</span>
+            <input
+              id="su-pw2"
+              type="password"
+              minlength="6"
+              autocomplete="new-password"
+            />
+          </label>
           <div class="auth-err" id="su-err"></div>
           <button class="primary auth-submit" id="su-btn" type="submit">Create admin &amp; sign in</button>
         </form>
@@ -580,7 +847,14 @@
           <div class="user-picker" id="userPicker"></div>
           <form id="pwForm" hidden>
             <div class="picked-user" id="pickedUser"></div>
-            <input id="li-pw" type="password" placeholder="Password" />
+            <label class="auth-field" for="li-pw">
+              <span>Password</span>
+              <input
+                id="li-pw"
+                type="password"
+                autocomplete="current-password"
+              />
+            </label>
             <div class="auth-err" id="li-err"></div>
             <button class="primary auth-submit" id="li-btn" type="submit">Sign in</button>
             <button class="auth-back" id="li-back" type="button">← Choose another user</button>
@@ -591,41 +865,12 @@
     </div>
     <!-- /#authOverlay -->
 
-    <!-- ===== admin: manage users ===== -->
-    <div id="usersModal" role="dialog" aria-modal="true" aria-label="Users">
-      <div class="um-backdrop" id="um-backdrop"></div>
-      <div class="um-card">
-        <div class="um-head">
-          <i data-lucide="users" aria-hidden="true"></i>
-          <h2>Users</h2>
-          <span class="um-spacer"></span>
-          <button id="um-close" type="button" aria-label="Close"><i data-lucide="x" aria-hidden="true"></i></button>
-        </div>
-        <div class="um-list" id="um-list"></div>
-        <form class="um-form" id="um-form">
-          <h3 id="um-form-title">Add user</h3>
-          <input id="um-user" type="text" placeholder="Username" autocomplete="off" />
-          <input id="um-pw" type="password" placeholder="Password (min 6)" />
-          <select id="um-role">
-            <option value="viewer">Viewer (read-only)</option>
-            <option value="editor">Editor (full alerts)</option>
-            <option value="admin">Admin (+ manage users)</option>
-          </select>
-          <div class="auth-err" id="um-err"></div>
-          <div class="um-form-actions">
-            <button class="primary" id="um-save" type="submit">Add user</button>
-            <button id="um-cancel" type="button" hidden>Cancel</button>
-          </div>
-        </form>
-      </div>
-    </div>
-    <!-- /#usersModal -->
-
     <div
       id="stockModal"
       role="dialog"
       aria-modal="true"
-      aria-label="Stock details"
+      aria-labelledby="sm-sym"
+      aria-describedby="sm-name"
     >
       <div class="sm-card">
         <div class="sm-head">
@@ -643,7 +888,15 @@
             >
               <i data-lucide="bell-plus" aria-hidden="true"></i>
             </button>
-            <button class="sm-close" id="sm-close" aria-label="Close" title="Close"><i data-lucide="x" aria-hidden="true"></i></button>
+            <button
+              class="sm-close"
+              id="sm-close"
+              type="button"
+              aria-label="Close stock details"
+              title="Close"
+            >
+              <i data-lucide="x" aria-hidden="true"></i>
+            </button>
           </div>
         </div>
         <div class="sm-price">
@@ -654,8 +907,10 @@
           <button
             type="button"
             class="sm-tab active"
+            id="sm-tab-details"
             data-tab="details"
             role="tab"
+            aria-controls="sm-panel-details"
             aria-selected="true"
           >
             Details
@@ -663,14 +918,23 @@
           <button
             type="button"
             class="sm-tab"
+            id="sm-tab-alerts"
             data-tab="alerts"
             role="tab"
+            aria-controls="sm-panel-alerts"
             aria-selected="false"
+            tabindex="-1"
           >
-            Alerts <span class="sm-tab-count" id="sm-tab-alerts-count" hidden></span>
+            Alerts
+            <span class="sm-tab-count" id="sm-tab-alerts-count" hidden></span>
           </button>
         </div>
-        <div class="sm-panel" id="sm-panel-details" role="tabpanel">
+        <div
+          class="sm-panel"
+          id="sm-panel-details"
+          role="tabpanel"
+          aria-labelledby="sm-tab-details"
+        >
           <div class="sm-grid" id="sm-grid"></div>
           <section
             id="sm-preopen"
@@ -679,7 +943,13 @@
             hidden
           ></section>
         </div>
-        <div class="sm-panel" id="sm-panel-alerts" role="tabpanel" hidden>
+        <div
+          class="sm-panel"
+          id="sm-panel-alerts"
+          role="tabpanel"
+          aria-labelledby="sm-tab-alerts"
+          hidden
+        >
           <section
             id="sm-alerts"
             class="sm-alerts"
@@ -694,12 +964,15 @@
       <span class="tt-arrow" aria-hidden="true"></span>
     </div>
 
-    <footer>
-      Live data (level + all constituents:
-      O/H/L/LTP/Prev/Change/Volume/Turnover/52-week), proxied by your local
-      <code>server.js</code> (open via <code>http://localhost:8787/</code>). Live
-      during market hours (Mon–Fri 09:15–15:30 IST); shows last close otherwise.
-      Prices in ₹.
+    <footer class="app-footer">
+      <span class="footer-summary">Local NSE market-data proxy</span>
+      <span class="footer-meta">
+        <span>Mon–Fri · 09:15–15:30 IST</span>
+        <span aria-hidden="true">·</span>
+        <span>Last close shown outside market hours</span>
+        <span aria-hidden="true">·</span>
+        <span>Prices in ₹</span>
+      </span>
     </footer>
 
     <!-- Lucide icons (MIT, lightweight) via CDN; degrades gracefully if offline -->

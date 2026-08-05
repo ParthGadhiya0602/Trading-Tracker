@@ -119,7 +119,12 @@ function storeCookies(res) {
   }
 }
 function cookieHeader() {
-  return [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
+  let value = "";
+  for (const [name, cookie] of jar) {
+    if (value) value += "; ";
+    value += `${name}=${cookie}`;
+  }
+  return value;
 }
 
 async function srcGet(url, uaIndex, timeoutMs = 15000, referer = null) {
@@ -367,7 +372,8 @@ async function fetchMarketData() {
   return marketState() === "pre-open" ? fetchPreopen() : fetchAllIndices();
 }
 
-// ---------------- market state (IST, Mon-Fri): pre-open 09:00-09:15, open 09:15-15:30 ----
+// ---------------- market state (IST, Mon-Fri): pre-open 09:00-09:15,
+// open 09:15-15:30, otherwise closed ---------------------------------------
 function marketState(d = new Date()) {
   const f = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Kolkata",
@@ -381,7 +387,7 @@ function marketState(d = new Date()) {
   if (o.weekday === "Sat" || o.weekday === "Sun") return "closed";
   const mins = (parseInt(o.hour, 10) % 24) * 60 + parseInt(o.minute, 10);
   if (mins >= 9 * 60 && mins < 9 * 60 + 15) return "pre-open";
-  if (mins >= 9 * 60 + 15 && mins <= 15 * 60 + 30) return "open";
+  if (mins >= 9 * 60 + 15 && mins < 15 * 60 + 30) return "open";
   return "closed";
 }
 // ---------------- live WS feed (opt-in via STREAM_WS; open session only) ----------------
@@ -393,16 +399,10 @@ const SLOW_REFRESH_MS = 45_000; // REST reseed cadence while the WS feed is driv
 // liveCache mirrors the exact buildPayloadNext envelope, keyed by DASH_INDICES.
 let liveCache = {};
 let liveCacheStampMs = 0;
-let liveCacheSource = null; // 'rest' | 'ws'
-
-function getLivePayload() {
-  return liveCache;
-}
 // Full-fidelity reseed from a REST fetch (all fields, incl. enrichment-only ones).
 function seedLiveCache(payload) {
   liveCache = payload;
   liveCacheStampMs = Date.now();
-  liveCacheSource = "rest";
 }
 // Merge one normalized WS tick into liveCache, preserving REST-only enrichment fields.
 function applyTick(t) {
@@ -421,7 +421,6 @@ function applyTick(t) {
   }
   entry.timestamp = Date.now();
   liveCacheStampMs = Date.now();
-  liveCacheSource = "ws";
 }
 // SSE fan-out for /api/stream (only ever populated when STREAM_WS is on - the endpoint
 // itself 404s otherwise, so nothing subscribes).
@@ -437,7 +436,6 @@ function sseWrite(res, chunk) {
     sseClients.delete(res);
   }
 }
-let reseedTimer = null;
 async function reseedLiveCache() {
   if (!(STREAM_WS && marketState() === "open")) return;
   try {
@@ -471,7 +469,7 @@ const ALERT_POLL_MS =
 const NO_TICK = !!process.env.ALERTS_NO_TICK;
 let evaluating = false;
 // latest live price per symbol - used to re-anchor a trigger at create/edit time
-let latestPrices = {};
+const latestPrices = Object.create(null);
 function cachePrices(payload) {
   for (const idx of DASH_INDICES) {
     for (const r of (payload[idx] && payload[idx].data) || []) {
@@ -784,10 +782,10 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 404, { error: "not found" });
         return;
       }
-      // alert writes require editor/admin; viewers are read-only
+      // Only editors may change alerts; admins and viewers are read-only.
       if (url.startsWith("/api/alerts") && method !== "GET" &&
-          user.role !== "admin" && user.role !== "editor") {
-        sendJson(res, 403, { error: "your role is read-only" });
+          user.role !== "editor") {
+        sendJson(res, 403, { error: "editor role required for alert actions" });
         return;
       }
       // data + alert endpoints (any authenticated user for reads)
@@ -853,6 +851,7 @@ async function main() {
   await auth.load();
   console.log(
     `  Auth: ${auth.listUsers().length} user(s) · store: ${auth.backendName()}` +
+      ` · password pepper: ${auth.passwordPepperConfigured() ? "configured" : "NOT configured"}` +
       (auth.needsSetup() ? " · NEEDS SETUP (create admin on first open)" : ""),
   );
   const streamCfg = requireStream(); // null when STREAM_WS unset, or on WARNING+continue
@@ -917,11 +916,11 @@ async function main() {
         log: (msg) => console.log(`  ${msg}`),
         userAgent: USER_AGENTS[0],
       });
-      reseedTimer = setInterval(reseedLiveCache, SLOW_REFRESH_MS); // 45s REST reseed cadence
+      setInterval(reseedLiveCache, SLOW_REFRESH_MS); // 45s REST reseed cadence
       setInterval(() => {
         // 1/s SSE fan-out: only while the session is open and someone is listening
         if (!(STREAM_WS && marketState() === "open" && sseClients.size > 0)) return;
-        const chunk = `event: patch\ndata: ${JSON.stringify(getLivePayload())}\n\n`;
+        const chunk = `event: patch\ndata: ${JSON.stringify(liveCache)}\n\n`;
         for (const client of sseClients) sseWrite(client, chunk);
       }, 1000);
       setInterval(() => {

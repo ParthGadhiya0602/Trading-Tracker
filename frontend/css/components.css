@@ -30,18 +30,24 @@
         padding: 16px 18px 12px;
         position: sticky;
         top: 0;
+        z-index: 1;
         background: var(--panel-raised);
         border-bottom: 1px solid var(--line);
       }
+      .sm-head > :first-child {
+        min-width: 0;
+      }
       .sm-sym {
-        font-size: 18px;
+        font-size: 19px;
         font-weight: 800;
         letter-spacing: 0.2px;
+        overflow-wrap: anywhere;
       }
       .sm-name {
         font-size: 12px;
         color: var(--muted);
         margin-top: 2px;
+        overflow-wrap: anywhere;
       }
       /* alert (icon-only) + close: identical square icon buttons in a self-contained
          action group so they line up with each other regardless of the title height */
@@ -50,6 +56,7 @@
         display: flex;
         align-items: center;
         gap: 6px;
+        flex: none;
       }
       .sm-actions .sm-addalert,
       .sm-actions .sm-close {
@@ -145,6 +152,10 @@
         display: inline-flex;
         align-items: center;
         gap: 6px;
+        transition:
+          color 0.16s var(--ease),
+          border-color 0.16s var(--ease),
+          background-color 0.16s var(--ease);
       }
       .sm-tab:hover {
         color: var(--txt);
@@ -427,6 +438,23 @@
         border-radius: var(--radius-sm);
       }
       @media (max-width: 480px) {
+        #stockModal {
+          align-items: flex-end;
+          padding: 0;
+        }
+        .sm-card {
+          width: 100%;
+          max-height: calc(100dvh - 12px);
+          border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+        }
+        .sm-head,
+        .sm-price,
+        .sm-tabs,
+        .sm-alerts,
+        .sm-preopen {
+          padding-left: 14px;
+          padding-right: 14px;
+        }
         .sm-grid {
           grid-template-columns: 1fr;
         }
@@ -493,12 +521,29 @@
         margin-right: 8px;
         animation: spin 0.8s linear infinite;
       }
-      footer {
+      .app-footer {
         margin-top: 16px;
         color: var(--muted);
         font-size: 11.5px;
         padding-top: 14px;
         border-top: 1px solid var(--line);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 6px 18px;
+      }
+      .footer-summary {
+        color: var(--muted-ink);
+        font-weight: 650;
+      }
+      .footer-meta {
+        display: inline-flex;
+        align-items: center;
+        justify-content: flex-end;
+        flex-wrap: wrap;
+        gap: 4px 8px;
+        text-align: right;
       }
       code {
         background: var(--chip);
@@ -510,21 +555,40 @@
         body {
           padding: 12px 12px 36px;
         }
-        header {
+        .appbar {
           margin: -12px -12px 14px;
           padding: 12px;
+          gap: 10px;
         }
         h1 {
           font-size: 16px;
         }
-        /* app-bar: let the view switch wrap to its own row and hide the
-           username text (keep the avatar chip + logout icon) */
-        .viewnav {
+        .appbar-primary,
+        .appbar-actions {
+          width: 100%;
+        }
+        .appbar-primary {
           flex-basis: 100%;
-          order: 5;
+        }
+        .appbar-actions {
+          display: grid;
+          grid-template-columns: auto minmax(0, 1fr) auto;
+        }
+        .appbar-actions .viewnav {
+          width: 100%;
+        }
+        .viewnav .tab {
+          flex: 1 1 0;
+          min-width: 0;
         }
         .usernav .who {
           display: none;
+        }
+        .app-footer,
+        .footer-meta {
+          align-items: flex-start;
+          justify-content: flex-start;
+          text-align: left;
         }
         /* a 999px pill radius on a track that wraps to 2+ rows balloons into an
            oversized blob (radius clamps to half the now much shorter row height) */
@@ -552,8 +616,8 @@
           overflow: hidden;
           padding-bottom: 16px;
         }
-        /* the visible view fills the space between header and footer; the dashboard's
-           table scrolls inside it, the alerts page scrolls as a whole */
+        /* The visible view fills the space between header and footer. Keep view-level
+           controls fixed and give scrolling to the dashboard table or alerts list. */
         #dashView:not([hidden]) {
           display: flex;
           flex-direction: column;
@@ -561,16 +625,36 @@
           min-height: 0;
         }
         #alertsView:not([hidden]) {
+          display: flex;
+          flex-direction: column;
+          flex: 1 1 auto;
+          min-height: 0;
+          overflow: hidden;
+        }
+        #alertsView .alerts-bar {
+          flex: none;
+        }
+        #alertsView .alerts-list-card {
+          display: flex;
+          flex-direction: column;
+          flex: 1 1 auto;
+          min-height: 0;
+          overflow: hidden;
+        }
+        #alertList {
           flex: 1 1 auto;
           min-height: 0;
           overflow-y: auto;
+          overscroll-behavior: contain;
+          scrollbar-gutter: stable;
+          padding-right: var(--s2);
         }
         .tablewrap {
           flex: 1 1 auto;
           max-height: none; /* let flex give it the remaining height */
           min-height: 0; /* allow the flex child to shrink & scroll */
         }
-        footer {
+        .app-footer {
           flex: none;
         }
       }
@@ -769,7 +853,7 @@
       }
       .alert-item.ringing {
         border-color: var(--accent);
-        box-shadow: 0 0 0 2px var(--accent-tint);
+        box-shadow: none;
       }
       /* info column: badges → prices → meta, stacked and filling the row width */
       .alert-item .ai-body {
@@ -931,8 +1015,7 @@
       }
       .ring-toast {
         background: var(--panel-raised);
-        border: 1px solid var(--accent);
-        border-left: 4px solid var(--accent);
+        border: 1px solid color-mix(in srgb, var(--accent) 72%, var(--line));
         border-radius: var(--radius-md);
         box-shadow: var(--shadow);
         padding: 12px 14px;
@@ -966,6 +1049,17 @@
       .ring-toast .rt-actions button {
         flex: 1;
       }
+      .ring-toast.read-only {
+        cursor: pointer;
+      }
+      .ring-toast.read-only .rt-msg {
+        margin-bottom: 0;
+      }
+      .ring-toast.read-only:focus-visible,
+      .notif-item:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: -2px;
+      }
 
       /* ---------- notification center ---------- */
       .notif-btn {
@@ -989,6 +1083,7 @@
       .notif-btn.has-unread {
         color: var(--accent);
         border-color: var(--accent);
+        background: color-mix(in srgb, var(--accent) 6%, var(--chip));
       }
       .notif-badge {
         position: absolute;
@@ -1052,7 +1147,7 @@
       .np-head h3 {
         margin: 0;
         font-size: 14px;
-        font-weight: 760;
+        font-weight: 750;
       }
       .np-head .np-count {
         color: var(--muted);
@@ -1117,8 +1212,8 @@
         background: var(--chip);
       }
       .notif-item.unread {
-        background: var(--accent-tint);
-        border-color: color-mix(in srgb, var(--accent) 22%, var(--line));
+        background: color-mix(in srgb, var(--accent) 6%, var(--panel-raised));
+        border-color: color-mix(in srgb, var(--accent) 26%, var(--line));
       }
       .notif-item .ni-dot {
         flex: 0 0 auto;
@@ -1145,7 +1240,7 @@
         font-size: 14px;
       }
       .notif-item .ni-sym {
-        font-weight: 750;
+        font-weight: 800;
         font-size: 13px;
       }
       .notif-item .ni-side,
@@ -1171,6 +1266,14 @@
         font-size: 12px;
         margin: 3px 0 7px;
         font-variant-numeric: tabular-nums;
+      }
+      @media (max-width: 560px) {
+        #notifPanel {
+          padding: 56px 12px 12px;
+        }
+        #notifPanel .np-card {
+          max-height: calc(100dvh - 68px);
+        }
       }
       .notif-item .ni-actions {
         display: flex;
@@ -1214,5 +1317,3 @@
         height: 13px;
         margin-right: 4px;
       }
-
-      
