@@ -620,7 +620,7 @@
           }
           closeReviewModal();
           closeAlertView();
-          loadList();
+          refreshAll();
         }
         // called from the dashboard's stock modal: switch to Alerts + open create,
         // prefilled with the given index + symbol
@@ -874,18 +874,32 @@
               `<div class="empty">Failed to load: ${err.message}</div>`;
           }
         }
+        // Refresh EVERY surface at once (ringing toasts, notification center, and the
+        // alert list) so an action taken in one place is reflected everywhere.
+        async function refreshAll() {
+          await Promise.allSettled([pollRinging(), pollNotifications()]);
+          if (!$("#alertsView").hidden) loadList();
+        }
         async function act(id, action) {
           try {
             await api("/api/alerts/" + id + "/" + action, "POST");
           } catch (_) {}
-          pollRinging();
-          if (!$("#alertsView").hidden) loadList();
+          // snooze/close from ANY surface should also clear this alert's live
+          // notification(s), matching what the notification panel's own buttons do.
+          if (action === "snooze" || action === "close") {
+            for (const it of notifItems)
+              if (it.a.id === id) {
+                markRead(it.sig);
+                dismissNotif(it.sig);
+              }
+          }
+          await refreshAll();
         }
         async function del(id) {
           try {
             await api("/api/alerts/" + id, "DELETE");
           } catch (_) {}
-          loadList();
+          refreshAll();
         }
         // Re-arm a (usually closed) alert with the same data + creation-time logic. Warns
         // if the live price is already past the entry (it'll re-arm already-entered).
@@ -913,7 +927,7 @@
           alertView = "active"; // jump to Active so the re-armed alert is visible
           syncViewToggle();
           closeAlertView();
-          loadList();
+          refreshAll();
         }
         function syncViewToggle() {
           $$("#alertViewToggle .vt").forEach((b) =>
