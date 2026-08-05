@@ -525,22 +525,26 @@
                 "pencil",
               ),
             );
-            acts.appendChild(
-              btn(
-                "Approve",
-                "btn-sm",
-                () => openReviewModal(a, "approve"),
-                "shield-check",
-              ),
-            );
-            acts.appendChild(
-              btn(
-                "Reject",
-                "btn-sm",
-                () => openReviewModal(a, "reject"),
-                "shield-off",
-              ),
-            );
+            // Approve unless already approved; Reject unless already rejected
+            // (so raw shows both, approved shows only Reject, rejected only Approve).
+            if (a.reviewState !== "approved")
+              acts.appendChild(
+                btn(
+                  "Approve",
+                  "btn-sm",
+                  () => openReviewModal(a, "approve"),
+                  "shield-check",
+                ),
+              );
+            if (a.reviewState !== "rejected")
+              acts.appendChild(
+                btn(
+                  "Reject",
+                  "btn-sm",
+                  () => openReviewModal(a, "reject"),
+                  "shield-off",
+                ),
+              );
             acts.appendChild(
               btn(
                 "Close",
@@ -808,22 +812,26 @@
                 ),
               );
             } else {
-              acts.appendChild(
-                btn(
-                  "Approve",
-                  "btn-sm",
-                  () => openReviewModal(a, "approve"),
-                  "shield-check",
-                ),
-              );
-              acts.appendChild(
-                btn(
-                  "Reject",
-                  "btn-sm",
-                  () => openReviewModal(a, "reject"),
-                  "shield-off",
-                ),
-              );
+              // list shows Approve/Reject only for raw (unreviewed) alerts;
+              // approved/rejected are toggled from the detail modal (click the row).
+              if (a.reviewState === "raw") {
+                acts.appendChild(
+                  btn(
+                    "Approve",
+                    "btn-sm",
+                    () => openReviewModal(a, "approve"),
+                    "shield-check",
+                  ),
+                );
+                acts.appendChild(
+                  btn(
+                    "Reject",
+                    "btn-sm",
+                    () => openReviewModal(a, "reject"),
+                    "shield-off",
+                  ),
+                );
+              }
               if (a.ringing)
                 acts.appendChild(
                   btn("Snooze", "btn-sm", () => act(a.id, "snooze"), "clock"),
