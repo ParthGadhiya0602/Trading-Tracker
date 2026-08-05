@@ -306,7 +306,60 @@
           )
           .join("");
         renderPreOpen(document.getElementById("sm-preopen"), r.preOpen);
+        renderStockAlerts(r.symbol);
         document.getElementById("stockModal").classList.add("show");
+      }
+      // List this stock's alerts (active + archived) inside the detail modal, or a
+      // "no alerts" line. Each row opens the full alert view (via the alerts module).
+      const REVIEW_TXT = { approved: "Approved", rejected: "Rejected", raw: "Raw" };
+      async function renderStockAlerts(symbol) {
+        const host = document.getElementById("sm-alerts");
+        host.innerHTML = `<div class="sm-al-head">Alerts</div><div class="sm-al-msg">Loading…</div>`;
+        let data;
+        try {
+          data = await fetch("/api/alerts/all", {
+            credentials: "same-origin",
+          }).then((res) => res.json());
+        } catch (_) {
+          host.innerHTML = `<div class="sm-al-head">Alerts</div><div class="sm-al-msg">Couldn't load alerts.</div>`;
+          return;
+        }
+        if (symbol !== modalSymbol) return; // user clicked another row meanwhile
+        const mine = []
+          .concat(data.alerts || [], data.archived || [])
+          .filter((a) => a.symbol === symbol)
+          .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+        if (!mine.length) {
+          host.innerHTML = `<div class="sm-al-head">Alerts</div><div class="sm-al-msg">No alerts for this stock yet.</div>`;
+          return;
+        }
+        const rowsHtml = mine
+          .map((a) => {
+            const rv = a.reviewState || "raw";
+            return (
+              `<button type="button" class="sm-alert" data-id="${a.id}">` +
+              `<span class="sm-alert-top">` +
+              `<span class="ai-side ${a.side === "BUY" ? "buy" : "sell"}">${a.side}</span>` +
+              `<span class="ai-status ${a.status}">${a.status}</span>` +
+              `<span class="ai-review ${rv}">${REVIEW_TXT[rv] || rv}</span>` +
+              `<span class="sm-alert-tf">${escText(a.timeframe || "-")}</span>` +
+              `</span>` +
+              `<span class="sm-alert-nums">Entry ${rs(a.alertPrice)} · Alert ${rs(a.triggerPrice)} · SL ${rs(a.stopLoss)}</span>` +
+              `</button>`
+            );
+          })
+          .join("");
+        host.innerHTML =
+          `<div class="sm-al-head">Alerts <span class="sm-al-count">${mine.length}</span></div>` +
+          `<div class="sm-al-list">${rowsHtml}</div>`;
+        const byId = new Map(mine.map((a) => [a.id, a]));
+        host.querySelectorAll(".sm-alert").forEach((el) => {
+          el.onclick = () => {
+            const a = byId.get(el.dataset.id);
+            closeStockModal();
+            if (window.__viewAlert) window.__viewAlert(a);
+          };
+        });
       }
       function closeStockModal() {
         document.getElementById("stockModal").classList.remove("show");

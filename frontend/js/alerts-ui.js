@@ -1319,6 +1319,13 @@
         };
         window.__alertsCanEdit = canEdit;
         window.__reloadAlerts = loadList; // let the auth controller refresh after login
+        // open a specific alert's detail view from another surface (e.g. the dashboard
+        // stock modal) — switch to the Alerts view first so the modal is visible.
+        window.__viewAlert = function (a) {
+          if (!a) return;
+          activateView("alerts");
+          openAlertView(a);
+        };
 
         let alertsPollStarted = false;
         // started by the auth controller once the user is signed in

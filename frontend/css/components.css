@@ -123,6 +123,95 @@
       .sm-preopen[hidden] {
         display: none;
       }
+      /* this stock's alerts, listed inside the detail modal */
+      .sm-alerts {
+        border-top: 1px solid var(--line);
+        padding: 14px 18px 18px;
+        display: flex;
+        flex-direction: column;
+        gap: var(--s2);
+      }
+      .sm-al-head {
+        display: flex;
+        align-items: center;
+        gap: var(--s2);
+        font-size: 13px;
+        font-weight: 750;
+      }
+      .sm-al-count {
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--muted);
+        background: var(--chip);
+        border-radius: var(--radius-pill);
+        padding: 1px 8px;
+      }
+      .sm-al-msg {
+        color: var(--muted);
+        font-size: 12.5px;
+      }
+      .sm-al-list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .sm-alert {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        width: 100%;
+        text-align: left;
+        background: var(--panel-raised);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        padding: 8px 10px;
+        cursor: pointer;
+        font: inherit;
+        color: inherit;
+        transition: border-color 0.15s var(--ease), background-color 0.15s var(--ease);
+      }
+      .sm-alert:hover {
+        border-color: var(--accent);
+        background: var(--accent-tint);
+      }
+      .sm-alert-top {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .sm-alert-tf {
+        margin-left: auto;
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--muted);
+      }
+      .sm-alert-nums {
+        font-size: 12.5px;
+        font-weight: 600;
+        color: var(--muted-ink);
+        font-variant-numeric: tabular-nums;
+      }
+      /* pill chrome for the reused badges (color variants are global already) */
+      .sm-alert-top .ai-side,
+      .sm-alert-top .ai-status,
+      .sm-alert-top .ai-review {
+        font-size: 10.5px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+        padding: 2px 8px;
+        border-radius: var(--radius-pill);
+        background: var(--chip);
+        color: var(--muted);
+      }
+      .sm-alert-top .ai-side {
+        font-weight: 800;
+        letter-spacing: 0.5px;
+      }
+      .sm-alert-top .ai-status {
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+      }
       .pob-head {
         display: flex;
         align-items: center;
