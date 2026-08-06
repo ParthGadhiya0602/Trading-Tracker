@@ -18,6 +18,7 @@ const path = require("path");
 const crypto = require("crypto");
 const { connectMongoWithRetry } = require("./mongo-retry");
 const { DurableOutbox } = require("./durable-outbox");
+const { istNow, istFromMs, istLogTs } = require("./utils");
 
 const ROOT = path.join(__dirname, ".."); // repo root (config lives here)
 const STORE_DIR = path.join(ROOT, "store"); // alert + user data files live here
@@ -27,28 +28,10 @@ const CONFIG_FILE = path.join(ROOT, "config.json");
 const LOG_DIR = path.join(ROOT, "logs");
 const LOG_FILE = path.join(LOG_DIR, "alerts-errors.log");
 
-// ---------- error log (persistence/connection/notification failures) ----------
-// IST timestamp "YYYY-MM-DD HH:MM:SS"
-function logTs() {
-  const p = {};
-  new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Kolkata",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  })
-    .formatToParts(new Date())
-    .forEach((x) => (p[x.type] = x.value));
-  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second} IST`;
-}
 // Append a dated line to logs/alerts-errors.log and echo to the console.
 function logError(scope, err) {
   const msg = err && err.message ? err.message : String(err == null ? "" : err);
-  const line = `[${logTs()}] ERROR [${scope}] ${msg}\n`;
+  const line = `[${istLogTs()}] ERROR [${scope}] ${msg}\n`;
   try {
     fs.mkdirSync(LOG_DIR, { recursive: true });
     fs.appendFileSync(LOG_FILE, line);
@@ -203,7 +186,7 @@ function migrateReview(a) {
       a.reviewState = "approved";
       a.reviewer = "(migrated)";
       a.reviewReason = "(migrated from verify)";
-      a.reviewedAt = new Date().toISOString();
+      a.reviewedAt = istNow();
     } else {
       a.reviewState = "pending";
       a.reviewer = "";
@@ -280,7 +263,7 @@ function migrate(users) {
   // move any lingering closed alerts out of the active list into the archive
   const stillClosed = store.alerts.filter((a) => a.status === "closed");
   if (stillClosed.length) {
-    const nowIso = new Date().toISOString();
+    const nowIso = istNow();
     for (const a of stillClosed) {
       if (!a.archivedAt) a.archivedAt = a.updatedAt || nowIso;
     }
@@ -306,7 +289,7 @@ async function putAlert(payload) {
       alertId: doc.id,
       localVersion: doc.version,
       mongoVersion: current.version,
-      detectedAt: new Date().toISOString(),
+      detectedAt: istNow(),
     };
   await target.replaceOne({ _id: doc.id }, mongoDocument(doc), { upsert: true });
   await other.deleteOne({ _id: doc.id, version: { $lte: doc.version } });
@@ -373,7 +356,7 @@ async function processOutboxOperation(operation) {
   }
   await processedColl.updateOne(
     { _id: operation.operationId },
-    { $setOnInsert: { type, processedAt: new Date().toISOString(), outcome } },
+    { $setOnInsert: { type, processedAt: istNow(), outcome } },
     { upsert: true },
   );
 }
@@ -397,7 +380,7 @@ function queueAlert(alert, location) {
 function queueDelete(alert) {
   outbox.enqueue(
     "ALERT_DELETE",
-    { id: alert.id, version: alert.version, at: new Date().toISOString() },
+    { id: alert.id, version: alert.version, at: istNow() },
     { dedupeKey: `alert:${alert.id}` },
   );
 }
@@ -692,13 +675,13 @@ function versionConflict(alert, expectedVersion) {
     currentVersion: alert.version,
   };
 }
-function bumpVersion(alert, at = new Date().toISOString()) {
+function bumpVersion(alert, at = istNow()) {
   alert.version = (Number.isInteger(alert.version) ? alert.version : 0) + 1;
   alert.updatedAt = at;
   return at;
 }
 function recordEvent(alert, type, details = {}) {
-  const at = details.at || new Date().toISOString();
+  const at = details.at || istNow();
   const actor = details.actor || null;
   const event = {
     id: crypto.randomUUID(),
@@ -752,16 +735,16 @@ function updateNotification(userId, eventId, action, options = {}) {
     (item) => item.userId === userId && item.eventId === eventId,
   );
   if (!receipt) return { error: "not found" };
-  const now = new Date();
-  if (action === "read") receipt.readAt = receipt.readAt || now.toISOString();
+  const now = istNow();
+  if (action === "read") receipt.readAt = receipt.readAt || now;
   else if (action === "dismiss") {
-    receipt.readAt = receipt.readAt || now.toISOString();
-    receipt.dismissedAt = now.toISOString();
+    receipt.readAt = receipt.readAt || now;
+    receipt.dismissedAt = now;
   } else if (action === "snooze") {
     const minutes = Number(options.minutes == null ? 15 : options.minutes);
     if (!Number.isFinite(minutes) || minutes < 1 || minutes > 1440)
       return { error: "snooze minutes must be between 1 and 1440" };
-    receipt.snoozedUntil = new Date(now.getTime() + minutes * 60_000).toISOString();
+    receipt.snoozedUntil = istFromMs(Date.now() + minutes * 60_000);
   } else {
     return { error: "invalid notification action" };
   }
@@ -771,7 +754,7 @@ function updateNotification(userId, eventId, action, options = {}) {
   return { notification: { ...receipt } };
 }
 function active(userId) {
-  const now = new Date().toISOString();
+  const now = istNow();
   const result = [];
   for (const alert of store.alerts) {
     const event = alert.lastEvent;
@@ -819,6 +802,10 @@ function validate(input, opts = {}) {
   if (!(alertPrice > 0)) errors.push("alertPrice must be a positive number");
   if (!TIMEFRAMES.includes(timeframe)) errors.push("timeframe is required");
   if (!(stopLoss > 0)) errors.push("stop loss must be a positive number");
+  else if (side === "BUY" && alertPrice > 0 && stopLoss >= alertPrice)
+    errors.push("stop loss must be below entry price for BUY");
+  else if (side === "SELL" && alertPrice > 0 && stopLoss <= alertPrice)
+    errors.push("stop loss must be above entry price for SELL");
   if (!note) errors.push("note is required");
   // on create the caller must supply a creator (set server-side from the session);
   // on edit a blank/legacy stored value shouldn't block an otherwise-valid update.
@@ -887,7 +874,7 @@ function markEnteredIfPastEntry(alert, currentPrice) {
 function create(input, currentPrice, actor) {
   const { errors, clean } = validate(input);
   if (errors.length) return { error: errors.join("; ") };
-  const now = new Date().toISOString();
+  const now = istNow();
   const offsetPct = offsetFor(clean.timeframe);
   const stepPct = stepFor(clean.timeframe, offsetPct);
   const alertPrice = round2(clean.alertPrice);
@@ -1014,7 +1001,7 @@ function archiveAlert(id, details = {}) {
   const [alert] = store.alerts.splice(i, 1);
   alert.status = "closed";
   alert.ringing = false;
-  const at = new Date().toISOString();
+  const at = istNow();
   alert.archivedAt = at;
   bumpVersion(alert, at);
   recordEvent(alert, details.type || "CLOSED", {
@@ -1111,7 +1098,7 @@ function review(id, decision, reason, actor, expectedVersion) {
   alert.reviewerUserId = actor.id;
   alert.reviewerRole = actor.role;
   alert.reviewReason = trimmed;
-  alert.reviewedAt = new Date().toISOString();
+  alert.reviewedAt = istNow();
   bumpVersion(alert);
   recordEvent(alert, decision === "approve" ? "APPROVED" : "REJECTED", {
     actor,
@@ -1177,7 +1164,7 @@ function messageFor(alert, type, ltp) {
 function fire(alert, type, ltp, opts) {
   const ring = opts && opts.ring !== undefined ? opts.ring : RINGS.has(type);
   const text = messageFor(alert, type, ltp);
-  const at = new Date().toISOString();
+  const at = istNow();
   alert.firedCount++;
   alert.ringing = ring; // silent (non-ring) events clear any prior ring
   if (ring) alert.snoozed = false;
@@ -1255,7 +1242,7 @@ function evaluateZone(alert, ltp) {
 function enterAlert(alert, ltp) {
   alert.status = "active";
   alert.entered = true;
-  alert.updatedAt = new Date().toISOString();
+  alert.updatedAt = istNow();
   fire(alert, "ENTRY", round2(ltp), { ring: false });
 }
 
@@ -1290,7 +1277,7 @@ function evaluate(payload) {
       if (r.fired) mutated = true;
       if (r.terminal) {
         alert.status = "closed";
-        alert.updatedAt = new Date().toISOString();
+        alert.updatedAt = istNow();
         toArchive.push(alert.id);
         mutated = true;
       }

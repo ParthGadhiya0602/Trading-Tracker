@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const { connectMongoWithRetry } = require("./mongo-retry");
 const { DurableOutbox } = require("./durable-outbox");
+const { istNow, istFromMs } = require("./utils");
 
 const ROOT = path.join(__dirname, "..");
 const STORE_DIR = path.join(ROOT, "store");
@@ -95,7 +96,7 @@ async function processOutbox(operation) {
     {
       $setOnInsert: {
         type: operation.type,
-        processedAt: new Date().toISOString(),
+        processedAt: istNow(),
       },
     },
     { upsert: true },
@@ -200,7 +201,7 @@ async function load(options = {}) {
       for (const delivery of store.deliveries) {
         if (delivery.status !== "sending") continue;
         delivery.status = "failed";
-        delivery.nextAttemptAt = new Date().toISOString();
+        delivery.nextAttemptAt = istNow();
         delivery.lastError = "delivery interrupted before acknowledgement";
         queueDelivery(delivery);
       }
@@ -233,7 +234,7 @@ function publicConfig() {
 function enqueue(event) {
   if (!configured() || !event || !event.id) return;
   const recipients = auth.telegramRecipients();
-  const now = new Date().toISOString();
+  const now = istNow();
   for (const recipient of recipients) {
     if (
       store.deliveries.some(
@@ -285,7 +286,7 @@ async function telegramRequest(method, body) {
 async function processDelivery(delivery) {
   delivery.status = "sending";
   delivery.attempts += 1;
-  delivery.updatedAt = new Date().toISOString();
+  delivery.updatedAt = istNow();
   queueDelivery(delivery);
   saveStore();
   try {
@@ -309,17 +310,17 @@ async function processDelivery(delivery) {
     } else {
       delivery.status = "failed";
       const delay = Math.min(15 * 60_000, 5000 * 2 ** (delivery.attempts - 1));
-      delivery.nextAttemptAt = new Date(Date.now() + delay).toISOString();
+      delivery.nextAttemptAt = istFromMs(Date.now() + delay);
     }
     logError("telegram.delivery", delivery.lastError);
   }
-  delivery.updatedAt = new Date().toISOString();
+  delivery.updatedAt = istNow();
   queueDelivery(delivery);
   saveStore();
 }
 
 async function deliveryTick() {
-  const now = new Date().toISOString();
+  const now = istNow();
   const ready = store.deliveries
     .filter(
       (delivery) =>

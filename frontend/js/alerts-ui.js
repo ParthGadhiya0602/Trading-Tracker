@@ -456,6 +456,14 @@
               "Targets: — <span class='opt'>(needs side, entry price & stop loss)</span>";
             return;
           }
+          if (
+            (side === "BUY" && slv >= p) ||
+            (side === "SELL" && slv <= p)
+          ) {
+            el.innerHTML =
+              `<span class='opt' style='color:var(--danger,#e53e3e)'>Stop loss must be ${side === "BUY" ? "below" : "above"} entry price for ${side}</span>`;
+            return;
+          }
           const R = Math.abs(p - slv);
           const dir = side === "BUY" ? 1 : -1;
           el.innerHTML = `R ${fmtRs(R)} · 3× <b>${fmtRs(p + dir * 3 * R)}</b> (+${fmtRs(3 * R)}) · 5× <b>${fmtRs(p + dir * 5 * R)}</b> (+${fmtRs(5 * R)})`;

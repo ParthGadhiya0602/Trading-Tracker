@@ -3,6 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { istNow } = require("./utils");
 
 class DurableOutbox {
   constructor(file, options = {}) {
@@ -42,7 +43,7 @@ class DurableOutbox {
       if (pending) {
         pending.type = type;
         pending.payload = payload;
-        pending.updatedAt = new Date().toISOString();
+        pending.updatedAt = istNow();
         pending.attempts = 0;
         pending.lastError = null;
         this.write();
@@ -50,7 +51,7 @@ class DurableOutbox {
         return pending.operationId;
       }
     }
-    const now = new Date().toISOString();
+    const now = istNow();
     const operation = {
       operationId: crypto.randomUUID(),
       type,
@@ -89,7 +90,7 @@ class DurableOutbox {
         } catch (error) {
           operation.attempts += 1;
           operation.lastError = String((error && error.message) || error);
-          operation.updatedAt = new Date().toISOString();
+          operation.updatedAt = istNow();
           this.write();
           this.logError("outbox.replay", operation.lastError);
           const delay = Math.min(60_000, 1000 * 2 ** Math.min(operation.attempts, 6));

@@ -18,6 +18,7 @@ const path = require("path");
 const crypto = require("crypto");
 const { connectMongoWithRetry } = require("./mongo-retry");
 const { DurableOutbox } = require("./durable-outbox");
+const { istNow, istFromMs, istLogTs } = require("./utils");
 
 const ROOT = path.join(__dirname, ".."); // repo root (config lives here)
 const STORE_DIR = path.join(ROOT, "store"); // alert + user data files live here
@@ -45,26 +46,9 @@ let passwordPepper = "";
 const sessions = new Map(); // token -> { userId, role, username, lastSeen }
 const fails = new Map(); // usernameLower -> { count, until, expiresAt }
 
-// ---------- small error log (shared file with alerts, "auth.*" scopes) ----------
-function logTs() {
-  const p = {};
-  new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Kolkata",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  })
-    .formatToParts(new Date())
-    .forEach((x) => (p[x.type] = x.value));
-  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second} IST`;
-}
 function logError(scope, err) {
   const msg = err && err.message ? err.message : String(err == null ? "" : err);
-  const line = `[${logTs()}] ERROR [${scope}] ${msg}`;
+  const line = `[${istLogTs()}] ERROR [${scope}] ${msg}`;
   console.error("  " + line);
   try {
     fs.mkdirSync(LOG_DIR, { recursive: true });
@@ -204,7 +188,7 @@ function queueUser(user) {
 function queueUserDelete(user) {
   outbox.enqueue(
     "USER_DELETE",
-    { id: user.id, at: new Date().toISOString() },
+    { id: user.id, at: istNow() },
     { dedupeKey: `user:${user.id}` },
   );
 }
@@ -227,7 +211,7 @@ async function processOutbox(operation) {
     {
       $setOnInsert: {
         type: operation.type,
-        processedAt: new Date().toISOString(),
+        processedAt: istNow(),
       },
     },
     { upsert: true },
@@ -321,15 +305,15 @@ function createTelegramLinkCode(userId) {
   const user = findById(userId);
   if (!user) return { error: "not found" };
   const code = crypto.randomBytes(6).toString("base64url").toUpperCase();
-  const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
+  const expiresAt = istFromMs(Date.now() + 10 * 60_000);
   user.telegramLink = { codeHash: linkCodeHash(code), expiresAt };
-  user.updatedAt = new Date().toISOString();
+  user.updatedAt = istNow();
   save();
   return { code, expiresAt };
 }
 function consumeTelegramLinkCode(code, telegramAccount) {
   const hash = linkCodeHash(String(code || "").trim().toUpperCase());
-  const now = new Date().toISOString();
+  const now = istNow();
   const user = store.users.find(
     (candidate) =>
       candidate.telegramLink &&
@@ -345,7 +329,7 @@ function consumeTelegramLinkCode(code, telegramAccount) {
       candidate.telegram.chatId === chatId,
   );
   if (conflict) return { error: "this Telegram chat is already linked" };
-  const linkedAt = new Date().toISOString();
+  const linkedAt = istNow();
   user.telegram = {
     chatId,
     telegramUserId: String(telegramAccount.telegramUserId || ""),
@@ -366,7 +350,7 @@ function unlinkTelegram(userId) {
   if (!user) return { error: "not found" };
   delete user.telegram;
   delete user.telegramLink;
-  user.updatedAt = new Date().toISOString();
+  user.updatedAt = istNow();
   save();
   return { user: pub(user) };
 }
@@ -376,7 +360,7 @@ function setTelegramEnabled(userId, enabled) {
   if (!user.telegram || !user.telegram.verifiedAt)
     return { error: "Telegram is not linked" };
   user.telegram.enabled = !!enabled;
-  user.updatedAt = new Date().toISOString();
+  user.updatedAt = istNow();
   save();
   return { user: pub(user) };
 }
@@ -402,7 +386,7 @@ function markTelegramUnreachable(userId, error) {
   user.telegram.reachable = false;
   user.telegram.enabled = false;
   user.telegram.lastError = String(error || "Telegram delivery failed");
-  user.updatedAt = new Date().toISOString();
+  user.updatedAt = istNow();
   save();
 }
 function validateUsername(username) {
@@ -432,7 +416,7 @@ function createUser({ username, password, role }, createdBy) {
   if (pe) return { error: pe };
   if (!ROLES.includes(role)) return { error: "invalid role" };
   if (findByName(username)) return { error: "username already exists" };
-  const now = new Date().toISOString();
+  const now = istNow();
   const { salt, hash } = hashPassword(password);
   const user = {
     id: crypto.randomUUID(),
@@ -484,7 +468,7 @@ function updateUser(id, input) {
     u.salt = salt;
     u.hash = hash;
   }
-  u.updatedAt = new Date().toISOString();
+  u.updatedAt = istNow();
   save();
   return { user: pub(u) };
 }
@@ -555,7 +539,7 @@ function login(username, password) {
     return { error: "invalid username or password" };
   }
   clearFails(username);
-  u.lastLoginAt = new Date().toISOString();
+  u.lastLoginAt = istNow();
   save();
   const now = Date.now();
   for (const [sessionToken, session] of sessions) {
