@@ -4,7 +4,7 @@
   },
   "telegram": {
     "botToken": "PASTE_YOUR_BOT_TOKEN_FROM_BOTFATHER",
-    "recipients": [{ "chatId": "PASTE_YOUR_CHAT_ID", "label": "Me" }]
+    "botUsername": "ZoneTrackerAlertBot"
   },
   "mongo": {
     "uri": "mongodb+srv://USER:PASSWORD@cluster0.xxxx.mongodb.net/trading_tracker?retryWrites=true&w=majority"

@@ -25,6 +25,8 @@ const path = require("path");
 const alerts = require("./alerts");
 const auth = require("./auth");
 const stream = require("./stream");
+const telegram = require("./telegram");
+const { ACTION, authorize } = require("./alert-policy");
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.PORT || 8787);
@@ -425,6 +427,9 @@ function applyTick(t) {
 // SSE fan-out for /api/stream (only ever populated when STREAM_WS is on - the endpoint
 // itself 404s otherwise, so nothing subscribes).
 const sseClients = new Set();
+const stateSseClients = new Set(); // { res, userId }
+const stateChanges = [];
+let stateRevision = 0;
 function sseWrite(res, chunk) {
   try {
     if (res.writableEnded) {
@@ -434,6 +439,27 @@ function sseWrite(res, chunk) {
     res.write(chunk);
   } catch (_) {
     sseClients.delete(res);
+  }
+}
+function stateSseWrite(client, chunk) {
+  try {
+    if (client.res.writableEnded) {
+      stateSseClients.delete(client);
+      return;
+    }
+    client.res.write(chunk);
+  } catch (_) {
+    stateSseClients.delete(client);
+  }
+}
+function broadcastState(change) {
+  const revisioned = { ...change, revision: ++stateRevision };
+  stateChanges.push(revisioned);
+  if (stateChanges.length > 500) stateChanges.shift();
+  const chunk = `event: state\ndata: ${JSON.stringify(revisioned)}\n\n`;
+  for (const client of stateSseClients) {
+    if (revisioned.userId && revisioned.userId !== client.userId) continue;
+    stateSseWrite(client, chunk);
   }
 }
 async function reseedLiveCache() {
@@ -525,8 +551,17 @@ function readJson(req) {
 }
 function finishAlert(res, r) {
   if (r.error)
-    return sendJson(res, r.error === "not found" ? 404 : 400, { error: r.error });
-  return sendJson(res, 200, { alert: r.alert });
+    return sendJson(res, r.status || (r.error === "not found" ? 404 : 400), {
+      error: r.error,
+      ...(r.currentVersion == null ? {} : { currentVersion: r.currentVersion }),
+    });
+  return sendJson(res, 200, { alert: r.alert, syncStatus: alerts.syncStatus() });
+}
+function permit(res, user, action, alert) {
+  const denied = authorize(user, action, alert);
+  if (!denied) return true;
+  sendJson(res, denied.status, { error: denied.error });
+  return false;
 }
 
 // ---------------- auth: cookies + session ----------------
@@ -605,6 +640,34 @@ async function handleUsersApi(req, res, url, method, actor) {
     else sendJson(res, 201, { user: r.user });
     return true;
   }
+  const telegramMatch = url.match(
+    /^\/api\/users\/([^/]+)\/telegram\/(link-code|link)$/,
+  );
+  if (telegramMatch) {
+    const id = decodeURIComponent(telegramMatch[1]);
+    const action = telegramMatch[2];
+    if (action === "link-code" && method === "POST") {
+      if (!telegram.configured()) {
+        sendJson(res, 503, { error: "Telegram bot is not configured" });
+        return true;
+      }
+      const result = auth.createTelegramLinkCode(id);
+      sendJson(res, result.error ? (result.error === "not found" ? 404 : 400) : 201, {
+        ...result,
+        botUsername: telegram.publicConfig().botUsername,
+      });
+      return true;
+    }
+    if (action === "link" && method === "DELETE") {
+      const result = auth.unlinkTelegram(id);
+      if (!result.error) {
+        broadcastState({ kind: "telegram", userId: id });
+        broadcastState({ kind: "users" });
+      }
+      sendJson(res, result.error ? (result.error === "not found" ? 404 : 400) : 200, result);
+      return true;
+    }
+  }
   const m = url.match(/^\/api\/users\/([^/]+)$/);
   if (m) {
     const id = decodeURIComponent(m[1]);
@@ -639,7 +702,7 @@ async function handleAlertsApi(req, res, url, method, user) {
     return true;
   }
   if (url === "/api/alerts/active" && method === "GET") {
-    sendJson(res, 200, { alerts: alerts.active() });
+    sendJson(res, 200, { alerts: alerts.active(user.id) });
     return true;
   }
   // active + archived together (used by the notification center so archived events survive)
@@ -666,6 +729,7 @@ async function handleAlertsApi(req, res, url, method, user) {
     return true;
   }
   if (url === "/api/alerts" && method === "POST") {
+    if (!permit(res, user, ACTION.CREATE)) return true;
     const body = await readJson(req);
     body.zoneCreator = (user && user.username) || ""; // authoritative: the signed-in user
     // Prefer the price the create form captured (once side+entry+time frame were set) so
@@ -674,9 +738,25 @@ async function handleAlertsApi(req, res, url, method, user) {
     delete body.formPrice; // transport-only; never persisted on the alert
     const cp =
       formCp > 0 ? formCp : latestPrices[String(body.symbol || "").toUpperCase()];
-    const r = alerts.create(body, cp);
+    const r = alerts.create(body, cp, user);
     if (r.error) sendJson(res, 400, { error: r.error });
-    else sendJson(res, 201, { alert: r.alert });
+    else sendJson(res, 201, { alert: r.alert, syncStatus: alerts.syncStatus() });
+    return true;
+  }
+  const eventsMatch = url.match(/^\/api\/alerts\/([^/]+)\/events$/);
+  if (eventsMatch && method === "GET") {
+    const id = decodeURIComponent(eventsMatch[1]);
+    if (!alerts.find(id)) {
+      sendJson(res, 404, { error: "not found" });
+      return true;
+    }
+    sendJson(res, 200, { events: alerts.listEvents(id) });
+    return true;
+  }
+  const detailMatch = url.match(/^\/api\/alerts\/([^/]+)$/);
+  if (detailMatch && method === "GET") {
+    const alert = alerts.find(decodeURIComponent(detailMatch[1]));
+    sendJson(res, alert ? 200 : 404, alert ? { alert } : { error: "not found" });
     return true;
   }
   const m = url.match(
@@ -685,39 +765,137 @@ async function handleAlertsApi(req, res, url, method, user) {
   if (m) {
     const id = decodeURIComponent(m[1]);
     const action = m[2];
-    if (action === "snooze" && method === "POST") return finishAlert(res, alerts.snooze(id)), true;
-    if (action === "close" && method === "POST") return finishAlert(res, alerts.close(id)), true;
+    if (action === "snooze" && method === "POST") {
+      const body = await readJson(req);
+      finishAlert(res, alerts.snooze(id, user.id, body.minutes));
+      return true;
+    }
+    if (action === "close" && method === "POST") {
+      const alert = alerts.find(id);
+      if (!alert) {
+        finishAlert(res, { error: "not found" });
+        return true;
+      }
+      if (!permit(res, user, ACTION.CLOSE, alert)) return true;
+      const body = await readJson(req);
+      finishAlert(res, alerts.close(id, user, body.expectedVersion));
+      return true;
+    }
     if (action === "rearm" && method === "POST") {
       // re-anchor against the current live price, exactly like creation
-      const a =
-        alerts.list().find((x) => x.id === id) ||
-        alerts.listArchived().find((x) => x.id === id);
+      const a = alerts.find(id);
+      if (!a) {
+        finishAlert(res, { error: "not found" });
+        return true;
+      }
+      if (!permit(res, user, ACTION.REARM, a)) return true;
+      const body = await readJson(req);
       const cp = a ? latestPrices[a.symbol] : undefined;
-      return finishAlert(res, alerts.rearm(id, cp)), true;
+      finishAlert(res, alerts.rearm(id, cp, user, body.expectedVersion));
+      return true;
     }
     if ((action === "approve" || action === "reject") && method === "POST") {
+      const alert = alerts.find(id);
+      if (!alert) {
+        finishAlert(res, { error: "not found" });
+        return true;
+      }
+      if (!permit(res, user, ACTION.REVIEW, alert)) return true;
       const body = await readJson(req);
-      const reviewer = (user && user.username) || ""; // server-authoritative, like zoneCreator
-      return (
-        finishAlert(res, alerts.review(id, action, body.reason, reviewer)),
-        true
+      finishAlert(
+        res,
+        alerts.review(id, action, body.reason, user, body.expectedVersion),
       );
+      return true;
     }
     if (!action && method === "PATCH") {
+      const alert = alerts.find(id);
+      if (!alert) {
+        finishAlert(res, { error: "not found" });
+        return true;
+      }
+      if (!permit(res, user, ACTION.EDIT, alert)) return true;
       const body = await readJson(req);
       delete body.zoneCreator; // creator is fixed at create time; edits never reassign it
       const formCp = num(body.formPrice);
       delete body.formPrice; // transport-only; never persisted on the alert
       const cp =
         formCp > 0 ? formCp : latestPrices[String(body.symbol || "").toUpperCase()];
-      return finishAlert(res, alerts.update(id, body, cp)), true;
-    }
-    if (!action && method === "DELETE") {
-      const r = alerts.remove(id);
-      if (r.error) sendJson(res, 404, { error: r.error });
-      else sendJson(res, 200, { ok: true });
+      finishAlert(
+        res,
+        alerts.update(id, body, cp, user, body.expectedVersion),
+      );
       return true;
     }
+    if (!action && method === "DELETE") {
+      const alert = alerts.find(id);
+      if (!alert) {
+        finishAlert(res, { error: "not found" });
+        return true;
+      }
+      if (!permit(res, user, ACTION.DELETE, alert)) return true;
+      const body = await readJson(req);
+      const r = alerts.remove(id, user, body.expectedVersion);
+      if (r.error) finishAlert(res, r);
+      else sendJson(res, 200, { ok: true, syncStatus: alerts.syncStatus() });
+      return true;
+    }
+  }
+  return false;
+}
+
+async function handleNotificationsApi(req, res, url, method, user) {
+  if (url === "/api/notifications" && method === "GET") {
+    sendJson(res, 200, { notifications: alerts.listNotifications(user.id) });
+    return true;
+  }
+  const match = url.match(
+    /^\/api\/notifications\/([^/]+)\/(read|dismiss|snooze)$/,
+  );
+  if (!match || method !== "POST") return false;
+  const eventId = decodeURIComponent(match[1]);
+  const action = match[2];
+  const body = await readJson(req);
+  const result = alerts.updateNotification(user.id, eventId, action, body);
+  if (result.error)
+    sendJson(res, result.error === "not found" ? 404 : 400, {
+      error: result.error,
+    });
+  else sendJson(res, 200, { ...result, syncStatus: alerts.syncStatus() });
+  return true;
+}
+
+async function handleTelegramApi(req, res, url, method, user) {
+  if (url === "/api/telegram/status" && method === "GET") {
+    const liveUser = auth.sessionUser(getToken(req)) || user;
+    sendJson(res, 200, {
+      telegram: liveUser.telegram,
+      config: telegram.publicConfig(),
+      deliveries: telegram.deliveryStatus(user.id),
+    });
+    return true;
+  }
+  if (url === "/api/telegram/link-code" && method === "POST") {
+    if (!telegram.configured()) {
+      sendJson(res, 503, { error: "Telegram bot is not configured" });
+      return true;
+    }
+    const result = auth.createTelegramLinkCode(user.id);
+    sendJson(res, result.error ? 400 : 201, result);
+    return true;
+  }
+  if (url === "/api/telegram/link" && method === "DELETE") {
+    const result = auth.unlinkTelegram(user.id);
+    if (!result.error) broadcastState({ kind: "telegram", userId: user.id });
+    sendJson(res, result.error ? 400 : 200, result);
+    return true;
+  }
+  if (url === "/api/telegram/enabled" && method === "POST") {
+    const body = await readJson(req);
+    const result = auth.setTelegramEnabled(user.id, body.enabled);
+    if (!result.error) broadcastState({ kind: "telegram", userId: user.id });
+    sendJson(res, result.error ? 400 : 200, result);
+    return true;
   }
   return false;
 }
@@ -782,10 +960,56 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 404, { error: "not found" });
         return;
       }
-      // Only editors may change alerts; admins and viewers are read-only.
-      if (url.startsWith("/api/alerts") && method !== "GET" &&
-          user.role !== "editor") {
-        sendJson(res, 403, { error: "editor role required for alert actions" });
+      if (url.startsWith("/api/notifications")) {
+        if (await handleNotificationsApi(req, res, url, method, user)) return;
+        sendJson(res, 404, { error: "not found" });
+        return;
+      }
+      if (url.startsWith("/api/telegram")) {
+        if (await handleTelegramApi(req, res, url, method, user)) return;
+        sendJson(res, 404, { error: "not found" });
+        return;
+      }
+      if (url === "/api/changes" && method === "GET") {
+        const requestUrl = new URL(req.url, `http://${HOST}`);
+        const since = Math.max(0, Number(requestUrl.searchParams.get("since")) || 0);
+        const oldestRevision = stateChanges.length
+          ? stateChanges[0].revision
+          : stateRevision + 1;
+        const resetRequired =
+          since > stateRevision || (since > 0 && since < oldestRevision - 1);
+        const changes = resetRequired
+          ? []
+          : stateChanges.filter(
+              (change) =>
+                change.revision > since &&
+                (!change.userId || change.userId === user.id),
+            );
+        sendJson(res, 200, {
+          revision: stateRevision,
+          resetRequired,
+          changes,
+        });
+        return;
+      }
+      if (url === "/api/events" && method === "GET") {
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        });
+        res.write("retry: 3000\n\n");
+        res.write(
+          `event: state\ndata: ${JSON.stringify({ kind: "ready", revision: stateRevision, syncStatus: alerts.syncStatus() })}\n\n`,
+        );
+        const client = { res, userId: user.id };
+        stateSseClients.add(client);
+        req.on("close", () => stateSseClients.delete(client));
+        return;
+      }
+      if (url === "/api/sync-status" && method === "GET") {
+        sendJson(res, 200, alerts.syncStatus());
         return;
       }
       // data + alert endpoints (any authenticated user for reads)
@@ -842,17 +1066,31 @@ async function main() {
       ? "  Data source: configured from config.json (feed)"
       : "  Data source: NOT configured - add a `feed` block to config.json (see config.example.json)",
   );
-  await alerts.load();
-  console.log(
-    `  Alerts: ${alerts.list().length} saved · store: ${alerts.backendName()} · Telegram ${
-      alerts.telegramConfigured() ? "configured" : "not configured (in-page only)"
-    } · eval every ${ALERT_POLL_MS / 1000}s in market hours`,
-  );
   await auth.load();
   console.log(
     `  Auth: ${auth.listUsers().length} user(s) · store: ${auth.backendName()}` +
       ` · password pepper: ${auth.passwordPepperConfigured() ? "configured" : "NOT configured"}` +
       (auth.needsSetup() ? " · NEEDS SETUP (create admin on first open)" : ""),
+  );
+  await alerts.load({
+    users: auth.listUsers(),
+    usersProvider: () => auth.listUsers(),
+  });
+  console.log(
+    `  Alerts: ${alerts.list().length} saved · store: ${alerts.backendName()} · eval every ${ALERT_POLL_MS / 1000}s in market hours`,
+  );
+  const telegramBackend = await telegram.load({
+    auth,
+    logError: alerts.logError,
+    onUserChange: (userId) => {
+      broadcastState({ kind: "telegram", userId });
+      broadcastState({ kind: "users" });
+    },
+  });
+  alerts.setEventSink((event) => telegram.enqueue(event));
+  alerts.setChangeSink((change) => broadcastState(change));
+  console.log(
+    `  Telegram: ${telegram.configured() ? `configured · store: ${telegramBackend}` : "not configured (in-page only)"}`,
   );
   const streamCfg = requireStream(); // null when STREAM_WS unset, or on WARNING+continue
   console.log(
@@ -927,6 +1165,9 @@ async function main() {
         for (const client of sseClients) sseWrite(client, ":\n\n"); // heartbeat comment
       }, 15_000);
     }
+    setInterval(() => {
+      for (const client of stateSseClients) stateSseWrite(client, ":\n\n");
+    }, 15_000);
   });
 }
 main();

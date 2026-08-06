@@ -13,6 +13,7 @@
         const niceLabel = (n) =>
           n.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
         let editId = null;
+        let editVersion = null;
         let SYMS = {};
         let OFFSETS = {}; // { timeframe: pct } from the server
         let DEFAULT_OFFSET = 10;
@@ -64,7 +65,7 @@
             key: "review",
             label: "Review",
             opts: [
-              ["raw", "Raw"],
+              ["pending", "Pending"],
               ["approved", "Approved"],
               ["rejected", "Rejected"],
             ],
@@ -274,10 +275,14 @@
         const zoneText = (o) =>
           ({ fail: "Failed", partial: "Partial", success: "Successful" })[o] ||
           "Pending";
-        const REVIEW_LABEL = { approved: "Approved", rejected: "Rejected" };
-        const reviewLabel = (r) => REVIEW_LABEL[r] || "Raw";
+        const REVIEW_LABEL = {
+          pending: "Pending",
+          approved: "Approved",
+          rejected: "Rejected",
+        };
+        const reviewLabel = (r) => REVIEW_LABEL[r] || "Pending";
         const reviewBadgeHtml = (a) =>
-          `<span class="ai-review ${a.reviewState || "raw"}">${reviewLabel(a.reviewState).toUpperCase()}</span>`;
+          `<span class="ai-review ${a.reviewState || "pending"}">${reviewLabel(a.reviewState).toUpperCase()}</span>`;
         function fmtRs(v) {
           return v == null || isNaN(v)
             ? "-"
@@ -301,8 +306,12 @@
             j = txt ? JSON.parse(txt) : {};
           } catch (_) {}
           if (res.status === 401 && window.__onAuthExpired) window.__onAuthExpired();
-          if (!res.ok || j.error)
-            throw new Error(j.error || "HTTP " + res.status);
+          if (!res.ok || j.error) {
+            const error = new Error(j.error || "HTTP " + res.status);
+            error.status = res.status;
+            error.currentVersion = j.currentVersion;
+            throw error;
+          }
           return j;
         }
         function btn(label, cls, onclick, icon) {
@@ -572,21 +581,20 @@
           const acts = $("#av-actions");
           acts.innerHTML = "";
           const isArch = a._archived || a.status === "closed";
-          if (!canEdit()) {
-            acts.innerHTML =
-              `<span class="av-readonly">Read-only access. An editor can approve or reject this alert.</span>`;
-          } else if (isArch) {
-            // archived alert: re-open (re-arm) or delete
-            acts.appendChild(
-              btn("Re-open", "btn-sm", () => rearmAlert(a), "rotate-ccw"),
-            );
-            acts.appendChild(
+          if (isArch) {
+            // Archived definitions remain creator-controlled.
+            if (canRearmAlert(a))
+              acts.appendChild(
+                btn("Re-open", "btn-sm", () => rearmAlert(a), "rotate-ccw"),
+              );
+            if (canDeleteAlert(a))
+              acts.appendChild(
               btn(
                 "Delete",
                 "btn-sm danger",
                 () => {
                   if (confirm(`Delete archived alert for ${a.symbol}?`)) {
-                    del(a.id);
+                    del(a);
                     closeAlertView();
                   }
                 },
@@ -594,20 +602,21 @@
               ),
             );
           } else {
-            acts.appendChild(
-              btn(
-                "Edit",
-                "btn-sm",
-                () => {
-                  closeAlertView();
-                  editAlert(a);
-                },
-                "pencil",
-              ),
-            );
+            if (canEditAlert(a))
+              acts.appendChild(
+                btn(
+                  "Edit",
+                  "btn-sm",
+                  () => {
+                    closeAlertView();
+                    editAlert(a);
+                  },
+                  "pencil",
+                ),
+              );
             // Approve unless already approved; Reject unless already rejected
-            // (so raw shows both, approved shows only Reject, rejected only Approve).
-            if (a.reviewState !== "approved")
+            // Pending shows both; reviewed alerts expose the opposite decision.
+            if (canReviewAlert(a) && a.reviewState !== "approved")
               acts.appendChild(
                 btn(
                   "Approve",
@@ -616,7 +625,7 @@
                   "shield-check",
                 ),
               );
-            if (a.reviewState !== "rejected")
+            if (canReviewAlert(a) && a.reviewState !== "rejected")
               acts.appendChild(
                 btn(
                   "Reject",
@@ -625,24 +634,26 @@
                   "shield-off",
                 ),
               );
-            acts.appendChild(
-              btn(
-                "Close alert",
-                "btn-sm",
-                async () => {
-                  await act(a.id, "close");
-                  closeAlertView();
-                },
-                "circle-x",
-              ),
-            );
-            acts.appendChild(
+            if (canCloseAlert(a))
+              acts.appendChild(
+                btn(
+                  "Close alert",
+                  "btn-sm",
+                  async () => {
+                    await act(a, "close");
+                    closeAlertView();
+                  },
+                  "circle-x",
+                ),
+              );
+            if (canDeleteAlert(a))
+              acts.appendChild(
               btn(
                 "Delete",
                 "btn-sm danger",
                 () => {
                   if (confirm(`Delete alert for ${a.symbol}?`)) {
-                    del(a.id);
+                    del(a);
                     closeAlertView();
                   }
                 },
@@ -650,6 +661,9 @@
               ),
             );
           }
+          if (!acts.children.length)
+            acts.innerHTML =
+              `<span class="av-readonly">View access only for this alert.</span>`;
           $("#alertViewModal").classList.add("show");
           drawIcons();
           setTimeout(() => $("#av-close").focus(), 50);
@@ -703,7 +717,7 @@
             await api(
               "/api/alerts/" + a.id + "/" + action,
               "POST",
-              { reason },
+              { reason, expectedVersion: a.version },
             );
           } catch (err) {
             $("#rv-err").textContent = err.message;
@@ -726,6 +740,7 @@
         };
         function resetForm() {
           editId = null;
+          editVersion = null;
           $("#formTitle").textContent = "Create alert";
           $("#al-submit-text").textContent = "Create alert";
           $("#alertForm").reset();
@@ -747,6 +762,7 @@
         }
         function editAlert(a) {
           editId = a.id;
+          editVersion = a.version;
           $("#formTitle").textContent = "Edit alert";
           $("#al-submit-text").textContent = "Save changes";
           $("#al-index").value = a.index;
@@ -787,6 +803,7 @@
           // side + entry + time frame were set (what the preview used) - NOT a fresh
           // save-time tick. Server re-anchors against this instead of its latest price.
           if (curPrice > 0) body.formPrice = curPrice;
+          if (editId) body.expectedVersion = editVersion;
           $("#al-err").textContent = "";
           // If the live price is already at/past the entry, warn: the alert will be
           // created already "entered" (targets/stop-loss track immediately).
@@ -803,7 +820,7 @@
               if (past) {
                 const ok = confirm(
                   `Current price ${fmtRs(price)} is already ${body.side === "BUY" ? "at/below" : "at/above"} your entry ${fmtRs(body.alertPrice)}.\n\n` +
-                    `The alert will be created already ENTERED — its 3×/5×/stop-loss can fire immediately.\n\nCreate it anyway?`,
+                    `The alert will stay pending review. Once approved, it may enter on the next live tick and begin tracking its 3×/5×/stop-loss immediately.\n\nSave it anyway?`,
                 );
                 if (!ok) return;
               }
@@ -838,7 +855,7 @@
                   (!sel.status.size || sel.status.has(a.status)) &&
                   (!sel.side.size || sel.side.has(a.side)) &&
                   (!sel.tf.size || sel.tf.has(a.timeframe)) &&
-                  (!sel.review.size || sel.review.has(a.reviewState || "raw")) &&
+                  (!sel.review.size || sel.review.has(a.reviewState || "pending")) &&
                   (!sel.outcome.size || sel.outcome.has(a.zoneOutcome || "pending")),
               )
             : source;
@@ -856,7 +873,7 @@
               ? `<div class="empty">No alerts match the current filters.</div>`
               : alertView === "closed"
                 ? `<div class="empty">No closed alerts yet.</div>`
-                : canEdit()
+                : canCreate()
                   ? `<div class="empty">No active alerts. Click "New alert" to create one.</div>`
                   : `<div class="empty">No active alerts to view.</div>`;
             return;
@@ -865,9 +882,13 @@
           for (const a of alerts) {
             listedAlerts.set(String(a.id), a);
             const isArch = a._archived || a.status === "closed";
-            const editable = canEdit();
             const div = document.createElement("div");
             div.dataset.alertId = a.id;
+            div.tabIndex = 0;
+            div.setAttribute(
+              "aria-label",
+              `${a.symbol} ${a.side} alert. ${a.status}. Press Enter for details.`,
+            );
             div.className =
               "alert-item " +
               (a.side === "BUY" ? "side-buy" : "side-sell") +
@@ -875,35 +896,42 @@
               (isArch ? " archived" : "");
             div.innerHTML =
               `<div class="ai-body">` +
-              `<div class="ai-line1">` +
-              `<span class="ai-sym">${a.symbol}</span>` +
-              `<span class="ai-status ${a.status}">${a.status}</span>` +
-              `<span class="ai-side ${a.side === "BUY" ? "buy" : "sell"}">${a.side}</span>` +
-              `<span class="ai-index">${a.index}</span>` +
+              `<div class="ai-identity">` +
+              `<div class="ai-line1"><span class="ai-sym">${esc(a.symbol)}</span>` +
+              `<span class="ai-index">${esc(a.index)}</span></div>` +
+              `<div class="ai-state-row">` +
+              `<span class="ai-status ${a.status}">${esc(a.status)}</span>` +
+              `<span class="ai-side ${a.side === "BUY" ? "buy" : "sell"}">${esc(a.side)}</span>` +
+              reviewBadgeHtml(a) +
+              `<span class="ai-zone ${a.zoneOutcome || "pending"}">${zoneText(a.zoneOutcome)} outcome</span>` +
               (isArch ? `<span class="ai-archived">Archived</span>` : "") +
               `</div>` +
-              `<span class="ai-state-meta">${reviewLabel(a.reviewState)} review · ${zoneText(a.zoneOutcome)} outcome</span>` +
-              `<span class="ai-nums">Entry ${fmtRs(a.alertPrice)} · Alert ${fmtRs(a.triggerPrice)} · SL ${fmtRs(a.stopLoss)} · ${a.timeframe || "-"}</span>` +
-              `<span class="ai-sub">Targets: 3× ${fmtRs(a.target3)} · 5× ${fmtRs(a.target5)} · Risk ${fmtRs(a.riskR)}</span>` +
               `</div>` +
-              (editable ? `<div class="ai-actions"></div>` : "");
-            if (!editable) {
-              div.setAttribute("role", "button");
-              div.tabIndex = 0;
-              div.setAttribute("aria-label", `View ${a.symbol} alert details`);
-            }
+              `<div class="ai-levels">` +
+              `<span class="ai-metric"><small>Entry</small><strong>${fmtRs(a.alertPrice)}</strong></span>` +
+              `<span class="ai-metric trigger"><small>Trigger</small><strong>${fmtRs(a.triggerPrice)}</strong></span>` +
+              `<span class="ai-metric stop"><small>Stop loss</small><strong>${fmtRs(a.stopLoss)}</strong></span>` +
+              `</div>` +
+              `<div class="ai-plan">` +
+              `<span class="ai-metric"><small>Target 3×</small><strong>${fmtRs(a.target3)}</strong></span>` +
+              `<span class="ai-metric"><small>Target 5×</small><strong>${fmtRs(a.target5)}</strong></span>` +
+              `<span class="ai-metric"><small>Risk</small><strong>${fmtRs(a.riskR)}</strong></span>` +
+              `<span class="ai-metric"><small>Timeframe</small><strong>${esc(a.timeframe || "-")}</strong></span>` +
+              `</div>` +
+              `</div>` +
+              `<div class="ai-actions"></div>`;
             const acts = div.querySelector(".ai-actions");
-            if (editable && isArch) {
+            if (isArch && canRearmAlert(a)) {
               // Keep the resting row focused. Destructive actions live in details.
               acts.innerHTML = listActionHtml(
                 "Re-open alert",
                 "rearm",
                 "rotate-ccw",
               );
-            } else if (editable) {
+            } else if (!isArch) {
               // Only the next consequential action remains visible; edit/close/delete
               // stay in the detail view where their context is explicit.
-              if (a.reviewState === "raw") {
+              if (a.reviewState === "pending" && canReviewAlert(a)) {
                 acts.innerHTML += listActionHtml(
                   "Approve",
                   "approve",
@@ -918,8 +946,7 @@
               if (a.ringing)
                 acts.innerHTML += listActionHtml("Snooze", "snooze", "clock");
             }
-            if (editable)
-              acts.innerHTML += listActionHtml("View details", "view", "eye");
+            acts.innerHTML += listActionHtml("View details", "view", "eye");
             host.appendChild(div);
           }
           drawIcons();
@@ -933,7 +960,7 @@
           if (action === "rearm") rearmAlert(alert);
           else if (action === "approve" || action === "reject")
             openReviewModal(alert, action);
-          else if (action === "snooze") act(alert.id, "snooze");
+          else if (action === "snooze") act(alert, "snooze");
           else openAlertView(alert);
         });
         $("#alertList").addEventListener("keydown", (event) => {
@@ -950,25 +977,32 @@
           allArchived = data.archived || [];
           applyFilters();
         }
-        async function act(id, action) {
+        async function act(alert, action) {
           try {
-            await api("/api/alerts/" + id + "/" + action, "POST");
-          } catch (_) {}
-          // snooze/close from ANY surface should also clear this alert's live
-          // notification(s), matching what the notification panel's own buttons do.
-          if (action === "snooze" || action === "close") {
-            for (const it of notifItems)
-              if (it.a.id === id) {
-                markRead(it.sig);
-                dismissNotif(it.sig);
-              }
+            await api("/api/alerts/" + alert.id + "/" + action, "POST", {
+              expectedVersion: alert.version,
+            });
+          } catch (error) {
+            window.alert(
+              error.status === 409
+                ? "This alert changed in another session. The latest version has been loaded."
+                : `${niceLabel(action)} failed: ${error.message}`,
+            );
           }
           await refreshAll(true);
         }
-        async function del(id) {
+        async function del(alert) {
           try {
-            await api("/api/alerts/" + id, "DELETE");
-          } catch (_) {}
+            await api("/api/alerts/" + alert.id, "DELETE", {
+              expectedVersion: alert.version,
+            });
+          } catch (error) {
+            window.alert(
+              error.status === 409
+                ? "This alert changed in another session. The latest version has been loaded."
+                : "Delete failed: " + error.message,
+            );
+          }
           refreshAll(true);
         }
         // Re-arm a (usually closed) alert with the same data + creation-time logic. Warns
@@ -989,7 +1023,9 @@
             if (!confirm(`Re-arm ${a.symbol}?`)) return;
           }
           try {
-            await api("/api/alerts/" + a.id + "/rearm", "POST");
+            await api("/api/alerts/" + a.id + "/rearm", "POST", {
+              expectedVersion: a.version,
+            });
           } catch (err) {
             window.alert("Re-arm failed: " + err.message);
             return;
@@ -1028,21 +1064,18 @@
           el.innerHTML =
             `<div class="rt-top">${icon} ${a.symbol} <span class="ai-side ${a.side === "BUY" ? "buy" : "sell"}">${a.side}</span></div>` +
             `<div class="rt-msg"></div>` +
-            (canEdit()
-              ? `<div class="rt-actions">` +
-                `<button type="button" class="primary" data-toast-action="snooze"><i data-lucide="clock"></i>Snooze</button>` +
-                `<button type="button" data-toast-action="close"><i data-lucide="circle-x"></i>Close</button>` +
-                `</div>`
-              : "");
+            `<div class="rt-actions">` +
+            `<button type="button" class="primary" data-toast-action="snooze"><i data-lucide="clock"></i>Snooze</button>` +
+            (canCloseAlert(a)
+              ? `<button type="button" data-toast-action="close"><i data-lucide="circle-x"></i>Close alert</button>`
+              : "") +
+            `</div>`;
           el.querySelector(".rt-msg").textContent = a.lastEvent
             ? a.lastEvent.text
             : "";
-          if (!canEdit()) {
-            el.classList.add("read-only");
-            el.setAttribute("role", "button");
-            el.tabIndex = 0;
-            el.setAttribute("aria-label", `View ${a.symbol} alert details`);
-          }
+          el.setAttribute("role", "group");
+          el.tabIndex = 0;
+          el.setAttribute("aria-label", `${a.symbol} alert notification`);
           return el;
         }
         function updateRinging(alerts) {
@@ -1092,12 +1125,12 @@
           if (!record) return;
           const action = event.target.closest("[data-toast-action]")?.dataset
             .toastAction;
-          if (action) act(record.alert.id, action);
-          else if (!canEdit()) openToastAlert(record.alert);
+          if (action) act(record.alert, action);
+          else openToastAlert(record.alert);
         });
         $("#ringHost").addEventListener("keydown", (event) => {
           if (event.key !== "Enter" && event.key !== " ") return;
-          const toast = event.target.closest(".ring-toast.read-only");
+          const toast = event.target.closest(".ring-toast");
           const record = toast && toasts.get(toast.dataset.alertId);
           if (!record) return;
           event.preventDefault();
@@ -1105,27 +1138,9 @@
         });
 
         // ---------- notification center ----------
-        // One notification per fired alert (its latest event). Persists until the user
-        // snoozes/closes it; read/unread state is kept in localStorage across reloads.
-        const NOTIF_READ_KEY = "tt_notif_read";
-        const NOTIF_DISMISS_KEY = "tt_notif_dismissed";
-        const loadSet = (key) => {
-          try {
-            return new Set(JSON.parse(localStorage.getItem(key) || "[]"));
-          } catch (_) {
-            return new Set();
-          }
-        };
-        const saveSet = (key, set) => {
-          try {
-            localStorage.setItem(key, JSON.stringify([...set]));
-          } catch (_) {}
-        };
-        const notifRead = loadSet(NOTIF_READ_KEY);
-        const notifDismissed = loadSet(NOTIF_DISMISS_KEY);
-        let notifItems = []; // [{ a, sig }] newest first
-        // a signature changes whenever the alert fires again -> re-surfaces as unread
-        const sigOf = (a) => a.id + ":" + (a.lastEvent ? a.lastEvent.at : "");
+        // Notification receipts are server-owned per user/event so state follows the
+        // signed-in user across browsers. localStorage is intentionally not involved.
+        let notifItems = []; // [{ a, event, eventId, readAt, ... }] newest first
         const EVENT_ICON = {
           ENTRY: "🎯",
           TRIGGER: "🔔",
@@ -1150,7 +1165,7 @@
         }
         const unreadCount = () => {
           let count = 0;
-          for (const item of notifItems) if (!notifRead.has(item.sig)) count++;
+          for (const item of notifItems) if (!item.readAt) count++;
           return count;
         };
         function updateNotifBadge() {
@@ -1166,32 +1181,32 @@
             btn.classList.remove("has-unread");
           }
         }
-        function updateNotifications(data) {
-          // Include archived so Entry/Success/Fail of auto-closed alerts still show here.
-          const all = (data.alerts || []).concat(data.archived || []);
-          const live = new Set();
-          const items = [];
-          for (const a of all) {
-            if (!a.lastEvent || !a.firedCount) continue;
-            const sig = sigOf(a);
-            live.add(sig);
-            if (notifDismissed.has(sig)) continue;
-            items.push({ a, sig });
-          }
-          // prune stale read/dismissed signatures no longer present
-          let pruned = false;
-          for (const s of notifDismissed)
-            if (!live.has(s)) (notifDismissed.delete(s), (pruned = true));
-          for (const s of notifRead)
-            if (!live.has(s)) (notifRead.delete(s), (pruned = true));
-          if (pruned) {
-            saveSet(NOTIF_DISMISS_KEY, notifDismissed);
-            saveSet(NOTIF_READ_KEY, notifRead);
-          }
-          items.sort((x, y) =>
-            (y.a.lastEvent.at || "").localeCompare(x.a.lastEvent.at || ""),
+        function updateNotifications(payload, alertData) {
+          const alertsById = new Map(
+            (alertData.alerts || [])
+              .concat(alertData.archived || [])
+              .map((alert) => [alert.id, alert]),
           );
-          notifItems = items;
+          const now = new Date().toISOString();
+          notifItems = (payload.notifications || [])
+            .filter(
+              (item) =>
+                item.event &&
+                !item.dismissedAt &&
+                (!item.snoozedUntil || item.snoozedUntil <= now),
+            )
+            .map((item) => {
+              const metadata = item.event.metadata || {};
+              const alert = alertsById.get(item.event.alertId) || {
+                id: item.event.alertId,
+                symbol: metadata.symbol || "Alert",
+                index: metadata.index || "",
+                side: metadata.side || "",
+                status: "closed",
+                version: item.event.stateVersion,
+              };
+              return { ...item, a: alert, eventId: item.event.id };
+            });
           updateNotifBadge();
           if ($("#notifPanel").classList.contains("show")) renderNotifs();
         }
@@ -1209,15 +1224,29 @@
               alertsRefreshQueued = false;
               let data;
               try {
-                data = await api("/api/alerts/all");
+                const [alertData, notificationData, activeData] = await Promise.all([
+                  api("/api/alerts/all"),
+                  api("/api/notifications"),
+                  api("/api/alerts/active"),
+                ]);
+                const ringingIds = new Set(
+                  (activeData.alerts || []).map((alert) => alert.id),
+                );
+                data = {
+                  ...alertData,
+                  alerts: (alertData.alerts || []).map((alert) => ({
+                    ...alert,
+                    ringing: ringingIds.has(alert.id),
+                  })),
+                };
+                updateRinging(activeData.alerts || []);
+                updateNotifications(notificationData, data);
               } catch (err) {
                 if (!$("#alertsView").hidden)
                   $("#alertList").innerHTML =
                     `<div class="empty">Failed to load: ${esc(err.message)}</div>`;
                 return;
               }
-              updateRinging(data.alerts || []);
-              updateNotifications(data);
               if (!$("#alertsView").hidden) updateList(data);
             } while (alertsRefreshQueued);
           })().finally(() => {
@@ -1225,23 +1254,36 @@
           });
           return alertsRefreshPromise;
         }
-        function markRead(sig) {
-          if (!notifRead.has(sig)) {
-            notifRead.add(sig);
-            saveSet(NOTIF_READ_KEY, notifRead);
+        async function markRead(item) {
+          if (item.readAt) return;
+          item.readAt = new Date().toISOString();
+          updateNotifBadge();
+          try {
+            await api(`/api/notifications/${item.eventId}/read`, "POST", {});
+          } catch (_) {
+            item.readAt = null;
             updateNotifBadge();
           }
         }
-        function dismissNotif(sig) {
-          notifDismissed.add(sig);
-          saveSet(NOTIF_DISMISS_KEY, notifDismissed);
-          notifItems = notifItems.filter((it) => it.sig !== sig);
+        async function dismissNotif(item) {
+          notifItems = notifItems.filter((entry) => entry.eventId !== item.eventId);
+          updateNotifBadge();
+          try {
+            await api(`/api/notifications/${item.eventId}/dismiss`, "POST", {});
+          } catch (_) {
+            refreshAll(true);
+          }
         }
-        function markAllNotifsRead() {
-          for (const it of notifItems) notifRead.add(it.sig);
-          saveSet(NOTIF_READ_KEY, notifRead);
+        async function markAllNotifsRead() {
+          const unread = notifItems.filter((item) => !item.readAt);
+          for (const item of unread) item.readAt = new Date().toISOString();
           updateNotifBadge();
           renderNotifs();
+          await Promise.allSettled(
+            unread.map((item) =>
+              api(`/api/notifications/${item.eventId}/read`, "POST", {}),
+            ),
+          );
         }
         function renderNotifs() {
           const host = $("#np-list");
@@ -1253,11 +1295,11 @@
             return;
           }
           host.innerHTML = "";
-          for (const { a, sig } of notifItems) {
-            const ev = a.lastEvent;
+          for (const record of notifItems) {
+            const { a, event: ev, eventId, readAt } = record;
             const item = document.createElement("div");
-            item.className = "notif-item" + (notifRead.has(sig) ? "" : " unread");
-            item.dataset.notifSig = sig;
+            item.className = "notif-item" + (readAt ? "" : " unread");
+            item.dataset.eventId = eventId;
             item.innerHTML =
               `<span class="ni-dot"></span>` +
               `<div class="ni-body">` +
@@ -1269,28 +1311,21 @@
               `<span class="ni-time">${agoText(ev.at)}</span>` +
               `</div>` +
               `<div class="ni-msg"></div>` +
-              (canEdit()
-                ? `<div class="ni-actions"></div>`
-                : "") +
+              `<div class="ni-actions"></div>` +
               `</div>`;
             item.querySelector(".ni-msg").textContent =
               ev.text || `${ev.type} @ ${fmtRs(ev.price)}`;
             const acts = item.querySelector(".ni-actions");
             const closed = a.status === "closed";
-            if (acts && !closed) {
-              acts.innerHTML =
-                `<button type="button" class="btn-sm" data-notif-action="snooze"><i data-lucide="clock"></i>Snooze</button>` +
+            if (!closed)
+              acts.innerHTML +=
+                `<button type="button" class="btn-sm" data-notif-action="snooze"><i data-lucide="clock"></i>Snooze</button>`;
+            if (!closed && canCloseAlert(a))
+              acts.innerHTML +=
                 `<button type="button" class="btn-sm" data-notif-action="close"><i data-lucide="circle-x"></i>Close alert</button>`;
-            } else if (acts) {
-              acts.innerHTML = `<button type="button" class="btn-sm" data-notif-action="dismiss"><i data-lucide="check"></i>Dismiss</button>`;
-            }
-            if (acts)
-              acts.innerHTML += `<button type="button" class="btn-sm" data-notif-action="view"><i data-lucide="eye"></i>View</button>`;
-            if (!acts) {
-              item.setAttribute("role", "button");
-              item.tabIndex = 0;
-              item.setAttribute("aria-label", `View ${a.symbol} alert details`);
-            }
+            acts.innerHTML +=
+              `<button type="button" class="btn-sm" data-notif-action="dismiss"><i data-lucide="check"></i>Dismiss</button>` +
+              `<button type="button" class="btn-sm" data-notif-action="view"><i data-lucide="eye"></i>View</button>`;
             host.appendChild(item);
           }
           drawIcons();
@@ -1298,11 +1333,13 @@
         function notificationFromEvent(event) {
           const item = event.target.closest(".notif-item");
           if (!item) return null;
-          const record = notifItems.find((entry) => entry.sig === item.dataset.notifSig);
+          const record = notifItems.find(
+            (entry) => entry.eventId === item.dataset.eventId,
+          );
           return record || null;
         }
         function viewNotification(record) {
-          markRead(record.sig);
+          void markRead(record);
           closeNotifPanel();
           activateView("alerts");
           openAlertView(record.a);
@@ -1312,13 +1349,23 @@
           if (!record) return;
           const action = event.target.closest("[data-notif-action]")?.dataset
             .notifAction;
-          if (action === "snooze" || action === "close") {
-            markRead(record.sig);
-            dismissNotif(record.sig);
-            act(record.a.id, action);
+          if (action === "snooze") {
+            void markRead(record);
+            notifItems = notifItems.filter((item) => item.eventId !== record.eventId);
+            updateNotifBadge();
+            renderNotifs();
+            api(`/api/notifications/${record.eventId}/snooze`, "POST", {
+              minutes: 15,
+            })
+              .then(() => refreshAll(true))
+              .catch(() => refreshAll(true));
+          } else if (action === "close") {
+            void markRead(record);
+            void dismissNotif(record);
+            act(record.a, action);
           } else if (action === "dismiss") {
-            markRead(record.sig);
-            dismissNotif(record.sig);
+            void markRead(record);
+            void dismissNotif(record);
             renderNotifs();
           } else {
             viewNotification(record);
@@ -1467,12 +1514,28 @@
 
         buildFilters(); // build the multi-select filter dropdowns + chips
 
-        // Only editors can create or modify alerts (server also enforces this).
-        const canEdit = () => {
-          const r = window.APP_AUTH && window.APP_AUTH.user && window.APP_AUTH.user.role;
-          return r === "editor";
+        // Mirror backend visibility rules; the server remains authoritative.
+        const currentUser = () =>
+          (window.APP_AUTH && window.APP_AUTH.user) || null;
+        const canCreate = () => {
+          const user = currentUser();
+          return !!user && (user.role === "editor" || user.role === "admin");
         };
-        window.__alertsCanEdit = canEdit;
+        const canReviewAlert = () => canCreate();
+        const isAlertCreator = (alert) => {
+          const user = currentUser();
+          return !!user && !!alert && alert.createdByUserId === user.id;
+        };
+        const canEditAlert = (alert) => canCreate() && isAlertCreator(alert);
+        const canCloseAlert = (alert) => {
+          const user = currentUser();
+          if (!user || !alert || !canCreate()) return false;
+          if (isAlertCreator(alert)) return true;
+          return user.role === "admin" && alert.createdByRole === "editor";
+        };
+        const canRearmAlert = (alert) => canEditAlert(alert);
+        const canDeleteAlert = (alert) => canEditAlert(alert);
+        window.__alertsCanEdit = canCreate;
         window.__reloadAlerts = () => refreshAll(true); // refresh after login
         // open a specific alert's detail view from another surface (e.g. the dashboard
         // stock modal) — switch to the Alerts view first so the modal is visible.
@@ -1483,9 +1546,21 @@
         };
 
         let alertsPollStarted = false;
+        async function pollAlertChanges() {
+          if (window.__stateStreamConnected) return;
+          try {
+            const since = Number(window.__stateRevision) || 0;
+            const result = await api(`/api/changes?since=${since}`);
+            window.__stateRevision = Number(result.revision) || since;
+            if (result.resetRequired || (result.changes && result.changes.length))
+              refreshAll(true);
+          } catch (_) {
+            // Authentication and transient network failures are handled centrally.
+          }
+        }
         // started by the auth controller once the user is signed in
         window.__initAlerts = async function () {
-          document.body.classList.toggle("role-viewer", !canEdit());
+          document.body.classList.toggle("role-viewer", !canCreate());
           try {
             await loadConfig(); // builds the index dropdown, loads offsets
           } catch (_) {}
@@ -1498,8 +1573,8 @@
             alertsPollStarted = true;
             setInterval(() => {
               if (!window.APP_AUTH || !window.APP_AUTH.user) return; // paused until signed in
-              refreshAll();
-            }, 3000);
+              void pollAlertChanges();
+            }, 10_000);
           }
         };
       })();

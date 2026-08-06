@@ -341,7 +341,7 @@
         renderStockAlerts(r.symbol);
         stockModal.classList.add("show");
         requestAnimationFrame(() => {
-          document.getElementById("sm-tab-details").focus();
+          document.querySelector("#stockModal .sm-card").focus({ preventScroll: true });
         });
       }
       // Details / Alerts tab switch inside the stock modal.
@@ -415,16 +415,24 @@
           rowsHtml +=
             `<button type="button" class="sm-alert" data-id="${alert.id}">` +
             `<span class="sm-alert-top">` +
+            `<span class="sm-alert-badges">` +
             `<span class="ai-side ${alert.side === "BUY" ? "buy" : "sell"}">${alert.side}</span>` +
             `<span class="ai-status ${alert.status}">${alert.status}</span>` +
             `<span class="ai-review ${rv}">${REVIEW_TXT[rv] || rv}</span>` +
+            `</span>` +
             `<span class="sm-alert-tf">${escText(alert.timeframe || "-")}</span>` +
             `</span>` +
-            `<span class="sm-alert-nums">Entry ${rs(alert.alertPrice)} · Alert ${rs(alert.triggerPrice)} · SL ${rs(alert.stopLoss)}</span>` +
+            `<span class="sm-alert-prices">` +
+            `<span class="sm-alert-metric"><small>Entry</small><strong>${rs(alert.alertPrice)}</strong></span>` +
+            `<span class="sm-alert-metric trigger"><small>Trigger</small><strong>${rs(alert.triggerPrice)}</strong></span>` +
+            `<span class="sm-alert-metric stop"><small>Stop loss</small><strong>${rs(alert.stopLoss)}</strong></span>` +
+            `<i class="sm-alert-open" data-lucide="chevron-right" aria-hidden="true"></i>` +
+            `</span>` +
             `</button>`;
         }
         host.innerHTML = `<div class="sm-al-list">${rowsHtml}</div>`;
         setAlertsTabCount(mine.length);
+        if (window.lucide) window.lucide.createIcons();
       }
       document.getElementById("sm-alerts").addEventListener("click", (event) => {
         const button = event.target.closest(".sm-alert");

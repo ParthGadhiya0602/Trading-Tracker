@@ -104,6 +104,17 @@
         <div class="usernav" id="userNav" hidden>
           <span class="who" id="whoami" title="Signed in"></span>
           <button
+            class="logout-btn telegram-btn"
+            id="telegramBtn"
+            type="button"
+            title="Telegram settings"
+            aria-label="Telegram settings"
+            aria-haspopup="dialog"
+          >
+            <i data-lucide="send" aria-hidden="true"></i>
+            <span class="telegram-dot" id="telegramDot" hidden></span>
+          </button>
+          <button
             class="logout-btn"
             id="logoutBtn"
             type="button"
@@ -599,6 +610,7 @@
           <i data-lucide="user-plus" aria-hidden="true"></i>Add user
         </button>
       </div>
+      <div class="um-page-status" id="um-page-status" role="status" aria-live="polite"></div>
 
       <div class="users-workspace">
         <section class="um-directory" aria-labelledby="um-directory-title">
@@ -642,18 +654,28 @@
 
           <div class="um-tablewrap">
             <table class="um-table">
+              <colgroup>
+                <col class="um-col-user" />
+                <col class="um-col-role" />
+                <col class="um-col-access" />
+                <col class="um-col-telegram" />
+                <col class="um-col-login" />
+                <col class="um-col-updated" />
+                <col class="um-col-action" />
+              </colgroup>
               <thead>
                 <tr>
                   <th scope="col">User</th>
                   <th scope="col">Role</th>
                   <th scope="col">Access</th>
+                  <th scope="col">Telegram</th>
                   <th scope="col">Last login</th>
                   <th scope="col">Updated</th>
                   <th scope="col"><span class="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody id="um-list" aria-live="polite">
-                <tr class="um-loading"><td colspan="6">Loading accounts…</td></tr>
+                <tr class="um-loading"><td colspan="7">Loading accounts…</td></tr>
               </tbody>
             </table>
           </div>
@@ -663,8 +685,20 @@
             <span>Change the search or filters to see more accounts.</span>
           </div>
         </section>
+      </div>
+    </section>
+    <!-- /#usersView -->
 
-        <aside class="um-editor" aria-labelledby="um-form-title">
+    <div
+      class="um-modal"
+      id="um-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="um-form-title"
+      hidden
+    >
+      <div class="um-modal-backdrop" id="um-modal-backdrop"></div>
+      <section class="um-editor" aria-labelledby="um-form-title">
           <div class="um-editor-head">
             <span class="um-editor-icon" aria-hidden="true">
               <i data-lucide="user-plus"></i>
@@ -674,6 +708,9 @@
               <p id="um-form-sub">Create an account with the minimum access needed.</p>
             </div>
             <span class="um-editor-state" id="um-editor-state">New</span>
+            <button id="um-close" type="button" aria-label="Close user editor">
+              <i data-lucide="x" aria-hidden="true"></i>
+            </button>
           </div>
 
           <form class="um-form" id="um-form" novalidate>
@@ -738,6 +775,24 @@
               </button>
             </section>
 
+            <section
+              class="um-telegram-setting"
+              id="um-telegram-setting"
+              hidden
+              aria-labelledby="um-telegram-title"
+            >
+              <div class="um-telegram-heading">
+                <span class="um-telegram-icon" aria-hidden="true">
+                  <i data-lucide="send"></i>
+                </span>
+                <div>
+                  <h3 id="um-telegram-title">Telegram alerts</h3>
+                  <p>Connect this account to ZoneTrackerAlertBot.</p>
+                </div>
+              </div>
+              <div class="um-telegram-manage" id="um-telegram-manage" aria-live="polite"></div>
+            </section>
+
             <dl class="um-meta" id="um-meta" hidden>
               <div><dt>Last login</dt><dd id="um-meta-login">…</dd></div>
               <div><dt>Created</dt><dd id="um-meta-created">…</dd></div>
@@ -757,7 +812,7 @@
                 <i data-lucide="check" aria-hidden="true"></i>
                 <span id="um-save-label">Add user</span>
               </button>
-              <button id="um-cancel" type="button" hidden>Cancel edit</button>
+              <button id="um-cancel" type="button" hidden>Cancel</button>
             </div>
 
             <div class="um-danger" id="um-danger" hidden>
@@ -768,10 +823,8 @@
               <button class="danger" id="um-delete" type="button">Delete user</button>
             </div>
           </form>
-        </aside>
-      </div>
-    </section>
-    <!-- /#usersView -->
+      </section>
+    </div>
 
     <div id="ringHost" aria-live="assertive"></div>
 
@@ -792,6 +845,25 @@
       </div>
     </div>
     <!-- /#notifPanel -->
+
+    <div id="telegramPanel" role="dialog" aria-modal="true" aria-labelledby="tg-title">
+      <div class="tg-backdrop" id="tg-backdrop"></div>
+      <section class="tg-card">
+        <div class="tg-head">
+          <i data-lucide="send" aria-hidden="true"></i>
+          <div>
+            <h3 id="tg-title">Telegram alerts</h3>
+            <p>Connect once to receive alert events outside the browser.</p>
+          </div>
+          <button id="tg-close" type="button" aria-label="Close Telegram settings">
+            <i data-lucide="x" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="tg-body" id="tg-body" aria-live="polite">
+          <p class="tg-muted">Loading Telegram status…</p>
+        </div>
+      </section>
+    </div>
 
     <!-- ===== auth gate (covers the app until signed in) ===== -->
     <div id="authOverlay">
@@ -872,7 +944,7 @@
       aria-labelledby="sm-sym"
       aria-describedby="sm-name"
     >
-      <div class="sm-card">
+      <div class="sm-card" tabindex="-1">
         <div class="sm-head">
           <div>
             <div class="sm-sym" id="sm-sym"></div>

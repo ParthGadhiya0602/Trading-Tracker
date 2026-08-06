@@ -10,16 +10,19 @@
  *   `timingSafeEqual`; plaintext passwords and the pepper are never stored with users.
  * - Sessions are random 256-bit tokens kept in memory (cleared on restart), 12h idle TTL.
  *
- * Roles: admin (manages users, views alerts) | editor (manages alerts) |
+ * Roles: admin (manages users and alerts) | editor (manages alerts) |
  * viewer (read-only).
  */
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { connectMongoWithRetry } = require("./mongo-retry");
+const { DurableOutbox } = require("./durable-outbox");
 
 const ROOT = path.join(__dirname, ".."); // repo root (config lives here)
 const STORE_DIR = path.join(ROOT, "store"); // alert + user data files live here
 const STORE_FILE = path.join(STORE_DIR, "users.json");
+const OUTBOX_FILE = path.join(STORE_DIR, "auth-outbox.json");
 const CONFIG_FILE = path.join(ROOT, "config.json");
 const LOG_DIR = path.join(ROOT, "logs");
 const LOG_FILE = path.join(LOG_DIR, "alerts-errors.log");
@@ -34,8 +37,9 @@ const SCRYPT_KEYLEN = 64;
 let store = { users: [] };
 let backend = "file"; // "file" | "mongo"
 let usersColl = null;
-let mongoBusy = false,
-  mongoDirty = false;
+let processedColl = null;
+let mongoUri = "";
+let reconnectTimer = null;
 let passwordPepper = "";
 
 const sessions = new Map(); // token -> { userId, role, username, lastSeen }
@@ -67,6 +71,8 @@ function logError(scope, err) {
     fs.appendFileSync(LOG_FILE, line + "\n");
   } catch (_) {}
 }
+
+const outbox = new DurableOutbox(OUTBOX_FILE, { logError });
 
 // ---------- hashing ----------
 function passwordMaterial(password, pepper) {
@@ -126,17 +132,28 @@ function readFileStore() {
   }
 }
 async function load() {
-  const mongoUri = loadConfig();
+  mongoUri = loadConfig();
+  let seedFromLocal = false;
   if (mongoUri) {
     try {
-      const { MongoClient } = require("mongodb"); // lazy: only for Mongo mode
-      const client = new MongoClient(mongoUri, { serverSelectionTimeoutMS: 8000 });
-      await client.connect();
+      const client = await connectMongoWithRetry(mongoUri, {
+        retries: 3,
+        retryDelayMs: 3000,
+        serverSelectionTimeoutMS: 8000,
+      });
       const dbName =
         (mongoUri.match(/mongodb(?:\+srv)?:\/\/[^/]+\/([^/?]+)/) || [])[1] ||
         "trading_tracker";
       const db = client.db(dbName);
-      usersColl = db.collection("users");
+      configureMongo(db);
+      await outbox.drain();
+      await usersColl.createIndex(
+        { "telegram.chatId": 1 },
+        {
+          unique: true,
+          partialFilterExpression: { "telegram.chatId": { $type: "string" } },
+        },
+      );
       backend = "mongo";
       const docs = await usersColl.find({}).toArray();
       if (docs.length) {
@@ -149,20 +166,26 @@ async function load() {
       } else {
         // fresh DB: seed from local users.json if present, else empty (first-run setup)
         store = readFileStore();
+        seedFromLocal = true;
         if (store.users.length)
           console.log(`  auth: seeded ${store.users.length} users from users.json`);
       }
     } catch (e) {
       logError("auth.mongo.connect", `${(e && e.message) || e} - using users.json`);
       usersColl = null;
+      processedColl = null;
+      outbox.setProcessor(null);
       backend = "file";
       store = readFileStore();
+      seedFromLocal = true;
     }
   } else {
     backend = "file";
     store = readFileStore();
+    seedFromLocal = true;
   }
-  save(); // persist current shape to the active backend
+  save({ queue: seedFromLocal });
+  startReconnectWorker();
   return backend;
 }
 function backendName() {
@@ -171,40 +194,91 @@ function backendName() {
 function passwordPepperConfigured() {
   return !!passwordPepper;
 }
-function save() {
+function queueUser(user) {
+  outbox.enqueue(
+    "USER_PUT",
+    { ...user },
+    { dedupeKey: `user:${user.id}` },
+  );
+}
+function queueUserDelete(user) {
+  outbox.enqueue(
+    "USER_DELETE",
+    { id: user.id, at: new Date().toISOString() },
+    { dedupeKey: `user:${user.id}` },
+  );
+}
+async function processOutbox(operation) {
+  if (await processedColl.findOne({ _id: operation.operationId })) return;
+  if (operation.type === "USER_PUT") {
+    const user = operation.payload;
+    await usersColl.replaceOne(
+      { _id: user.id },
+      { ...user, _id: user.id },
+      { upsert: true },
+    );
+  } else if (operation.type === "USER_DELETE") {
+    await usersColl.deleteOne({ _id: operation.payload.id });
+  } else {
+    throw new Error(`unknown auth outbox operation: ${operation.type}`);
+  }
+  await processedColl.updateOne(
+    { _id: operation.operationId },
+    {
+      $setOnInsert: {
+        type: operation.type,
+        processedAt: new Date().toISOString(),
+      },
+    },
+    { upsert: true },
+  );
+}
+function configureMongo(db) {
+  usersColl = db.collection("users");
+  processedColl = db.collection("processed_operations");
+  outbox.setProcessor(processOutbox);
+}
+function save(options = {}) {
+  if (options.queue !== false) for (const user of store.users) queueUser(user);
   try {
     fs.mkdirSync(STORE_DIR, { recursive: true });
     fs.writeFileSync(STORE_FILE, JSON.stringify(store, null, 2));
   } catch (e) {
     logError("auth.file.write", `users.json - ${e.message}`);
   }
-  if (backend === "mongo" && usersColl) persistMongo();
+  if (backend === "mongo") void outbox.drain();
 }
-async function syncMongo() {
-  const ids = store.users.map((u) => u.id);
-  const ops = store.users.map((u) => ({
-    replaceOne: { filter: { _id: u.id }, replacement: { ...u, _id: u.id }, upsert: true },
-  }));
-  ops.push({ deleteMany: { filter: { _id: { $nin: ids } } } });
-  await usersColl.bulkWrite(ops, { ordered: false });
-}
-async function persistMongo() {
-  if (mongoBusy) {
-    mongoDirty = true;
-    return;
-  }
-  mongoBusy = true;
+async function reconnectMongo() {
+  if (!mongoUri || backend === "mongo") return;
   try {
-    await syncMongo();
-  } catch (e) {
-    logError("auth.mongo.write", (e && e.message) || e);
-  } finally {
-    mongoBusy = false;
-    if (mongoDirty) {
-      mongoDirty = false;
-      persistMongo();
-    }
+    const client = await connectMongoWithRetry(mongoUri, {
+      retries: 0,
+      serverSelectionTimeoutMS: 5000,
+    });
+    const dbName =
+      (mongoUri.match(/mongodb(?:\+srv)?:\/\/[^/]+\/([^/?]+)/) || [])[1] ||
+      "trading_tracker";
+    configureMongo(client.db(dbName));
+    await usersColl.createIndex(
+      { "telegram.chatId": 1 },
+      {
+        unique: true,
+        partialFilterExpression: { "telegram.chatId": { $type: "string" } },
+      },
+    );
+    backend = "mongo";
+    await outbox.drain();
+    console.log("  auth: MongoDB reconnected; durable outbox replayed");
+  } catch (error) {
+    backend = "file";
+    outbox.setProcessor(null);
+    logError("auth.mongo.reconnect", error);
   }
+}
+function startReconnectWorker() {
+  if (!mongoUri || reconnectTimer) return;
+  reconnectTimer = setInterval(() => void reconnectMongo(), 15_000);
+  if (reconnectTimer.unref) reconnectTimer.unref();
 }
 
 // ---------- helpers ----------
@@ -222,6 +296,7 @@ function enabledAdmins() {
 }
 // public shape (never leak salt/hash)
 function pub(u) {
+  const linked = !!(u.telegram && u.telegram.chatId && u.telegram.verifiedAt);
   return {
     id: u.id,
     username: u.username,
@@ -230,7 +305,105 @@ function pub(u) {
     createdAt: u.createdAt,
     updatedAt: u.updatedAt,
     lastLoginAt: u.lastLoginAt || null,
+    telegram: {
+      linked,
+      enabled: linked && u.telegram.enabled !== false,
+      reachable: linked && u.telegram.reachable !== false,
+    },
   };
+}
+
+// ---------- Telegram account link state (private fields never leave this module) ----------
+function linkCodeHash(code) {
+  return crypto.createHash("sha256").update(String(code), "utf8").digest("hex");
+}
+function createTelegramLinkCode(userId) {
+  const user = findById(userId);
+  if (!user) return { error: "not found" };
+  const code = crypto.randomBytes(6).toString("base64url").toUpperCase();
+  const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
+  user.telegramLink = { codeHash: linkCodeHash(code), expiresAt };
+  user.updatedAt = new Date().toISOString();
+  save();
+  return { code, expiresAt };
+}
+function consumeTelegramLinkCode(code, telegramAccount) {
+  const hash = linkCodeHash(String(code || "").trim().toUpperCase());
+  const now = new Date().toISOString();
+  const user = store.users.find(
+    (candidate) =>
+      candidate.telegramLink &&
+      candidate.telegramLink.expiresAt > now &&
+      candidate.telegramLink.codeHash === hash,
+  );
+  if (!user) return { error: "invalid or expired link code" };
+  const chatId = String(telegramAccount.chatId);
+  const conflict = store.users.find(
+    (candidate) =>
+      candidate.id !== user.id &&
+      candidate.telegram &&
+      candidate.telegram.chatId === chatId,
+  );
+  if (conflict) return { error: "this Telegram chat is already linked" };
+  const linkedAt = new Date().toISOString();
+  user.telegram = {
+    chatId,
+    telegramUserId: String(telegramAccount.telegramUserId || ""),
+    telegramUsername: String(telegramAccount.telegramUsername || ""),
+    linkedAt,
+    verifiedAt: linkedAt,
+    enabled: true,
+    reachable: true,
+    lastError: null,
+  };
+  delete user.telegramLink;
+  user.updatedAt = linkedAt;
+  save();
+  return { user: pub(user), username: user.username };
+}
+function unlinkTelegram(userId) {
+  const user = findById(userId);
+  if (!user) return { error: "not found" };
+  delete user.telegram;
+  delete user.telegramLink;
+  user.updatedAt = new Date().toISOString();
+  save();
+  return { user: pub(user) };
+}
+function setTelegramEnabled(userId, enabled) {
+  const user = findById(userId);
+  if (!user) return { error: "not found" };
+  if (!user.telegram || !user.telegram.verifiedAt)
+    return { error: "Telegram is not linked" };
+  user.telegram.enabled = !!enabled;
+  user.updatedAt = new Date().toISOString();
+  save();
+  return { user: pub(user) };
+}
+function telegramRecipients() {
+  return store.users
+    .filter(
+      (user) =>
+        !user.disabled &&
+        user.telegram &&
+        user.telegram.verifiedAt &&
+        user.telegram.enabled !== false &&
+        user.telegram.reachable !== false,
+    )
+    .map((user) => ({
+      userId: user.id,
+      username: user.username,
+      chatId: String(user.telegram.chatId),
+    }));
+}
+function markTelegramUnreachable(userId, error) {
+  const user = findById(userId);
+  if (!user || !user.telegram) return;
+  user.telegram.reachable = false;
+  user.telegram.enabled = false;
+  user.telegram.lastError = String(error || "Telegram delivery failed");
+  user.updatedAt = new Date().toISOString();
+  save();
 }
 function validateUsername(username) {
   const n = norm(username);
@@ -320,6 +493,7 @@ function deleteUser(id) {
   if (!u) return { error: "not found" };
   if (u.role === "admin" && enabledAdmins().length <= 1)
     return { error: "cannot delete the last admin" };
+  queueUserDelete(u);
   store.users = store.users.filter((x) => x.id !== id);
   save();
   return { ok: true };
@@ -330,9 +504,7 @@ function listUsers() {
 // for the login picker: enabled users only, minimal fields
 function pickerUsers() {
   return store.users.filter((u) => !u.disabled).map((u) => ({
-    id: u.id,
     username: u.username,
-    role: u.role,
   }));
 }
 
@@ -435,6 +607,12 @@ module.exports = {
   login,
   logout,
   sessionUser,
+  createTelegramLinkCode,
+  consumeTelegramLinkCode,
+  unlinkTelegram,
+  setTelegramEnabled,
+  telegramRecipients,
+  markTelegramUnreachable,
   ROLES,
   PW_MIN,
   // exposed for tests

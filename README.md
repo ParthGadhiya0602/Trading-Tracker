@@ -50,6 +50,23 @@ The data-source endpoints live in `config.json`'s `feed` block (copy `config.exa
 - A network the data source will answer - home/office broadband is fine. VPNs and
   datacentre IPs are often blocked (you'll see HTTP 401/403).
 
+### Password pepper
+
+User records keep a unique random salt beside each password hash; salts are public by
+design. The application also requires a separate secret pepper kept only in the
+gitignored `config.json`. Generate it before creating the first administrator:
+
+```bash
+openssl rand -hex 32
+```
+
+```json
+{ "auth": { "passwordPepper": "PASTE_THE_GENERATED_VALUE_HERE" } }
+```
+
+Back up this value securely. The server refuses to start if it is missing or shorter than
+32 characters. Do not rotate or remove it without resetting every user password.
+
 ## How to use
 
 ```bash
@@ -130,10 +147,10 @@ read/unread state; it persists until you snooze/close/dismiss. Closed alerts mov
 toggle to review past ones. Each alert records **Created / Updated / Last fired** metadata
 (in its detail modal, opened by clicking a row).
 
-Every alert carries a **zone-verification flag** (starts _Unverified_). Someone reviews the
-zone and clicks **Verify** (or **Unverify** to revert). The list shows **all indices
-together** (each row tagged with its index — no index tabs); filter it with **multi-select**
-dropdowns — **index**, **status**, **side**, **time frame**, **zone-verified**, **outcome** —
+Every alert starts **Pending** and is not evaluated until an editor or admin approves it.
+Editors and admins can approve or reject any alert with a required review reason. The list
+shows **all indices together** (each row tagged with its index — no index tabs); filter it with **multi-select**
+dropdowns — **index**, **status**, **side**, **time frame**, **review**, **outcome** —
 pick any combination; active selections appear as removable **chips** (with Clear all).
 
 The **index list and stock list are dynamic** - alerts cover every dashboard index
@@ -149,21 +166,22 @@ Notifications reach you with no tab open. Create `config.json` at the repo root:
 {
   "telegram": {
     "botToken": "123456:ABC...",
-    "recipients": [
-      { "chatId": "11111111", "label": "Me" },
-      { "chatId": "22222222", "label": "Partner" }
-    ]
+    "botUsername": "ZoneTrackerAlertBot"
   }
 }
 ```
 
-Fires to every recipient. Without this file, alerts are **in-page only**. Get a token
-from **@BotFather**; each recipient messages the bot once, then look up their `chatId`
-via `https://api.telegram.org/bot<token>/getUpdates`.
+Get the token and username from **@BotFather**. Each signed-in user opens **Telegram
+settings** and selects **Create connection link**, then **Open Telegram and connect**.
+Telegram opens **@ZoneTrackerAlertBot**; after the user taps **Start**, the bot confirms the
+linked application account. Send the copyable `/link CODE` fallback to
+**@ZoneTrackerAlertBot** if the direct link does not open. Link codes are single-use and
+expire after ten minutes. Eligible events are queued independently for every enabled linked
+user. Without this configuration, alerts remain **in-page only**.
 
 ## Alert storage (local file or MongoDB Atlas)
 
-By default alerts persist to **`alerts.json`** (local, no setup). To share alerts **across
+By default alerts persist to **`store/alerts.json`** (local, no setup). To share alerts **across
 devices**, point it at **MongoDB Atlas**: `npm install`, then add a `mongo.uri` to
 `config.json`:
 
@@ -171,35 +189,37 @@ devices**, point it at **MongoDB Atlas**: `npm install`, then add a `mongo.uri` 
 { "mongo": { "uri": "mongodb+srv://USER:PASS@cluster0.xxxx.mongodb.net/trading_tracker" } }
 ```
 
-It uses a proper schema — **one document per alert** in an `alerts` collection (`_id` =
-the alert id), closed alerts in an **`archived_alerts`** collection (moved on close, so the
-active list stays small), plus a small `meta` doc for the symbol cache. It **always also
-writes `alerts.json`** as an offline cache and **automatically falls back** to the file if
-Atlas is unreachable, so the app never blanks. The startup log shows `store: mongo` or
-`store: file`. Any write/connection/Telegram failures are logged (dated, IST) to
-**`logs/alerts-errors.log`**.
+It uses separate collections for alerts, archived alerts, immutable events, per-user
+notification receipts, Telegram deliveries, processed operation IDs, and tombstones. It
+**always also writes local cache files** and appends offline mutations to durable outboxes.
+When Atlas returns, operations replay idempotently instead of replacing entire collections.
+At startup it makes one connection attempt followed by three retries
+at three-second intervals before falling back, so the app never blanks. The startup log
+shows `store: mongo` or `store: file`. Only the final exhausted connection failure, plus
+write or Telegram failures, is logged (dated, IST) to **`logs/alerts-errors.log`**.
 
 Set **`ALERTS_NO_TICK=1`** to run the server without evaluating alerts (serves the UI +
-APIs only — no fires, no Telegram, no writes); handy for local inspection.
+APIs with no alert fires or Telegram delivery); handy for local inspection.
 
 ## Files
 
 ```
-backend/   server.js  · alerts.js · auth.js · config.example.json
+backend/   server.js  · alerts.js · auth.js · telegram.js · durable-outbox.js
 frontend/  index.html · css/{base,components,dashboard,alerts,auth}.css
            js/{main,dashboard,alerts-ui,auth-ui}.js
-store/     (gitignored) alerts.json · users.json     ← alert + user data
+store/     (gitignored) alerts.json · users.json · telegram.json · *-outbox.json
 root       package.json · package-lock.json   +  (gitignored) config.json · logs/
 ```
 
 - `backend/server.js` - zero-dependency Node proxy: warms the session, serves `frontend/`
   statically, gates `/api/*` behind auth, runs the alert eval loop. Run: `node backend/server.js`.
-- `backend/alerts.js` - alert engine, storage (Atlas or `alerts.json`), Telegram sender.
+- `backend/alerts.js` - alert engine, versioned state, events, and notification receipts.
+- `backend/telegram.js` - account linking, long polling, delivery queue, and retries.
 - `backend/auth.js` - user accounts (scrypt), sessions, roles (admin/editor/viewer).
 - `frontend/index.html` - markup only; loads `css/*` and `js/main.js` (native ES modules,
   no build step). `js/`: `main` (entry) + `dashboard`, `alerts-ui`, `auth-ui`.
 - `package.json` (root) - only the optional `mongodb` driver (needed just for Atlas).
-- `config.json` (root, gitignored) - `feed` endpoints, `mongo.uri`, `telegram` recipients.
+- `config.json` (root, gitignored) - feed endpoints, Mongo URI, auth pepper, and bot settings.
 
 ## Notes / limitations
 
