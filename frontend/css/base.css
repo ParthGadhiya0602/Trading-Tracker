@@ -504,6 +504,8 @@
         border-radius: 999px !important;
         box-shadow: none !important;
         padding: 7px 13px !important;
+        white-space: nowrap;
+        flex: 0 0 auto;
       }
       .tab:hover:not(.active):not(:disabled) {
         background: var(--panel-raised);

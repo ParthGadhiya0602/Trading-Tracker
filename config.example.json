@@ -9,6 +9,14 @@
   "mongo": {
     "uri": "mongodb+srv://USER:PASSWORD@cluster0.xxxx.mongodb.net/trading_tracker?retryWrites=true&w=majority"
   },
+  "llm": {
+    "provider": "openai",
+    "apiKey": "PASTE_YOUR_LLM_API_KEY",
+    "model": "gpt-4o-mini",
+    "temperature": 0.3,
+    "maxTokens": 1024,
+    "enabled": true
+  },
   "feed": {
     "base": "https://YOUR_DATA_SOURCE_HOST",
     "indicesEndpoint": "/path/to/indices-api?functionName=SOME_FUNCTION&symbol=",
@@ -26,7 +34,10 @@
         "NIFTY MIDCAP 100": { "path": "PATH_KEY_FOR_MIDCAP100",       "index": "Nifty Midcap 100" }
       },
       "levels": {
-        "NIFTY 50": { "path": "PATH_KEY_FOR_NIFTY50_LEVEL", "index": "Nifty 50" }
+        "NIFTY 50":         { "path": "PATH_KEY_FOR_NIFTY50_LEVEL",   "index": "Nifty 50" },
+        "NIFTY NEXT 50":    { "path": "PATH_KEY_FOR_NEXT50_LEVEL",    "index": "Nifty Next 50" },
+        "NIFTY MIDCAP 50":  { "path": "PATH_KEY_FOR_MIDCAP50_LEVEL",  "index": "Nifty Midcap 50" },
+        "NIFTY MIDCAP 100": { "path": "PATH_KEY_FOR_MIDCAP100_LEVEL", "index": "Nifty Midcap 100" }
       }
     }
   }

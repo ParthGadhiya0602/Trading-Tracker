@@ -340,13 +340,15 @@
         setStockTab("details"); // always open on Details
         renderStockAlerts(r.symbol);
         stockModal.classList.add("show");
+        document.body.style.overflow = "hidden"; // lock background scroll (mobile sheet)
         requestAnimationFrame(() => {
           document.querySelector("#stockModal .sm-card").focus({ preventScroll: true });
         });
       }
-      // Details / Alerts tab switch inside the stock modal.
+      // Details / Alerts / AI Analysis tab switch inside the stock modal.
       function setStockTab(tab, moveFocus = false) {
-        const nextTab = tab === "alerts" ? "alerts" : "details";
+        const nextTab =
+          tab === "alerts" ? "alerts" : tab === "analysis" ? "analysis" : "details";
         document.querySelectorAll("#stockModal .sm-tab").forEach((b) => {
           const on = b.dataset.tab === nextTab;
           b.classList.toggle("active", on);
@@ -356,6 +358,8 @@
         });
         document.getElementById("sm-panel-details").hidden = nextTab !== "details";
         document.getElementById("sm-panel-alerts").hidden = nextTab !== "alerts";
+        document.getElementById("sm-panel-analysis").hidden = nextTab !== "analysis";
+        if (nextTab === "analysis") fetchAnalysis(modalSymbol);
       }
       document.querySelectorAll("#stockModal .sm-tab").forEach((b) => {
         b.onclick = () => setStockTab(b.dataset.tab);
@@ -380,6 +384,66 @@
           el.textContent = n;
           el.hidden = false;
         } else el.hidden = true;
+      }
+      // AI Analysis tab: fetch the backend's cached pre-open signal for this stock.
+      async function fetchAnalysis(symbol) {
+        const host = document.getElementById("sm-analysis");
+        if (!host || !symbol) return;
+        host.innerHTML = `<div class="sm-ai-msg">Loading analysis…</div>`;
+        let data;
+        try {
+          const res = await fetch(
+            `/api/analysis?symbol=${encodeURIComponent(symbol)}`,
+            { credentials: "same-origin" },
+          );
+          data = await res.json();
+        } catch (_) {
+          if (symbol === modalSymbol)
+            host.innerHTML = `<div class="sm-ai-msg">Couldn't load analysis.</div>`;
+          return;
+        }
+        if (symbol !== modalSymbol) return; // user navigated away
+        if (data.status === "unavailable") {
+          host.innerHTML = `<div class="sm-ai-msg">AI analysis is not configured.</div>`;
+        } else if (data.status === "pending") {
+          host.innerHTML = `<div class="sm-ai-msg">Analysis in progress — available during pre-open (09:00–09:15 IST). Check back shortly.</div>`;
+        } else if (data.status === "error") {
+          host.innerHTML = `<div class="sm-ai-msg">Analysis failed.${data.error ? " " + escText(data.error) : ""}</div>`;
+        } else if (data.status === "ready" && data.analysis) {
+          renderAnalysis(host, data.analysis, data.date);
+        } else {
+          host.innerHTML = `<div class="sm-ai-msg">No analysis available.</div>`;
+        }
+      }
+      function renderAnalysis(host, a, date) {
+        const sigClass =
+          a.signal === "bullish" ? "up" : a.signal === "bearish" ? "down" : "flat";
+        const sigLabel = a.signal
+          ? a.signal.charAt(0).toUpperCase() + a.signal.slice(1)
+          : "—";
+        const conf = Math.max(0, Math.min(100, Number(a.confidence) || 0));
+        host.innerHTML = `
+          <div class="sm-ai-header">
+            <span class="sm-ai-signal ${sigClass}">${sigLabel}</span>
+            ${date ? `<span class="sm-ai-date">${escText(date)}</span>` : ""}
+          </div>
+          <div class="sm-ai-confidence">
+            <span class="sm-ai-conf-label">Confidence</span>
+            <div class="sm-ai-conf-bar">
+              <div class="sm-ai-conf-fill ${sigClass}" style="transform:scaleX(${conf / 100})"></div>
+            </div>
+            <span class="sm-ai-conf-value">${conf}%</span>
+          </div>
+          <div class="sm-ai-snapshot">
+            <div class="cell"><span class="k">IEP</span><span class="v num">${rs(a.iep)}</span></div>
+            <div class="cell"><span class="k">Prev Close</span><span class="v num">${rs(a.prevClose)}</span></div>
+            <div class="cell"><span class="k">Change</span><span class="v num ${cls(a.pChange)}">${pct(a.pChange)}</span></div>
+          </div>
+          <div class="sm-ai-reasoning">
+            <span class="sm-ai-reason-label">Reasoning</span>
+            <p>${escText(a.reasoning || "")}</p>
+          </div>
+        `;
       }
       // List this stock's alerts (active + archived) inside the detail modal, or a
       // "no alerts" line. Each row opens the full alert view (via the alerts module).
@@ -446,6 +510,7 @@
         const stockModal = document.getElementById("stockModal");
         if (!stockModal.classList.contains("show")) return;
         stockModal.classList.remove("show");
+        document.body.style.overflow = ""; // restore background scroll
         if (
           restoreFocus &&
           stockModalReturnFocus &&
@@ -595,7 +660,7 @@
         COLS.forEach((c) => {
           const th = document.createElement("th");
           const sorted = c.key === sortKey;
-          th.className = sorted ? "sorted" : "";
+          th.className = (sorted ? "sorted " : "") + "col-" + c.key;
           th.tabIndex = 0;
           th.setAttribute("role", "columnheader button");
           th.setAttribute(
@@ -693,8 +758,9 @@
           );
           COLS.forEach((c) => {
             const td = document.createElement("td");
+            td.classList.add("col-" + c.key);
             if (c.type === "sym") {
-              td.className = "sym";
+              td.classList.add("sym");
               const wrap = document.createElement("span");
               wrap.className = "symwrap hint";
               wrap.dataset.symbol = r.symbol;
@@ -718,10 +784,10 @@
               wrap.appendChild(document.createTextNode(r.symbol));
               td.appendChild(wrap);
             } else if (c.type === "rs") {
-              td.className = "num";
+              td.classList.add("num");
               td.textContent = rs(r[c.key]);
             } else if (c.type === "vol") {
-              td.className = "num";
+              td.classList.add("num");
               td.textContent = vol(r[c.key]);
             } else if (c.type === "delta") {
               td.innerHTML = deltaCell(r[c.rs], r[c.pc]);

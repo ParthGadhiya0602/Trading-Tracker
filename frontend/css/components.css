@@ -19,12 +19,32 @@
         border: 1px solid var(--line-strong);
         border-radius: var(--radius-lg);
         box-shadow: var(--shadow-lg);
-        width: min(580px, 96vw);
+        /* 100% (not 96vw) so the card respects the backdrop's 16px padding and
+           never overflows the viewport on mid-size phones/tablets */
+        width: min(580px, 100%);
         max-height: 88vh;
         overflow: auto;
       }
       .sm-card:focus {
         outline: none;
+      }
+      /* Desktop: wrapper is inert (head keeps its own sticky). Mobile turns it
+         into the single sticky top cluster - see the <=560px block below. */
+      .sm-top {
+        display: contents;
+      }
+      .sm-grabber {
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 8px 0 4px;
+      }
+      .sm-grabber::before {
+        content: "";
+        width: 40px;
+        height: 4px;
+        border-radius: var(--radius-pill);
+        background: var(--line-strong);
       }
       .sm-head {
         display: flex;
@@ -264,6 +284,103 @@
         background: var(--accent-tint);
         box-shadow: none;
         transform: none;
+      }
+      /* ---------- AI Analysis tab ---------- */
+      .sm-analysis {
+        padding: 14px 18px 18px;
+        display: flex;
+        flex-direction: column;
+        gap: var(--s3);
+      }
+      .sm-ai-msg {
+        color: var(--muted);
+        font-size: 12.5px;
+        text-align: center;
+        padding: 24px 0;
+      }
+      .sm-ai-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .sm-ai-signal {
+        font-size: 13px;
+        font-weight: 750;
+        padding: 4px 12px;
+        border-radius: var(--radius-pill);
+      }
+      .sm-ai-signal.up {
+        color: var(--up);
+        background: var(--rowup);
+      }
+      .sm-ai-signal.down {
+        color: var(--down);
+        background: var(--rowdown);
+      }
+      .sm-ai-signal.flat {
+        color: var(--flat);
+        background: var(--chip);
+      }
+      .sm-ai-date {
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .sm-ai-confidence {
+        display: flex;
+        align-items: center;
+        gap: var(--s2);
+      }
+      .sm-ai-conf-label {
+        font-size: 12px;
+        color: var(--muted);
+        min-width: 72px;
+      }
+      .sm-ai-conf-bar {
+        flex: 1;
+        height: 6px;
+        border-radius: var(--radius-pill);
+        background: var(--chip);
+        overflow: hidden;
+      }
+      .sm-ai-conf-fill {
+        height: 100%;
+        width: 100%;
+        transform-origin: left center;
+        border-radius: var(--radius-pill);
+        transition: transform 0.3s var(--ease);
+      }
+      .sm-ai-conf-fill.up {
+        background: var(--up);
+      }
+      .sm-ai-conf-fill.down {
+        background: var(--down);
+      }
+      .sm-ai-conf-fill.flat {
+        background: var(--flat);
+      }
+      .sm-ai-conf-value {
+        font-size: 13px;
+        font-weight: 700;
+        min-width: 36px;
+        text-align: right;
+      }
+      .sm-ai-snapshot {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: var(--s2);
+      }
+      .sm-ai-reason-label {
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      .sm-ai-reasoning p {
+        margin: var(--s1) 0 0;
+        font-size: 13px;
+        line-height: 1.5;
+        color: var(--muted-ink);
       }
       .sm-alert-top {
         width: 100%;
@@ -516,30 +633,75 @@
         border: 1px dashed var(--line);
         border-radius: var(--radius-sm);
       }
-      @media (max-width: 480px) {
+      @media (max-width: 560px) {
+        /* Centered card with breathing room on all sides. */
         #stockModal {
-          align-items: flex-end;
-          padding: 0;
+          align-items: center;
+          padding: 16px;
         }
         .sm-card {
           width: 100%;
-          max-height: calc(100dvh - 12px);
-          border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+          max-width: 100%;
+          border-radius: var(--radius-lg);
+          /* clip X so a wide child (pre-open ladder, long value) can't force
+             horizontal scroll - the actual cause of the clipped right edge */
+          overflow-x: hidden;
+          overflow-y: auto;
+          overscroll-behavior: contain;
+          max-height: calc(100dvh - 32px);
         }
-        .sm-head,
-        .sm-price,
+        /* single sticky top cluster: head + price + tabs */
+        .sm-top {
+          display: block;
+          position: sticky;
+          top: 0;
+          z-index: 2;
+          background: var(--panel-raised);
+          border-bottom: 1px solid var(--line);
+        }
+        .sm-head {
+          position: static;
+          border-bottom: none;
+          padding: 14px 16px 10px;
+        }
+        .sm-name {
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+        }
+        .sm-price {
+          padding: 2px 16px 12px;
+        }
         .sm-alerts,
+        .sm-analysis,
         .sm-preopen {
-          padding-left: 14px;
-          padding-right: 14px;
+          padding-left: 16px;
+          padding-right: 16px;
         }
+        /* touch targets: 34px is fine for a mouse, too small for a thumb */
+        .sm-actions .sm-addalert,
+        .sm-actions .sm-close {
+          width: 44px;
+          height: 44px;
+        }
+        /* tabs become a full-width segmented control (equal thirds) */
         .sm-tabs {
-          max-width: calc(100% - 28px);
-          margin-right: 14px;
-          margin-left: 14px;
+          display: flex;
+          width: auto;
+          max-width: none;
+          margin: 0 16px 12px;
+        }
+        .sm-tab {
+          flex: 1 1 0;
+          justify-content: center;
+          padding: 0 8px;
         }
         .sm-grid {
           grid-template-columns: 1fr;
+        }
+        .sm-ai-snapshot {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
         }
         .pob-summary {
           grid-template-columns: repeat(2, 1fr);

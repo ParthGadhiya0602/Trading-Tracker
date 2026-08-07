@@ -415,4 +415,26 @@
           gap: 4px 8px;
           font-size: 11.5px;
         }
+        /* Mobile table: only Symbol, LTP, Change - the rest live in the row's
+           detail modal (tap a row). Keeps the table readable without side-scroll. */
+        .col-open,
+        .col-dayHigh,
+        .col-dayLow,
+        .col-prevClose,
+        .col-totalTradedVolume {
+          display: none;
+        }
+        /* 3 columns fit the viewport - drop the 680px desktop floor so the table
+           stops overflowing (and the sticky symbol column can't overlap the LTP). */
+        table {
+          min-width: 0;
+        }
+        th:first-child,
+        td:first-child {
+          position: static;
+        }
+        th,
+        td {
+          padding: 10px 8px;
+        }
       }

@@ -26,6 +26,9 @@ const alerts = require("./alerts");
 const auth = require("./auth");
 const stream = require("./stream");
 const telegram = require("./telegram");
+const llm = require("./llm");
+const trades = require("./trades");
+const { logInfo, logWarn } = require("./logger");
 const { ACTION, authorize } = require("./alert-policy");
 
 const HOST = "127.0.0.1";
@@ -58,8 +61,9 @@ function requireStream() {
   if (!process.env.STREAM_WS) return null;
   const s = FEED && FEED.stream;
   if (!s || !s.wsBase || !s.constituents) {
-    console.log(
-      "  WARNING - STREAM_WS is set but `feed.stream` is missing/incomplete in config.json " +
+    logWarn(
+      "stream",
+      "STREAM_WS is set but `feed.stream` is missing/incomplete in config.json " +
         "(see config.example.json) - continuing in pure-REST mode.",
     );
     return null;
@@ -274,11 +278,19 @@ async function fetchIndexNext(name) {
     unchanged: num(a.unchange) || 0,
   };
   const stamp = idx.lastUpdateTime || d.timestamp || null;
-  return buildPayloadNext(stocks, level, advance, stamp, marketStatusStr(d.marketStatus));
+  return buildPayloadNext(
+    stocks,
+    level,
+    advance,
+    stamp,
+    marketStatusStr(d.marketStatus),
+  );
 }
 // Fetch all dashboard indices (one API call each, in parallel).
 async function fetchAllIndices() {
-  const payloads = await Promise.all(DASH_INDICES.map((n) => fetchIndexNext(n)));
+  const payloads = await Promise.all(
+    DASH_INDICES.map((n) => fetchIndexNext(n)),
+  );
   const out = {};
   DASH_INDICES.forEach((name, i) => (out[name] = payloads[i]));
   return out;
@@ -290,13 +302,18 @@ async function fetchAllIndices() {
 // fetchAllIndices so /api/indices can serve it transparently.
 async function fetchPreopen() {
   requireFeed();
-  if (!FEED.preopenEndpoint) throw new Error("pre-open endpoint not configured");
+  if (!FEED.preopenEndpoint)
+    throw new Error("pre-open endpoint not configured");
   const j = await srcJson(`${BASE}${FEED.preopenEndpoint}ALL`);
   const rows = (j && j.data) || [];
   const bySym = new Map();
   for (const r of rows) {
     const m = r && r.metadata;
-    if (m && m.symbol) bySym.set(m.symbol, { metadata: m, pom: (r.detail && r.detail.preOpenMarket) || null });
+    if (m && m.symbol)
+      bySym.set(m.symbol, {
+        metadata: m,
+        pom: (r.detail && r.detail.preOpenMarket) || null,
+      });
   }
   const stamp = (j && j.timestamp) || null;
   const out = {};
@@ -348,8 +365,14 @@ async function fetchPreopen() {
           totalBuyQty: num(pom.totalBuyQuantity),
           totalSellQty: num(pom.totalSellQuantity),
           ato: {
-            buyQty: num(pom.atoBuyQty) != null ? num(pom.atoBuyQty) : num(ato.totalBuyQuantity),
-            sellQty: num(pom.atoSellQty) != null ? num(pom.atoSellQty) : num(ato.totalSellQuantity),
+            buyQty:
+              num(pom.atoBuyQty) != null
+                ? num(pom.atoBuyQty)
+                : num(ato.totalBuyQuantity),
+            sellQty:
+              num(pom.atoSellQty) != null
+                ? num(pom.atoSellQty)
+                : num(ato.totalSellQuantity),
           },
           finalQty: num(pom.finalQuantity),
           lastUpdateTime: pom.lastUpdateTime || null,
@@ -397,7 +420,8 @@ function marketState(d = new Date()) {
 // fetchMarketData(), byte-for-byte today's behaviour. This is the safety guarantee.
 const STREAM_WS = !!process.env.STREAM_WS;
 const STALE_MAX_MS = 15_000; // liveCache older than this -> treat as stale, fall back to REST
-const SLOW_REFRESH_MS = 45_000; // REST reseed cadence while the WS feed is driving the cache
+const SLOW_REFRESH_MS = 15_000; // REST reseed cadence while the WS feed is driving the cache (covers fields not carried by a WS tick)
+const FANOUT_MIN_MS = 150; // coalesce bursts of WS ticks into at most one SSE frame per this window
 // liveCache mirrors the exact buildPayloadNext envelope, keyed by DASH_INDICES.
 let liveCache = {};
 let liveCacheStampMs = 0;
@@ -441,6 +465,26 @@ function sseWrite(res, chunk) {
     sseClients.delete(res);
   }
 }
+// Event-driven SSE fan-out: relay liveCache to subscribers as soon as a tick (or
+// REST reseed) changes it, coalescing bursts to one frame per FANOUT_MIN_MS so a
+// flood of ticks can't spam the socket. Replaces the old fixed-interval push, which
+// added up to its interval of latency to every update.
+let fanoutTimer = null;
+let lastFanoutMs = 0;
+function fanoutNow() {
+  fanoutTimer = null;
+  lastFanoutMs = Date.now();
+  if (!(STREAM_WS && marketState() === "open" && sseClients.size > 0)) return;
+  const chunk = `event: patch\ndata: ${JSON.stringify(liveCache)}\n\n`;
+  for (const client of sseClients) sseWrite(client, chunk);
+}
+function scheduleFanout() {
+  if (fanoutTimer) return;
+  const since = Date.now() - lastFanoutMs;
+  const wait = since >= FANOUT_MIN_MS ? 0 : FANOUT_MIN_MS - since;
+  fanoutTimer = setTimeout(fanoutNow, wait);
+  if (fanoutTimer.unref) fanoutTimer.unref();
+}
 function stateSseWrite(client, chunk) {
   try {
     if (client.res.writableEnded) {
@@ -467,6 +511,7 @@ async function reseedLiveCache() {
   try {
     const payload = await fetchAllIndices();
     seedLiveCache(payload);
+    scheduleFanout(); // push the reseeded fields (esp. ones no WS tick carries)
   } catch (_) {
     /* transient - keep serving the existing liveCache/REST fallback */
   }
@@ -477,7 +522,8 @@ async function getMarketData() {
   if (!STREAM_WS) return fetchMarketData();
   const st = marketState();
   if (st === "open") {
-    const fresh = liveCacheStampMs && Date.now() - liveCacheStampMs < STALE_MAX_MS;
+    const fresh =
+      liveCacheStampMs && Date.now() - liveCacheStampMs < STALE_MAX_MS;
     if (fresh && Object.keys(liveCache).length) return liveCache;
     const payload = await fetchAllIndices();
     seedLiveCache(payload);
@@ -512,6 +558,8 @@ async function alertTick() {
     cachePrices(payload);
     if (st === "open") alerts.updateSymbols(payload); // refresh symbol cache from real constituents only
     alerts.evaluate(payload);
+    if (st === "pre-open" && llm.configured())
+      llm.analyze(payload).catch(() => {}); // fire-and-forget; errors logged inside
   } catch (_) {
     /* transient network error - try again next tick */
   } finally {
@@ -555,7 +603,10 @@ function finishAlert(res, r) {
       error: r.error,
       ...(r.currentVersion == null ? {} : { currentVersion: r.currentVersion }),
     });
-  return sendJson(res, 200, { alert: r.alert, syncStatus: alerts.syncStatus() });
+  return sendJson(res, 200, {
+    alert: r.alert,
+    syncStatus: alerts.syncStatus(),
+  });
 }
 function permit(res, user, action, alert) {
   const denied = authorize(user, action, alert);
@@ -572,7 +623,8 @@ function parseCookies(req) {
   const raw = req.headers.cookie || "";
   raw.split(";").forEach((p) => {
     const i = p.indexOf("=");
-    if (i > 0) out[p.slice(0, i).trim()] = decodeURIComponent(p.slice(i + 1).trim());
+    if (i > 0)
+      out[p.slice(0, i).trim()] = decodeURIComponent(p.slice(i + 1).trim());
   });
   return out;
 }
@@ -601,7 +653,10 @@ function sendJsonCookie(res, code, obj, setCookie) {
 // Open auth endpoints (no existing session required). Returns true if handled.
 async function handleAuthApi(req, res, url, method, token) {
   if (url === "/api/auth/status" && method === "GET") {
-    sendJson(res, 200, { needsSetup: auth.needsSetup(), user: auth.sessionUser(token) });
+    sendJson(res, 200, {
+      needsSetup: auth.needsSetup(),
+      user: auth.sessionUser(token),
+    });
     return true;
   }
   if (url === "/api/auth/users-public" && method === "GET") {
@@ -611,19 +666,30 @@ async function handleAuthApi(req, res, url, method, token) {
   if (url === "/api/auth/setup" && method === "POST") {
     const body = await readJson(req);
     const r = auth.setupAdmin(body);
-    if (r.error) return sendJson(res, 400, { error: r.error }), true;
+    if (r.error) return (sendJson(res, 400, { error: r.error }), true);
     const li = auth.login(body.username, body.password); // auto-login the new admin
-    return sendJsonCookie(res, 201, { user: r.user }, li.token ? sessionCookie(li.token) : undefined), true;
+    return (
+      sendJsonCookie(
+        res,
+        201,
+        { user: r.user },
+        li.token ? sessionCookie(li.token) : undefined,
+      ),
+      true
+    );
   }
   if (url === "/api/auth/login" && method === "POST") {
     const body = await readJson(req);
     const r = auth.login(body.username, body.password);
-    if (r.error) return sendJson(res, 401, { error: r.error }), true;
-    return sendJsonCookie(res, 200, { user: r.user }, sessionCookie(r.token)), true;
+    if (r.error) return (sendJson(res, 401, { error: r.error }), true);
+    return (
+      sendJsonCookie(res, 200, { user: r.user }, sessionCookie(r.token)),
+      true
+    );
   }
   if (url === "/api/auth/logout" && method === "POST") {
     auth.logout(token);
-    return sendJsonCookie(res, 200, { ok: true }, clearCookie()), true;
+    return (sendJsonCookie(res, 200, { ok: true }, clearCookie()), true);
   }
   return false;
 }
@@ -652,10 +718,14 @@ async function handleUsersApi(req, res, url, method, actor) {
         return true;
       }
       const result = auth.createTelegramLinkCode(id);
-      sendJson(res, result.error ? (result.error === "not found" ? 404 : 400) : 201, {
-        ...result,
-        botUsername: telegram.publicConfig().botUsername,
-      });
+      sendJson(
+        res,
+        result.error ? (result.error === "not found" ? 404 : 400) : 201,
+        {
+          ...result,
+          botUsername: telegram.publicConfig().botUsername,
+        },
+      );
       return true;
     }
     if (action === "link" && method === "DELETE") {
@@ -664,7 +734,11 @@ async function handleUsersApi(req, res, url, method, actor) {
         broadcastState({ kind: "telegram", userId: id });
         broadcastState({ kind: "users" });
       }
-      sendJson(res, result.error ? (result.error === "not found" ? 404 : 400) : 200, result);
+      sendJson(
+        res,
+        result.error ? (result.error === "not found" ? 404 : 400) : 200,
+        result,
+      );
       return true;
     }
   }
@@ -725,7 +799,9 @@ async function handleAlertsApi(req, res, url, method, user) {
   }
   if (url === "/api/alerts" && method === "GET") {
     const q = new URL(req.url, `http://${HOST}`);
-    sendJson(res, 200, { alerts: alerts.list(q.searchParams.get("index") || undefined) });
+    sendJson(res, 200, {
+      alerts: alerts.list(q.searchParams.get("index") || undefined),
+    });
     return true;
   }
   if (url === "/api/alerts" && method === "POST") {
@@ -737,10 +813,13 @@ async function handleAlertsApi(req, res, url, method, user) {
     const formCp = num(body.formPrice);
     delete body.formPrice; // transport-only; never persisted on the alert
     const cp =
-      formCp > 0 ? formCp : latestPrices[String(body.symbol || "").toUpperCase()];
+      formCp > 0
+        ? formCp
+        : latestPrices[String(body.symbol || "").toUpperCase()];
     const r = alerts.create(body, cp, user);
     if (r.error) sendJson(res, 400, { error: r.error });
-    else sendJson(res, 201, { alert: r.alert, syncStatus: alerts.syncStatus() });
+    else
+      sendJson(res, 201, { alert: r.alert, syncStatus: alerts.syncStatus() });
     return true;
   }
   const eventsMatch = url.match(/^\/api\/alerts\/([^/]+)\/events$/);
@@ -756,7 +835,11 @@ async function handleAlertsApi(req, res, url, method, user) {
   const detailMatch = url.match(/^\/api\/alerts\/([^/]+)$/);
   if (detailMatch && method === "GET") {
     const alert = alerts.find(decodeURIComponent(detailMatch[1]));
-    sendJson(res, alert ? 200 : 404, alert ? { alert } : { error: "not found" });
+    sendJson(
+      res,
+      alert ? 200 : 404,
+      alert ? { alert } : { error: "not found" },
+    );
     return true;
   }
   const m = url.match(
@@ -820,11 +903,10 @@ async function handleAlertsApi(req, res, url, method, user) {
       const formCp = num(body.formPrice);
       delete body.formPrice; // transport-only; never persisted on the alert
       const cp =
-        formCp > 0 ? formCp : latestPrices[String(body.symbol || "").toUpperCase()];
-      finishAlert(
-        res,
-        alerts.update(id, body, cp, user, body.expectedVersion),
-      );
+        formCp > 0
+          ? formCp
+          : latestPrices[String(body.symbol || "").toUpperCase()];
+      finishAlert(res, alerts.update(id, body, cp, user, body.expectedVersion));
       return true;
     }
     if (!action && method === "DELETE") {
@@ -900,6 +982,118 @@ async function handleTelegramApi(req, res, url, method, user) {
   return false;
 }
 
+async function handleAnalysisApi(req, res, url, method, user) {
+  if (url === "/api/analysis" && method === "GET") {
+    if (!llm.configured()) {
+      sendJson(res, 200, { status: "unavailable" });
+      return true;
+    }
+    const q = new URL(req.url, `http://${HOST}`);
+    const symbol = (q.searchParams.get("symbol") || "").toUpperCase().trim();
+    if (!symbol) {
+      sendJson(res, 400, { error: "symbol parameter required" });
+      return true;
+    }
+    const analysis = llm.getAnalysis(symbol);
+    if (analysis) {
+      sendJson(res, 200, { status: "ready", date: llm.cacheDate(), analysis });
+    } else {
+      const status = llm.getStatus();
+      sendJson(res, 200, {
+        status: status === "ready" ? "pending" : status, // ready-but-missing-symbol -> pending for this stock
+        date: llm.cacheDate(),
+        error: status === "error" ? llm.lastErrorMessage() : undefined,
+      });
+    }
+    return true;
+  }
+  if (url === "/api/analysis/refresh" && method === "POST") {
+    if (!permit(res, user, ACTION.CREATE)) return true; // editor/admin only (billable LLM call)
+    if (!llm.configured()) {
+      sendJson(res, 200, { status: "unavailable" });
+      return true;
+    }
+    llm.clearCache();
+    const payload = await getMarketData();
+    llm.analyze(payload).catch(() => {});
+    sendJson(res, 200, { status: "queued" });
+    return true;
+  }
+  return false;
+}
+
+async function handleTradesApi(req, res, url, method, user) {
+  if (url === "/api/trades/summary" && method === "GET") {
+    const q = new URL(req.url, `http://${HOST}`);
+    sendJson(res, 200, {
+      summary: trades.summary({
+        tradeType: q.searchParams.get("tradeType") || undefined,
+        from: q.searchParams.get("from") || undefined,
+        to: q.searchParams.get("to") || undefined,
+      }),
+    });
+    return true;
+  }
+  if (url === "/api/trades" && method === "GET") {
+    const q = new URL(req.url, `http://${HOST}`);
+    sendJson(res, 200, {
+      trades: trades.list({
+        tradeType: q.searchParams.get("tradeType") || undefined,
+        status: q.searchParams.get("status") || undefined,
+        symbol: q.searchParams.get("symbol") || undefined,
+        side: q.searchParams.get("side") || undefined,
+        from: q.searchParams.get("from") || undefined,
+        to: q.searchParams.get("to") || undefined,
+        strategy: q.searchParams.get("strategy") || undefined,
+      }),
+    });
+    return true;
+  }
+  if (url === "/api/trades" && method === "POST") {
+    if (!permit(res, user, ACTION.CREATE)) return true;
+    const body = await readJson(req);
+    const r = trades.create(body, user);
+    if (r.error) sendJson(res, 400, { error: r.error });
+    else sendJson(res, 201, { trade: r.trade });
+    return true;
+  }
+  const detail = url.match(/^\/api\/trades\/([^/]+)$/);
+  if (detail) {
+    const id = decodeURIComponent(detail[1]);
+    if (method === "GET") {
+      const trade = trades.get(id);
+      sendJson(res, trade ? 200 : 404, trade ? { trade } : { error: "not found" });
+      return true;
+    }
+    if (method === "PATCH") {
+      const existing = trades.find(id);
+      if (!existing) {
+        sendJson(res, 404, { error: "not found" });
+        return true;
+      }
+      if (!permit(res, user, ACTION.EDIT, existing)) return true;
+      const body = await readJson(req);
+      const r = trades.update(id, body, user);
+      if (r.error) sendJson(res, r.status || 400, { error: r.error });
+      else sendJson(res, 200, { trade: r.trade });
+      return true;
+    }
+    if (method === "DELETE") {
+      const existing = trades.find(id);
+      if (!existing) {
+        sendJson(res, 404, { error: "not found" });
+        return true;
+      }
+      if (!permit(res, user, ACTION.DELETE, existing)) return true;
+      const r = trades.remove(id);
+      if (r.error) sendJson(res, r.status || 400, { error: r.error });
+      else sendJson(res, 200, { ok: true });
+      return true;
+    }
+  }
+  return false;
+}
+
 // ---- static file serving (the app shell in ../frontend; public, app self-gates via auth) ----
 const FRONTEND_DIR = path.join(HERE, "..", "frontend");
 const MIME = {
@@ -926,7 +1120,13 @@ function serveStatic(res, urlPath) {
   }
   fs.readFile(full, (err, buf) => {
     if (err) send(res, 404, "Not found", "text/plain");
-    else send(res, 200, buf, MIME[path.extname(full)] || "application/octet-stream");
+    else
+      send(
+        res,
+        200,
+        buf,
+        MIME[path.extname(full)] || "application/octet-stream",
+      );
   });
 }
 
@@ -936,8 +1136,11 @@ const server = http.createServer(async (req, res) => {
   if (url.startsWith("/api/")) {
     try {
       // CSRF: state-changing requests must carry our XHR header (cross-site forms can't)
-      if (method !== "GET" && method !== "HEAD" &&
-          req.headers["x-requested-with"] !== "XMLHttpRequest") {
+      if (
+        method !== "GET" &&
+        method !== "HEAD" &&
+        req.headers["x-requested-with"] !== "XMLHttpRequest"
+      ) {
         sendJson(res, 403, { error: "missing X-Requested-With header" });
         return;
       }
@@ -970,9 +1173,17 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 404, { error: "not found" });
         return;
       }
+      if (url.startsWith("/api/analysis")) {
+        if (await handleAnalysisApi(req, res, url, method, user)) return;
+        sendJson(res, 404, { error: "not found" });
+        return;
+      }
       if (url === "/api/changes" && method === "GET") {
         const requestUrl = new URL(req.url, `http://${HOST}`);
-        const since = Math.max(0, Number(requestUrl.searchParams.get("since")) || 0);
+        const since = Math.max(
+          0,
+          Number(requestUrl.searchParams.get("since")) || 0,
+        );
         const oldestRevision = stateChanges.length
           ? stateChanges[0].revision
           : stateRevision + 1;
@@ -1023,6 +1234,11 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 404, { error: "not found" });
         return;
       }
+      if (url.startsWith("/api/trades")) {
+        if (await handleTradesApi(req, res, url, method, user)) return;
+        sendJson(res, 404, { error: "not found" });
+        return;
+      }
       if (url === "/api/indices") {
         const data = await getMarketData(); // pre-open feed during 09:00-09:15, else live (WS-backed when STREAM_WS is on)
         cachePrices(data);
@@ -1042,7 +1258,9 @@ const server = http.createServer(async (req, res) => {
           "X-Accel-Buffering": "no",
         });
         res.write("retry: 3000\n\n");
-        res.write(`event: snapshot\ndata: ${JSON.stringify(await getMarketData())}\n\n`);
+        res.write(
+          `event: snapshot\ndata: ${JSON.stringify(await getMarketData())}\n\n`,
+        );
         sseClients.add(res);
         req.on("close", () => sseClients.delete(res));
         return;
@@ -1079,6 +1297,8 @@ async function main() {
   console.log(
     `  Alerts: ${alerts.list().length} saved · store: ${alerts.backendName()} · eval every ${ALERT_POLL_MS / 1000}s in market hours`,
   );
+  await trades.load();
+  console.log(`  Trades: ${trades.list().length} saved · store: ${trades.backendName()}`);
   const telegramBackend = await telegram.load({
     auth,
     logError: alerts.logError,
@@ -1092,6 +1312,8 @@ async function main() {
   console.log(
     `  Telegram: ${telegram.configured() ? `configured · store: ${telegramBackend}` : "not configured (in-page only)"}`,
   );
+  llm.load({ logError: alerts.logError });
+  console.log(`  LLM: ${llm.configured() ? "configured" : "not configured"}`);
   const streamCfg = requireStream(); // null when STREAM_WS unset, or on WARNING+continue
   console.log(
     STREAM_WS
@@ -1141,26 +1363,25 @@ async function main() {
     );
   }
   server.listen(PORT, HOST, () => {
-    console.log(`\n  Serving on http://${HOST}:${PORT}/`);
+    logInfo("server", `serving on http://${HOST}:${PORT}/ (stream ${STREAM_WS ? "on" : "off"})`);
     console.log("  Open that URL in your browser. Ctrl-C to stop.\n");
     if (NO_TICK)
-      console.log("  ALERTS_NO_TICK set - alert engine PAUSED (read-only, no fires).\n");
+      console.log(
+        "  ALERTS_NO_TICK set - alert engine PAUSED (read-only, no fires).\n",
+      );
     else setInterval(alertTick, ALERT_POLL_MS); // server-side alert engine
     if (STREAM_WS && streamCfg) {
       stream.start({
         feed: FEED,
-        onTick: applyTick,
+        onTick: (t) => {
+          applyTick(t);
+          scheduleFanout(); // relay each tick immediately (coalesced), not on a timer
+        },
         isOpen: () => marketState() === "open",
         log: (msg) => console.log(`  ${msg}`),
         userAgent: USER_AGENTS[0],
       });
-      setInterval(reseedLiveCache, SLOW_REFRESH_MS); // 45s REST reseed cadence
-      setInterval(() => {
-        // 1/s SSE fan-out: only while the session is open and someone is listening
-        if (!(STREAM_WS && marketState() === "open" && sseClients.size > 0)) return;
-        const chunk = `event: patch\ndata: ${JSON.stringify(liveCache)}\n\n`;
-        for (const client of sseClients) sseWrite(client, chunk);
-      }, 1000);
+      setInterval(reseedLiveCache, SLOW_REFRESH_MS); // REST reseed cadence
       setInterval(() => {
         for (const client of sseClients) sseWrite(client, ":\n\n"); // heartbeat comment
       }, 15_000);

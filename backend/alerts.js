@@ -18,28 +18,14 @@ const path = require("path");
 const crypto = require("crypto");
 const { connectMongoWithRetry } = require("./mongo-retry");
 const { DurableOutbox } = require("./durable-outbox");
-const { istNow, istFromMs, istLogTs } = require("./utils");
+const { istNow, istFromMs } = require("./utils");
+const { logError } = require("./logger"); // daily-rotating logger, shared app-wide
 
 const ROOT = path.join(__dirname, ".."); // repo root (config lives here)
 const STORE_DIR = path.join(ROOT, "store"); // alert + user data files live here
 const STORE_FILE = path.join(STORE_DIR, "alerts.json");
 const OUTBOX_FILE = path.join(STORE_DIR, "alert-outbox.json");
 const CONFIG_FILE = path.join(ROOT, "config.json");
-const LOG_DIR = path.join(ROOT, "logs");
-const LOG_FILE = path.join(LOG_DIR, "alerts-errors.log");
-
-// Append a dated line to logs/alerts-errors.log and echo to the console.
-function logError(scope, err) {
-  const msg = err && err.message ? err.message : String(err == null ? "" : err);
-  const line = `[${istLogTs()}] ERROR [${scope}] ${msg}\n`;
-  try {
-    fs.mkdirSync(LOG_DIR, { recursive: true });
-    fs.appendFileSync(LOG_FILE, line);
-  } catch (_) {
-    /* logging must never throw */
-  }
-  console.error("  " + line.trimEnd());
-}
 
 const outbox = new DurableOutbox(OUTBOX_FILE, { logError });
 

@@ -945,6 +945,8 @@
       aria-describedby="sm-name"
     >
       <div class="sm-card" tabindex="-1">
+        <div class="sm-top">
+        <div class="sm-grabber" aria-hidden="true"></div>
         <div class="sm-head">
           <div>
             <div class="sm-sym" id="sm-sym"></div>
@@ -1000,6 +1002,19 @@
             Alerts
             <span class="sm-tab-count" id="sm-tab-alerts-count" hidden></span>
           </button>
+          <button
+            type="button"
+            class="sm-tab"
+            id="sm-tab-analysis"
+            data-tab="analysis"
+            role="tab"
+            aria-controls="sm-panel-analysis"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            AI Analysis
+          </button>
+        </div>
         </div>
         <div
           class="sm-panel"
@@ -1026,6 +1041,19 @@
             id="sm-alerts"
             class="sm-alerts"
             aria-label="Alerts for this stock"
+          ></section>
+        </div>
+        <div
+          class="sm-panel"
+          id="sm-panel-analysis"
+          role="tabpanel"
+          aria-labelledby="sm-tab-analysis"
+          hidden
+        >
+          <section
+            id="sm-analysis"
+            class="sm-analysis"
+            aria-label="AI analysis for this stock"
           ></section>
         </div>
       </div>
