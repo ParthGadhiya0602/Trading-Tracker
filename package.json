@@ -5,10 +5,12 @@
   "description": "NIFTY OHL dashboard + server-side price alerts (local data proxy)",
   "type": "commonjs",
   "scripts": {
-    "start": "node backend/server.js",
-    "live": "STREAM_WS=1 MARKET_CAPTURE=1 node backend/server.js",
+    "start": "node run.js",
+    "live": "node run.js --stream --capture",
+    "stream": "node run.js --stream",
+    "capture": "node run.js --capture",
+    "closed": "node run.js --no-tick",
     "deploy": "cloudflared tunnel --url http://127.0.0.1:8787/",
-    "closed": "node backend/server.js",
     "test": "node --test backend/*.test.js"
   },
   "dependencies": {
