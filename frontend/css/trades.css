@@ -1,0 +1,186 @@
+/* =====================================================================
+   trades.css — Trade journal view (additive; consumes system.css primitives)
+   Only what isn't already shared: modal overlays, the filter row, the
+   close-mode cue, responsive table columns, and the >=820 inner-scroll lock.
+   All colour comes from tokens / .pill / .up/.down/.flat utilities.
+   ===================================================================== */
+
+#tradesView[hidden] {
+  display: none !important;
+}
+
+/* filter row (children reuse .search / .field from base) */
+.trades-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 12px;
+  margin: 12px 0 14px;
+}
+.trades-filters .field select,
+.trades-filters .field input {
+  min-height: 38px;
+}
+
+/* segmented controls sit in a row with a little breathing room */
+.trades-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: center;
+  margin-top: var(--gap-section);
+}
+
+.trades-list-card {
+  padding: 0;
+  overflow: hidden;
+}
+.trades-list-card .tablewrap {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+/* ---- create/edit + detail modal overlays (mirror #stockModal / #alertModal) ---- */
+#tradeModal,
+#tradeViewModal {
+  position: fixed;
+  inset: 0;
+  z-index: 250;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: color-mix(in srgb, #05070c 55%, transparent);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+#tradeModal.show,
+#tradeViewModal.show {
+  display: flex;
+}
+#tradeModal .am-card {
+  width: min(560px, 96vw);
+  max-height: 90vh;
+  overflow: auto;
+}
+#tradeViewModal .sm-card {
+  margin: auto;
+}
+
+/* the one genuinely new visual cue: highlight the exit fieldset when closing a
+   trade (same accent-tint formula .trigger-preview uses in alerts.css) */
+#tradeModal.tm-close-mode #tr-exit-group {
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+/* dim separator inside entry/exit cells */
+.tr-dim {
+  color: var(--muted);
+  font-weight: var(--fw-regular);
+}
+
+/* detail-modal action row */
+.tv-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px 18px 18px;
+  border-top: 1px solid var(--line);
+}
+
+/* ---- responsive table columns (mirror dashboard.css technique, staged) ---- */
+/* mobile base: Symbol · Side · Net P&L · Status only */
+#trTable .col-type,
+#trTable .col-qty,
+#trTable .col-entry,
+#trTable .col-exit,
+#trTable .col-pnlpct,
+#trTable .col-r {
+  display: none;
+}
+#trTable {
+  min-width: 0;
+}
+#trTable th:first-child,
+#trTable td:first-child {
+  position: static;
+}
+
+@media (min-width: 560px) {
+  /* tablet: add qty + entry + exit; table regains its scroll min-width */
+  #trTable .col-qty,
+  #trTable .col-entry,
+  #trTable .col-exit {
+    display: table-cell;
+  }
+  #trTable {
+    min-width: 640px;
+  }
+  #trTable th:first-child,
+  #trTable td:first-child {
+    position: sticky;
+  }
+}
+
+@media (min-width: 820px) {
+  /* laptop: full column set */
+  #trTable .col-type,
+  #trTable .col-pnlpct,
+  #trTable .col-r {
+    display: table-cell;
+  }
+  #trTable {
+    min-width: 0;
+  }
+  /* only the inner table scrolls (mirror components.css alerts block) */
+  #tradesView:not([hidden]) {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  #tradesView .trades-list-card {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+}
+
+/* >=820: fill the viewport-locked body so the trades table scrolls in its box
+   with the pager footer pinned (was clipped/unscrollable before). */
+@media (min-width: 820px) {
+  #tradesView:not([hidden]) {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+  #tradesView .alerts-bar,
+  #tradesView .kpi-strip,
+  #tradesView .trades-controls,
+  #tradesView .trades-filters {
+    flex: none;
+  }
+  #tradesView .trades-list-card {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  #tradesView .trades-list-card .section-head,
+  #tradesView .trades-list-card .table-foot {
+    flex: none;
+  }
+  #tradesView .trades-list-card .tablewrap {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    overflow: auto;
+  }
+}

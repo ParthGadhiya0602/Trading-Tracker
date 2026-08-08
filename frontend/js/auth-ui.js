@@ -149,8 +149,10 @@
                 syncManagedTelegramState,
               );
             }
-            if (change.kind === "alert" || change.kind === "notification")
+            if (change.kind === "alert" || change.kind === "notification") {
               window.__reloadAlerts && window.__reloadAlerts();
+              window.__reloadOverview && window.__reloadOverview();
+            }
           });
         }
         function onAuthed(user) {
@@ -173,8 +175,12 @@
             try {
               window.__initAlerts && window.__initAlerts();
             } catch (_) {}
+            try {
+              window.__initOverview && window.__initOverview();
+            } catch (_) {}
           } else {
             window.__reloadAlerts && window.__reloadAlerts();
+            window.__reloadOverview && window.__reloadOverview();
           }
         }
 

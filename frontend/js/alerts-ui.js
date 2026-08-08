@@ -1403,19 +1403,34 @@
         function activateView(view) {
           const alertsOn = view === "alerts";
           const usersOn = view === "users";
+          const tradesOn = view === "trades";
+          const reportsOn = view === "reports";
+          const marketOn = view === "market";
           $$(".viewnav .tab").forEach((x) => {
             const on = x.dataset.view === view;
             x.classList.toggle("active", on);
             x.setAttribute("aria-selected", String(on));
             x.tabIndex = on ? 0 : -1;
           });
-          $("#dashView").hidden = alertsOn || usersOn;
+          $("#dashView").hidden = alertsOn || usersOn || tradesOn || reportsOn || marketOn;
           $("#alertsView").hidden = !alertsOn;
+          const tradesView = $("#tradesView");
+          if (tradesView) tradesView.hidden = !tradesOn;
+          const reportsView = $("#reportsView");
+          if (reportsView) reportsView.hidden = !reportsOn;
+          const marketView = $("#marketView");
+          if (marketView) marketView.hidden = !marketOn;
           $("#usersView").hidden = !usersOn;
+          const dashOn = view === "dash";
+          if (dashOn && window.__initOverview) window.__initOverview();
           if (alertsOn) {
             loadSymbols();
             refreshAll(true);
           }
+          if (tradesOn && window.__initTrades) window.__initTrades();
+          if (reportsOn && window.__initReports) window.__initReports();
+          if (marketOn && window.__initMarket) window.__initMarket();
+          if (!marketOn && window.__stopMarket) window.__stopMarket();
           if (usersOn && window.__openUsersView) window.__openUsersView();
         }
         $$(".viewnav .tab").forEach((b) => {

@@ -8,9 +8,13 @@
     />
     <title>NIFTY 50 - Open / High / Low Tracker</title>
     <link rel="stylesheet" href="css/base.css" />
+    <link rel="stylesheet" href="css/system.css" />
     <link rel="stylesheet" href="css/components.css" />
     <link rel="stylesheet" href="css/dashboard.css" />
     <link rel="stylesheet" href="css/alerts.css" />
+    <link rel="stylesheet" href="css/trades.css" />
+    <link rel="stylesheet" href="css/reports.css" />
+    <link rel="stylesheet" href="css/market.css" />
     <link rel="stylesheet" href="css/auth.css" />
   </head>
   <body>
@@ -23,6 +27,15 @@
       FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
     -->
     <header class="appbar">
+      <button
+        class="nav-toggle"
+        id="navToggle"
+        type="button"
+        aria-label="Toggle navigation menu"
+        aria-expanded="false"
+      >
+        <i data-lucide="menu" aria-hidden="true"></i>
+      </button>
       <div class="appbar-primary">
         <div class="brand">
           <span class="brand-mark" aria-hidden="true">
@@ -74,6 +87,17 @@
           </button>
           <button
             class="tab"
+            id="view-tab-market"
+            data-view="market"
+            role="tab"
+            aria-controls="marketView"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            <i data-lucide="candlestick-chart" aria-hidden="true"></i>Market Watch
+          </button>
+          <button
+            class="tab"
             id="view-tab-alerts"
             data-view="alerts"
             role="tab"
@@ -87,6 +111,28 @@
               hidden
             >0</span
             >
+          </button>
+          <button
+            class="tab"
+            id="view-tab-trades"
+            data-view="trades"
+            role="tab"
+            aria-controls="tradesView"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            <i data-lucide="notebook-pen" aria-hidden="true"></i>Trades
+          </button>
+          <button
+            class="tab"
+            id="view-tab-reports"
+            data-view="reports"
+            role="tab"
+            aria-controls="reportsView"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            <i data-lucide="bar-chart-3" aria-hidden="true"></i>Reports
           </button>
           <button
             class="tab"
@@ -135,6 +181,36 @@
         <div class="idxcard skel-card"><div class="skel l1"></div><div class="skel l2"></div><div class="skel l3"></div></div>
       </section>
 
+      <!-- ===== personal overview: your P&L, alerts, notifications, trades ===== -->
+      <div class="kpi-strip" id="dashUserKpis" style="margin-bottom: var(--gap-section)"></div>
+      <div class="dash-overview" id="dashOverview">
+        <div class="report-panel">
+          <div class="section-head">
+            <span class="title"><i data-lucide="bell-ring"></i> Recent alerts</span>
+            <button type="button" class="linklike" data-goto="alerts">View all →</button>
+          </div>
+          <div class="mini-list" id="dashAlerts"></div>
+        </div>
+        <div class="report-panel">
+          <div class="section-head">
+            <span class="title"><i data-lucide="bell"></i> Notifications</span>
+            <button type="button" class="linklike" data-goto="notifications">View all →</button>
+          </div>
+          <div class="mini-list" id="dashNotifs"></div>
+        </div>
+        <div class="report-panel">
+          <div class="section-head">
+            <span class="title"><i data-lucide="notebook-pen"></i> Recent trades</span>
+            <button type="button" class="linklike" data-goto="trades">View all →</button>
+          </div>
+          <div class="mini-list" id="dashTrades"></div>
+        </div>
+      </div>
+
+      <!-- legacy market table: kept in-DOM (hidden) so dashboard.js keeps
+           powering the live #idxCards above; browsing the full table now
+           lives in the dedicated Market Watch view -->
+      <div id="dashMarket" hidden>
       <!-- toolbar: status filters on the left, data controls on the right -->
       <div class="toolbar">
         <div class="toolbar-left">
@@ -295,8 +371,90 @@
           </table>
         </div>
       </section>
+      </div>
+      <!-- /#dashMarket -->
     </div>
     <!-- /#dashView -->
+
+    <div
+      id="marketView"
+      role="tabpanel"
+      aria-labelledby="view-tab-market"
+      hidden
+    >
+      <div class="alerts-bar">
+        <div class="alerts-head">
+          <h2 class="alerts-title">
+            <i data-lucide="candlestick-chart" aria-hidden="true"></i> Market Watch
+          </h2>
+          <p class="alerts-sub">
+            Live constituents by index - movement relative to the day's open.
+          </p>
+        </div>
+        <div class="alerts-bar-right">
+          <span class="meta" id="mwMeta"></span>
+        </div>
+      </div>
+
+      <div class="kpi-strip" id="mwKpis"></div>
+
+      <div class="mw-controls" style="margin-top: var(--gap-section)">
+        <div class="segmented" id="mwIndexSeg" role="tablist" aria-label="Index"></div>
+        <div class="segmented" id="mwFilterSeg" role="tablist" aria-label="Open filter">
+          <button type="button" class="seg active" data-filter="all" role="tab" aria-selected="true">All</button>
+          <button type="button" class="seg" data-filter="high" role="tab" aria-selected="false">
+            <span class="dotmark down" aria-hidden="true"></span>Open=High
+          </button>
+          <button type="button" class="seg" data-filter="low" role="tab" aria-selected="false">
+            <span class="dotmark up" aria-hidden="true"></span>Open=Low
+          </button>
+          <button type="button" class="seg" data-filter="neutral" role="tab" aria-selected="false">Neutral</button>
+        </div>
+        <div class="search">
+          <i data-lucide="search" aria-hidden="true"></i>
+          <input id="mw-search" type="search" placeholder="Search symbol…" autocomplete="off" />
+        </div>
+      </div>
+
+      <div id="mwEmpty" hidden></div>
+
+      <div class="market-layout with-rail" id="mwLayout">
+        <div class="card mw-list-card">
+          <div class="section-head">
+            <span class="title"><i data-lucide="list"></i> <span id="mwIdxName">Constituents</span></span>
+            <span class="meta" id="mwAdv"></span>
+          </div>
+          <div class="tablewrap">
+            <table id="mwTable">
+              <thead><tr id="mwHead"></tr></thead>
+              <tbody id="mwBody">
+                <tr class="loading"><td colspan="8">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="table-foot">
+            <span id="mwFoot"></span>
+            <span class="meta" id="mwUpdated"></span>
+          </div>
+        </div>
+
+        <div class="mw-rail">
+          <div class="report-panel">
+            <div class="section-head"><span class="title"><i data-lucide="trending-up"></i> Top gainers</span></div>
+            <div class="mini-list" id="mwGainers"></div>
+          </div>
+          <div class="report-panel">
+            <div class="section-head"><span class="title"><i data-lucide="trending-down"></i> Top losers</span></div>
+            <div class="mini-list" id="mwLosers"></div>
+          </div>
+          <div class="report-panel">
+            <div class="section-head"><span class="title"><i data-lucide="activity"></i> Most active</span></div>
+            <div class="mini-list" id="mwActive"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- /#marketView -->
 
     <div
       id="alertsView"
@@ -594,6 +752,377 @@
         </div>
     </div>
     <!-- /#alertsView -->
+
+    <div
+      id="tradesView"
+      role="tabpanel"
+      aria-labelledby="view-tab-trades"
+      hidden
+    >
+      <div class="alerts-bar">
+        <div class="alerts-head">
+          <h2 class="alerts-title">
+            <i data-lucide="notebook-pen" aria-hidden="true"></i> Trade journal
+          </h2>
+          <p class="alerts-sub">
+            Manual entry - log trades after the fact; intraday and swing kept
+            separate.
+          </p>
+        </div>
+        <div class="alerts-bar-right">
+          <button
+            id="tr-new"
+            class="primary"
+            type="button"
+            data-requires-edit
+          >
+            <i data-lucide="plus" aria-hidden="true"></i>New trade
+          </button>
+        </div>
+      </div>
+
+      <div class="kpi-strip" id="trKpis">
+        <div class="kpi-card hero">
+          <div class="kpi-head">
+            <span class="kpi-chip"><i data-lucide="trending-up"></i></span>
+            <span class="label">Net P&amp;L (closed)</span>
+          </div>
+          <span class="value" id="trKpiNet">-</span>
+          <span class="sub" id="trKpiNetSub"></span>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-head">
+            <span class="kpi-chip"><i data-lucide="circle-dot"></i></span>
+            <span class="label">Open</span>
+          </div>
+          <span class="value" id="trKpiOpen">-</span>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-head">
+            <span class="kpi-chip"><i data-lucide="check-circle-2"></i></span>
+            <span class="label">Closed</span>
+          </div>
+          <span class="value" id="trKpiClosed">-</span>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-head">
+            <span class="kpi-chip"><i data-lucide="percent"></i></span>
+            <span class="label">Win rate</span>
+          </div>
+          <span class="value" id="trKpiWin">-</span>
+          <span class="sub" id="trKpiWinSub"></span>
+        </div>
+      </div>
+
+      <div class="trades-controls">
+        <div class="segmented" id="trTypeSeg" role="tablist" aria-label="Trade type">
+          <button type="button" class="seg active" data-type="intraday" role="tab" aria-selected="true">
+            Intraday <span class="cnt" id="trCntIntraday"></span>
+          </button>
+          <button type="button" class="seg" data-type="swing" role="tab" aria-selected="false">
+            Swing <span class="cnt" id="trCntSwing"></span>
+          </button>
+        </div>
+        <div class="segmented" id="trStatusSeg" role="tablist" aria-label="Trade status">
+          <button type="button" class="seg active" data-status="open" role="tab" aria-selected="true">Open</button>
+          <button type="button" class="seg" data-status="closed" role="tab" aria-selected="false">Closed</button>
+          <button type="button" class="seg" data-status="journal" role="tab" aria-selected="false">Journal</button>
+        </div>
+      </div>
+
+      <div class="trades-filters">
+        <div class="search">
+          <i data-lucide="search" aria-hidden="true"></i>
+          <input id="tr-search" type="text" placeholder="Search symbol…" autocomplete="off" />
+        </div>
+        <label class="field">
+          Side
+          <select id="tr-side">
+            <option value="">All</option>
+            <option value="BUY">Buy</option>
+            <option value="SELL">Sell</option>
+          </select>
+        </label>
+        <label class="field">
+          From
+          <input id="tr-from" type="date" />
+        </label>
+        <label class="field">
+          To
+          <input id="tr-to" type="date" />
+        </label>
+      </div>
+
+      <div class="card trades-list-card">
+        <div class="section-head">
+          <span class="title"><i data-lucide="list"></i> Trades</span>
+          <span class="meta"><span id="tr-count"></span></span>
+        </div>
+        <div class="tablewrap">
+          <table id="trTable">
+            <thead><tr id="trHead"></tr></thead>
+            <tbody id="trBody">
+              <tr class="loading"><td colspan="10">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-foot">
+          <span id="trFootCount"></span>
+          <span class="pager" id="trPager"></span>
+        </div>
+      </div>
+
+      <!-- create / edit / close modal -->
+      <div id="tradeModal" role="dialog" aria-modal="true" aria-label="Trade">
+        <div class="am-card">
+          <div class="am-head">
+            <i data-lucide="notebook-pen" aria-hidden="true"></i>
+            <h2 id="trFormTitle">New trade</h2>
+            <button type="button" id="tr-modal-close" class="am-close" aria-label="Close trade editor">
+              <i data-lucide="x" aria-hidden="true"></i>
+            </button>
+          </div>
+          <form class="alert-form" id="tradeForm" autocomplete="off">
+            <input type="hidden" id="tr-id" />
+            <div class="form-grid">
+              <label>
+                Type
+                <select id="tr-type" required>
+                  <option value="intraday">Intraday</option>
+                  <option value="swing">Swing</option>
+                </select>
+              </label>
+              <label>
+                Side
+                <select id="tr-f-side" required>
+                  <option value="" selected disabled>Select…</option>
+                  <option value="BUY">Buy</option>
+                  <option value="SELL">Sell</option>
+                </select>
+              </label>
+            </div>
+            <div class="form-grid">
+              <label>
+                Symbol
+                <input id="tr-symbol" type="text" maxlength="24" placeholder="e.g. RELIANCE" required />
+              </label>
+              <label>
+                Exchange
+                <select id="tr-exchange">
+                  <option value="NSE">NSE</option>
+                  <option value="BSE">BSE</option>
+                </select>
+              </label>
+            </div>
+            <div class="form-grid">
+              <label>
+                Quantity
+                <input id="tr-qty" type="number" min="0" step="1" inputmode="numeric" required />
+              </label>
+              <label>
+                Index <span class="opt">(optional)</span>
+                <input id="tr-index" type="text" maxlength="40" placeholder="e.g. NIFTY 50" />
+              </label>
+            </div>
+            <div class="form-grid">
+              <label>
+                Entry price (₹)
+                <input id="tr-entry" type="number" min="0" step="0.05" inputmode="decimal" required />
+              </label>
+              <label>
+                Entry date
+                <input id="tr-entry-date" type="date" required />
+              </label>
+            </div>
+            <label>
+              Entry time (IST) <span class="opt" id="tr-entry-time-opt">(required for intraday)</span>
+              <input id="tr-entry-time" type="time" />
+            </label>
+            <fieldset class="form-grid" id="tr-exit-group">
+              <label>
+                Exit price (₹) <span class="opt">(to close)</span>
+                <input id="tr-exit" type="number" min="0" step="0.05" inputmode="decimal" />
+              </label>
+              <label>
+                Exit date
+                <input id="tr-exit-date" type="date" />
+              </label>
+              <label>
+                Exit time (IST)
+                <input id="tr-exit-time" type="time" />
+              </label>
+              <label>
+                Charges (₹)
+                <input id="tr-charges" type="number" min="0" step="0.01" inputmode="decimal" value="0" />
+              </label>
+            </fieldset>
+            <div class="form-grid">
+              <label>
+                Stop loss (₹) <span class="opt">(optional)</span>
+                <input id="tr-stop" type="number" min="0" step="0.05" inputmode="decimal" />
+              </label>
+              <label>
+                Target (₹) <span class="opt">(optional)</span>
+                <input id="tr-target" type="number" min="0" step="0.05" inputmode="decimal" />
+              </label>
+            </div>
+            <label>
+              Strategy <span class="opt">(optional)</span>
+              <input id="tr-strategy" type="text" maxlength="60" placeholder="e.g. Breakout" />
+            </label>
+            <label>
+              Notes <span class="opt">(optional)</span>
+              <textarea id="tr-notes" rows="2" maxlength="500" placeholder="Trade rationale / review"></textarea>
+            </label>
+            <label>
+              Tags <span class="opt">(comma-separated)</span>
+              <input id="tr-tags" type="text" maxlength="120" placeholder="e.g. momentum, gap-up" />
+            </label>
+            <div class="form-err" id="trade-err"></div>
+            <div class="form-actions">
+              <button type="submit" class="primary" id="tr-submit">
+                <i data-lucide="check" aria-hidden="true"></i>
+                <span id="tr-submit-text">Save trade</span>
+              </button>
+              <button type="button" id="tr-cancel">
+                <i data-lucide="x" aria-hidden="true"></i>Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+      <!-- /#tradeModal -->
+
+      <!-- detail modal -->
+      <div id="tradeViewModal" role="dialog" aria-modal="true" aria-label="Trade detail">
+        <div class="sm-card" tabindex="-1">
+          <div class="sm-head">
+            <div>
+              <div class="sm-sym" id="tv-sym"></div>
+              <div class="sm-name" id="tv-name"></div>
+            </div>
+            <div class="sm-actions">
+              <button class="sm-close" id="tv-close" type="button" aria-label="Close trade detail" title="Close">
+                <i data-lucide="x" aria-hidden="true"></i>
+              </button>
+            </div>
+          </div>
+          <div class="sm-grid" id="tv-grid"></div>
+          <div class="tv-actions" id="tv-actions"></div>
+        </div>
+      </div>
+      <!-- /#tradeViewModal -->
+    </div>
+    <!-- /#tradesView -->
+
+    <div
+      id="reportsView"
+      role="tabpanel"
+      aria-labelledby="view-tab-reports"
+      hidden
+    >
+      <div class="alerts-bar">
+        <div class="alerts-head">
+          <h2 class="alerts-title">
+            <i data-lucide="bar-chart-3" aria-hidden="true"></i> Reports
+          </h2>
+          <p class="alerts-sub">
+            Performance analytics from your logged trades - closed trades only.
+          </p>
+        </div>
+        <div class="alerts-bar-right">
+          <span class="meta" id="rpAsOf"></span>
+        </div>
+      </div>
+
+      <div class="report-controls">
+        <div class="segmented" id="rpTypeSeg" role="tablist" aria-label="Segment">
+          <button type="button" class="seg active" data-type="" role="tab" aria-selected="true">All</button>
+          <button type="button" class="seg" data-type="intraday" role="tab" aria-selected="false">Intraday</button>
+          <button type="button" class="seg" data-type="swing" role="tab" aria-selected="false">Swing</button>
+        </div>
+        <label class="field">
+          From
+          <input id="rp-from" type="date" />
+        </label>
+        <label class="field">
+          To
+          <input id="rp-to" type="date" />
+        </label>
+      </div>
+
+      <div id="rpEmpty" hidden></div>
+
+      <div id="rpContent">
+        <div class="kpi-strip" id="rpKpis"></div>
+
+        <div class="report-grid with-rail" style="margin-top: var(--gap-section)">
+          <div class="report-col">
+            <div class="chart-card">
+              <div class="section-head">
+                <span class="title"><i data-lucide="line-chart"></i> Equity curve</span>
+                <span class="meta" id="rpEquityMeta"></span>
+              </div>
+              <div class="chart-body" id="rpEquity"></div>
+            </div>
+
+            <div class="chart-card" style="margin-top: var(--gap-section)">
+              <div class="section-head">
+                <span class="title"><i data-lucide="bar-chart-3"></i> P&amp;L by period</span>
+                <div class="segmented" id="rpPeriodSeg" role="tablist" aria-label="Period">
+                  <button type="button" class="seg" data-period="day" role="tab" aria-selected="false">Daily</button>
+                  <button type="button" class="seg" data-period="week" role="tab" aria-selected="false">Weekly</button>
+                  <button type="button" class="seg active" data-period="month" role="tab" aria-selected="true">Monthly</button>
+                </div>
+              </div>
+              <div class="chart-body" id="rpBars"></div>
+            </div>
+
+            <div class="report-two" style="margin-top: var(--gap-section)">
+              <div class="report-panel">
+                <div class="section-head"><span class="title"><i data-lucide="trophy"></i> Best trades</span></div>
+                <div class="mini-list" id="rpBest"></div>
+              </div>
+              <div class="report-panel">
+                <div class="section-head"><span class="title"><i data-lucide="trending-down"></i> Worst trades</span></div>
+                <div class="mini-list" id="rpWorst"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="report-col report-rail">
+            <div class="report-panel">
+              <div class="section-head"><span class="title"><i data-lucide="layers"></i> By strategy</span></div>
+              <div class="mini-list" id="rpStrategy"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card trades-list-card" style="margin-top: var(--gap-section)">
+          <div class="section-head">
+            <span class="title"><i data-lucide="history"></i> Closed trade history</span>
+            <span class="meta"><span id="rpHistCount"></span></span>
+          </div>
+          <div class="tablewrap">
+            <table id="rpHistTable">
+              <thead>
+                <tr>
+                  <th class="col-symbol">Symbol</th>
+                  <th class="col-type">Type</th>
+                  <th class="col-side">Side</th>
+                  <th class="col-exit num">Exit date</th>
+                  <th class="col-netpnl num">Net P&amp;L</th>
+                  <th class="col-pnlpct num">P&amp;L %</th>
+                  <th class="col-r num">R</th>
+                </tr>
+              </thead>
+              <tbody id="rpHistBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- /#reportsView -->
 
     <section
       id="usersView"

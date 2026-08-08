@@ -438,3 +438,78 @@
           padding: 10px 8px;
         }
       }
+
+      /* ===== Dashboard personal overview (alerts / notifications / trades) ===== */
+      .dash-overview {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: var(--gap-section);
+      }
+      .dash-overview .report-panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-sm);
+        overflow: hidden;
+      }
+      .linklike {
+        border: 0;
+        background: none;
+        color: var(--accent);
+        font: inherit;
+        font-weight: var(--fw-semibold);
+        font-size: var(--fs-caption);
+        cursor: pointer;
+        padding: 2px 4px;
+        border-radius: var(--radius-xs);
+      }
+      .linklike:hover {
+        text-decoration: underline;
+      }
+      .linklike:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+      .mini-row.is-link {
+        cursor: pointer;
+      }
+      .mini-row.is-link:hover {
+        background: var(--chip);
+      }
+      @media (min-width: 820px) {
+        .dash-overview {
+          grid-template-columns: repeat(3, 1fr);
+        }
+      }
+
+      /* >=820: the Dashboard is now an overview page (market table hidden), so it
+         has no inner table scroll region — let the whole view scroll instead of
+         being clipped by the viewport-locked body (components.css). */
+      @media (min-width: 820px) {
+        #dashView:not([hidden]) {
+          overflow-y: auto;
+          min-height: 0;
+        }
+      }
+
+      /* overview panel "See all / Show less" toggle */
+      .mini-more {
+        width: 100%;
+        border: 0;
+        border-top: 1px solid var(--line);
+        background: none;
+        color: var(--accent);
+        font: inherit;
+        font-weight: var(--fw-semibold);
+        font-size: var(--fs-caption);
+        cursor: pointer;
+        padding: 9px 16px;
+        text-align: center;
+      }
+      .mini-more:hover {
+        background: var(--chip);
+      }
+      .mini-more:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: -2px;
+      }

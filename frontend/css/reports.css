@@ -1,0 +1,173 @@
+/* =====================================================================
+   reports.css — Reports / analytics view (additive; consumes system.css)
+   Analytics computed client-side from /api/trades. Charts are hand-rolled
+   inline SVG (zero-dep). All colour via tokens (--up/--down/--accent/--muted).
+   ===================================================================== */
+
+#reportsView[hidden] {
+  display: none !important;
+}
+
+.report-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: flex-end;
+  margin: 12px 0 14px;
+}
+
+/* main content + right rail; stacks below laptop */
+.report-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--gap-section);
+}
+
+.chart-card,
+.report-panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.chart-body {
+  padding: 12px 14px 14px;
+}
+
+/* inline SVG charts */
+svg.chart {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+svg.chart .axis {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+svg.chart .zero {
+  stroke: var(--line-strong);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+svg.chart .equity-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+svg.chart .equity-area {
+  fill: var(--accent-tint);
+  stroke: none;
+}
+svg.chart .bar-up {
+  fill: var(--up);
+}
+svg.chart .bar-down {
+  fill: var(--down);
+}
+svg.chart .lbl {
+  fill: var(--muted);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+.chart-empty {
+  padding: 28px 12px;
+  text-align: center;
+  color: var(--muted);
+  font-size: var(--fs-caption);
+}
+
+/* two-up breakdown row (best/worst) */
+.report-two {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--gap-section);
+}
+
+/* compact stat list (best/worst/strategy) */
+.mini-list {
+  display: flex;
+  flex-direction: column;
+}
+.mini-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 16px;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-td);
+}
+.mini-row:first-child {
+  border-top: 0;
+}
+.mini-row .mr-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.mini-row .mr-sub {
+  font-size: var(--fs-caption);
+  color: var(--muted-ink);
+}
+.mini-row .mr-val {
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--fw-semibold);
+  flex: none;
+}
+
+/* win-rate bar in strategy breakdown */
+.wr-bar {
+  position: relative;
+  width: 60px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--chip);
+  overflow: hidden;
+  flex: none;
+}
+.wr-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--up);
+  border-radius: var(--radius-pill);
+}
+
+@media (min-width: 820px) {
+  .report-two {
+    grid-template-columns: 1fr 1fr;
+  }
+  #reportsView.has-rail-layout .report-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (min-width: 1280px) {
+  .report-grid.with-rail {
+    grid-template-columns: minmax(0, 1fr) 340px;
+    align-items: start;
+  }
+}
+
+/* >=820: the whole report scrolls inside the viewport-locked body (was clipped). */
+@media (min-width: 820px) {
+  #reportsView:not([hidden]) {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  #reportsView .alerts-bar,
+  #reportsView .report-controls {
+    flex: none;
+  }
+  #reportsView #rpContent,
+  #reportsView #rpEmpty {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+}

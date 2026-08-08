@@ -29,6 +29,7 @@ const telegram = require("./telegram");
 const llm = require("./llm");
 const trades = require("./trades");
 const { logInfo, logWarn } = require("./logger");
+const { istNow } = require("./utils");
 const { ACTION, authorize } = require("./alert-policy");
 
 const HOST = "127.0.0.1";
@@ -395,6 +396,50 @@ async function fetchPreopen() {
 // dashboard/alert data for the current market state (pre-open uses the pre-open feed)
 async function fetchMarketData() {
   return marketState() === "pre-open" ? fetchPreopen() : fetchAllIndices();
+}
+
+// ---------------- market-status capture (opt-in via MARKET_CAPTURE=1) ----------------
+// Polls the raw upstream across the whole day (incl. post-close) and logs every
+// marketStatus transition to logs/market-capture-<IST-date>.jsonl, saving a full
+// raw sample the first time each status is seen. Purpose: document the post-market
+// (15:30-16:15) structure so marketState() can gain a proper post-market bucket.
+const MARKET_CAPTURE = !!process.env.MARKET_CAPTURE;
+const CAPTURE_DIR = path.join(HERE, "..", "logs");
+const captureSeen = new Set(); // `${date}:${scope}:${status}` -> raw already saved
+const lastStatusByScope = {}; // scope -> last logged status (transition detection)
+function captureFile() {
+  return path.join(CAPTURE_DIR, `market-capture-${istNow().slice(0, 10)}.jsonl`);
+}
+async function recordCapture(scope, marketStatus, timestamp, raw) {
+  const prev = lastStatusByScope[scope];
+  if (prev === marketStatus) return; // only write on a transition
+  lastStatusByScope[scope] = marketStatus;
+  const key = `${istNow().slice(0, 10)}:${scope}:${marketStatus}`;
+  const first = !captureSeen.has(key);
+  if (first) captureSeen.add(key);
+  const line = { at: istNow(), scope, ourState: marketState(), marketStatus, timestamp };
+  if (first) line.raw = raw; // full structure the first time this status appears
+  try {
+    // async fs so a large raw-sample write never blocks the event loop
+    await fs.promises.mkdir(CAPTURE_DIR, { recursive: true });
+    await fs.promises.appendFile(captureFile(), JSON.stringify(line) + "\n");
+  } catch (e) {
+    logWarn("capture.write", (e && e.message) || e);
+  }
+  logInfo("capture", `${scope}: ${prev || "(start)"} -> ${marketStatus} (ourState=${marketState()})${first ? " [raw saved]" : ""}`);
+}
+async function captureTick() {
+  try {
+    if (marketState() === "pre-open" && FEED.preopenEndpoint) {
+      const j = await srcJson(`${BASE}${FEED.preopenEndpoint}ALL`);
+      await recordCapture("preopen", "Pre-open", (j && j.timestamp) || null, j);
+    }
+    const j = await srcJson(INDEX_URL("NIFTY 50"));
+    const d = (j && j.data) || {};
+    await recordCapture("indices", marketStatusStr(d.marketStatus), d.timestamp || null, j);
+  } catch (e) {
+    logWarn("capture.tick", (e && e.message) || e);
+  }
 }
 
 // ---------------- market state (IST, Mon-Fri): pre-open 09:00-09:15,
@@ -1370,6 +1415,14 @@ async function main() {
         "  ALERTS_NO_TICK set - alert engine PAUSED (read-only, no fires).\n",
       );
     else setInterval(alertTick, ALERT_POLL_MS); // server-side alert engine
+    if (MARKET_CAPTURE) {
+      console.log("  Market capture: ON - transitions + raw samples -> logs/market-capture-<date>.jsonl");
+      // fire-and-forget; captureTick has its own try/catch, .catch is a belt-and-braces
+      // guard so a rejection can never bubble to an unhandledRejection / stop the process
+      captureTick().catch(() => {});
+      const capTimer = setInterval(() => captureTick().catch(() => {}), 30_000);
+      if (capTimer.unref) capTimer.unref();
+    }
     if (STREAM_WS && streamCfg) {
       stream.start({
         feed: FEED,
