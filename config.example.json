@@ -9,14 +9,6 @@
   "mongo": {
     "uri": "mongodb+srv://USER:PASSWORD@cluster0.xxxx.mongodb.net/trading_tracker?retryWrites=true&w=majority"
   },
-  "llm": {
-    "provider": "openai",
-    "apiKey": "PASTE_YOUR_LLM_API_KEY",
-    "model": "gpt-4o-mini",
-    "temperature": 0.3,
-    "maxTokens": 1024,
-    "enabled": true
-  },
   "feed": {
     "base": "https://YOUR_DATA_SOURCE_HOST",
     "indicesEndpoint": "/path/to/indices-api?functionName=SOME_FUNCTION&symbol=",

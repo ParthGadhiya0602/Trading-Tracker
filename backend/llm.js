@@ -12,12 +12,7 @@
  * config (openai | anthropic | gemini); missing/disabled block = feature dormant.
  */
 
-const fs = require("fs");
-const path = require("path");
 const { istNow } = require("./utils");
-
-const ROOT = path.join(__dirname, "..");
-const CONFIG_FILE = path.join(ROOT, "config.json");
 
 const BATCH_SIZE = 25; // stocks per LLM call
 const CALL_TIMEOUT_MS = 30_000;
@@ -54,24 +49,28 @@ let analyzing = false; // mutex: one LLM run at a time
 let lastError = null; // set when a run fails with no cache produced
 let logError = () => {};
 
+// Config source: ENVIRONMENT VARIABLES only.
+//   LLM_PROVIDER   openai | anthropic | gemini
+//   LLM_API_KEY    the provider key (feature is dormant until this is set)
+//   LLM_MODEL      optional (defaults per provider)
+//   LLM_TEMPERATURE / LLM_MAX_TOKENS  optional
+//   LLM_ENABLED    optional; set to "false" to force off even with a key
+// No key/provider -> returns null -> feature stays off. config.json is NOT read.
 function readConfig() {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
-    const llm = parsed && parsed.llm;
-    if (!llm || !llm.apiKey || !llm.provider) return null;
-    if (llm.enabled === false) return null;
-    const provider = String(llm.provider).toLowerCase().trim();
-    if (!DEFAULT_MODELS[provider]) return null;
-    return {
-      provider,
-      apiKey: String(llm.apiKey).trim(),
-      model: String(llm.model || DEFAULT_MODELS[provider]).trim(),
-      temperature: Number.isFinite(Number(llm.temperature)) ? Number(llm.temperature) : 0.3,
-      maxTokens: Number(llm.maxTokens) || 1024,
-    };
-  } catch (_) {
-    return null;
-  }
+  const provider = String(process.env.LLM_PROVIDER || "").toLowerCase().trim();
+  const apiKey = String(process.env.LLM_API_KEY || "").trim();
+  if (!apiKey || !provider) return null;
+  if (String(process.env.LLM_ENABLED).toLowerCase() === "false") return null;
+  if (!DEFAULT_MODELS[provider]) return null;
+  return {
+    provider,
+    apiKey,
+    model: String(process.env.LLM_MODEL || DEFAULT_MODELS[provider]).trim(),
+    temperature: Number.isFinite(Number(process.env.LLM_TEMPERATURE))
+      ? Number(process.env.LLM_TEMPERATURE)
+      : 0.3,
+    maxTokens: Number(process.env.LLM_MAX_TOKENS) || 1024,
+  };
 }
 
 function load(options = {}) {
