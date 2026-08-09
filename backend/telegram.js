@@ -172,9 +172,9 @@ async function load(options = {}) {
   if (config.mongoUri) {
     try {
       const client = await connectMongoWithRetry(config.mongoUri, {
-        retries: 3,
-        retryDelayMs: 3000,
-        serverSelectionTimeoutMS: 8000,
+        retries: 1,
+        retryDelayMs: 2000,
+        serverSelectionTimeoutMS: 6000,
       });
       configureCollections(client.db(mongoDbName(config.mongoUri)));
       await outbox.drain();

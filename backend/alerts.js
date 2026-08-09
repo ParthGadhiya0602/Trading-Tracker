@@ -395,7 +395,7 @@ async function load(context = {}) {
   let seedFromLocal = false;
   mongoUri = loadConfig();
   if (mongoUri) {
-    const retryCount = 3;
+    const retryCount = 1;
     try {
       const client = await connectMongoWithRetry(mongoUri, {
         retries: retryCount,

@@ -88,9 +88,9 @@ async function load() {
   if (mongoUri) {
     try {
       const client = await connectMongoWithRetry(mongoUri, {
-        retries: 3,
-        retryDelayMs: 3000,
-        serverSelectionTimeoutMS: 8000,
+        retries: 1,
+        retryDelayMs: 2000,
+        serverSelectionTimeoutMS: 6000,
       });
       configureMongo(client.db(mongoDbName(mongoUri)));
       await outbox.drain();

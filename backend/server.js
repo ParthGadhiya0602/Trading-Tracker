@@ -1335,25 +1335,30 @@ async function main() {
       ` · password pepper: ${auth.passwordPepperConfigured() ? "configured" : "NOT configured"}` +
       (auth.needsSetup() ? " · NEEDS SETUP (create admin on first open)" : ""),
   );
-  await alerts.load({
-    users: auth.listUsers(),
-    usersProvider: () => auth.listUsers(),
-  });
+  // Load the remaining stores in PARALLEL (trades is independent; alerts &
+  // telegram only need auth, already loaded). Collapses three sequential Mongo
+  // connects into one wave - the main startup-time win.
+  const [, , telegramBackend] = await Promise.all([
+    alerts.load({
+      users: auth.listUsers(),
+      usersProvider: () => auth.listUsers(),
+    }),
+    trades.load(),
+    telegram.load({
+      auth,
+      logError: alerts.logError,
+      onUserChange: (userId) => {
+        broadcastState({ kind: "telegram", userId });
+        broadcastState({ kind: "users" });
+      },
+    }),
+  ]);
+  alerts.setEventSink((event) => telegram.enqueue(event));
+  alerts.setChangeSink((change) => broadcastState(change));
   console.log(
     `  Alerts: ${alerts.list().length} saved · store: ${alerts.backendName()} · eval every ${ALERT_POLL_MS / 1000}s in market hours`,
   );
-  await trades.load();
   console.log(`  Trades: ${trades.list().length} saved · store: ${trades.backendName()}`);
-  const telegramBackend = await telegram.load({
-    auth,
-    logError: alerts.logError,
-    onUserChange: (userId) => {
-      broadcastState({ kind: "telegram", userId });
-      broadcastState({ kind: "users" });
-    },
-  });
-  alerts.setEventSink((event) => telegram.enqueue(event));
-  alerts.setChangeSink((change) => broadcastState(change));
   console.log(
     `  Telegram: ${telegram.configured() ? `configured · store: ${telegramBackend}` : "not configured (in-page only)"}`,
   );
@@ -1365,6 +1370,9 @@ async function main() {
       ? `  Live WS feed: STREAM_WS on · ${streamCfg ? "feed.stream configured" : "feed.stream NOT configured - pure-REST fallback"} · SSE ${streamCfg ? "available at /api/stream" : "disabled (404)"}`
       : "  Live WS feed: STREAM_WS off - pure REST (today's behaviour), /api/stream disabled (404)",
   );
+  // Self-test runs in the BACKGROUND so it never delays the HTTP listen - it only
+  // prints reachability + seeds caches (the poll/stream refresh these anyway).
+  void (async () => {
   console.log("  Self-test: fetching indices from the data source ...");
   try {
     const j = await fetchAllIndices();
@@ -1407,6 +1415,7 @@ async function main() {
       "  If HTTP 401/403, the data source's anti-bot blocked this network (VPN/datacentre).",
     );
   }
+  })();
   server.listen(PORT, HOST, () => {
     logInfo("server", `serving on http://${HOST}:${PORT}/ (stream ${STREAM_WS ? "on" : "off"})`);
     console.log("  Open that URL in your browser. Ctrl-C to stop.\n");
