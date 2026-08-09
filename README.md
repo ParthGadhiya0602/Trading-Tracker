@@ -1,229 +1,246 @@
-# Trading Tracker - NIFTY 50 / NIFTY NEXT 50 Dashboard
+# Trading Tracker
 
-A tiny, zero-dependency dashboard that tracks every **NIFTY 50** and **NIFTY NEXT 50**
-stock's intraday movement **relative to its open price**, plus each index's own live
-points level.
+A zero-dependency (Node built-ins only; `mongodb` optional) personal markets app for the
+Indian market (NSE), with five views:
 
-![Node 18+](https://img.shields.io/badge/node-18%2B-brightgreen) ![deps](https://img.shields.io/badge/dependencies-0-blue)
+- **Dashboard** — a personal overview: live index cards + your P&L, active alerts,
+  notifications, and recent trades (each panel shows the first 3 with *See all / Show less*).
+- **Market Watch** — live constituents per index (NIFTY 50 / NEXT 50 / MIDCAP 50 / MIDCAP 100)
+  with the Open=High (red) / Open=Low (green) row model, filters, search, sortable columns,
+  a Top Gainers / Losers / Most Active rail, and a click-a-row **stock detail modal**
+  (details + pre-open order book + Alerts + AI Analysis tabs).
+- **Alerts** — server-evaluated price alerts (fire even with no tab open), with an
+  approve/reject review gate and Telegram delivery.
+- **Trades** — a manual trade journal (intraday vs swing kept separate; log an entry, close
+  it later, P&L derived).
+- **Reports** — analytics on your trades (equity curve, per-period P&L, win rate, profit
+  factor, R-multiples, best/worst, by-strategy) — hand-drawn inline SVG, no chart library.
 
-## What it does
+Responsive: a left sidebar rail on laptop/desktop; a hamburger menu + bottom-sheet modals on
+mobile. Light/dark follow the system theme.
 
-- **Four indices** - NIFTY 50, NIFTY NEXT 50, NIFTY MIDCAP 50, NIFTY MIDCAP 100 (tabs,
-  all constituents including MIDCAP 100's full 100).
-- **Index headline cards** - live points for each index with ± points, % change,
-  Open / High / Low / Prev Close, plus **52-week High/Low and 1-year %** (all shown).
-- **Per-stock table** for the selected index with LTP, Open, High, Low, Prev Close,
-  **Change** (₹ and %), and **Volume**. Hover a symbol for Open→High/Low %; **click any
-  row for a detail panel** - company name, O/H/L, Open→High/Low %, **52-week High/Low +
-  % from 52W high**, **Turnover**, Volume, and **30-day & 1-year % change**. The panel's
-  **Add alert** button opens the create-alert modal prefilled with that index + stock.
-- **Row colouring** - red when Open = High (never traded above its open today),
-  green when Open = Low (never traded below), neutral otherwise. Filter tabs:
-  All / Open = High / Open = Low / Neutral.
-- **Every column sortable** ascending/descending with a direction indicator.
-- **Search box** filters the selected index's table by symbol or company name (works
-  alongside the filter tabs).
-- **Market-hours aware** - auto-polls only during IST trading (Mon–Fri
-  09:15–15:30); pauses and shows _Market CLOSED_ otherwise. Manual **Refresh now**
-  always works.
-- **Configurable** auto-poll interval (1–10 s) and clock format (12h / 24h IST).
-- **In-memory cache** - a transient fetch failure keeps the last good data on screen
-  with a "stale" indicator instead of blanking the table.
-- **Responsive** - fills the screen on laptops/desktops (only the table scrolls);
-  normal page scroll on phones. Light/dark follows your system theme.
+![Node 18+](https://img.shields.io/badge/node-18%2B-brightgreen)
 
-## Why there's a server
-
-The data source's API can't be called directly from a browser: CORS forbids the required
-headers, and its anti-bot layer blocks any request without a _warm session_ (cookies +
-browser-like headers). So a tiny local Node server warms a session and re-serves the data
-to the page from the **same origin** - no CORS, no public proxy, live data.
-
-`server.js` has **zero npm dependencies** (built-in `fetch` + a hand-rolled cookie jar).
-The data-source endpoints live in `config.json`'s `feed` block (copy `config.example.json`
-→ `config.json` and fill them in) — they're not shipped in the code.
+---
 
 ## Requirements
 
-- **Node.js 18+** (needs the built-in `fetch`). Check with `node --version`.
-- A `config.json` with the `feed` endpoints filled in (see `config.example.json`).
-- A network the data source will answer - home/office broadband is fine. VPNs and
-  datacentre IPs are often blocked (you'll see HTTP 401/403).
+- **Node.js 18+** (needs built-in `fetch`). Check: `node --version`.
+- A `config.json` (gitignored) with the **feed endpoints** and an **auth pepper** (below).
+- A network the data source answers on — home/office broadband is fine; VPN/datacentre IPs
+  are often blocked (HTTP 401/403).
+- `npm install` **only if** you want MongoDB Atlas storage (the `mongodb` driver). File mode
+  needs no install.
 
-### Password pepper
+---
 
-User records keep a unique random salt beside each password hash; salts are public by
-design. The application also requires a separate secret pepper kept only in the
-gitignored `config.json`. Generate it before creating the first administrator:
+## Setup
 
-```bash
-openssl rand -hex 32
-```
+1. Copy the template and fill it in:
+   ```bash
+   cp config.example.json config.json
+   ```
+2. Generate the required auth pepper (server refuses to start without it, min 32 chars):
+   ```bash
+   openssl rand -hex 32
+   ```
+   Put it in `config.json` → `auth.passwordPepper`. Back it up; don't rotate it without
+   resetting every user's password.
+3. Fill the `feed` block (the upstream endpoints are **not** shipped in the repo — see the
+   shape in `config.example.json`).
+4. Start the app (see **Running**) and open it; the first run shows a **Create admin** screen.
 
-```json
-{ "auth": { "passwordPepper": "PASTE_THE_GENERATED_VALUE_HERE" } }
-```
+### `config.json` reference
 
-Back up this value securely. The server refuses to start if it is missing or shorter than
-32 characters. Do not rotate or remove it without resetting every user password.
-
-## How to use
-
-```bash
-node backend/server.js
-```
-
-Then open **http://localhost:8787/** in your browser.
-
-On startup the server runs a self-test and prints whether it reached the data source, e.g.:
-
-```
-[NIFTY 50] level 24334.3 (+261.55, +1.09%)
-OK [NIFTY 50] - got 50 constituents (stamp: ...)
-```
-
-To use a different port:
-
-```bash
-PORT=9000 node backend/server.js     # then open http://localhost:9000/
-```
-
-Stop the server with **Ctrl-C**.
-
-> Live data flows only during market hours (Mon–Fri 09:15–15:30 IST). Outside those
-> hours the index cards still show the last close, but the constituents table will be
-> empty until the market opens - this is expected.
-
-## Data source
-
-The upstream endpoints aren't shipped in the repo — the base host, index endpoint,
-referer, and warmup paths live in `config.json`'s **`feed`** block (copy
-`config.example.json` → `config.json` and fill them in). One call per index returns the
-index **level** + **all** constituents (full 100 for MIDCAP 100) with
-Open/High/Low/LTP/Prev/Change/Volume/Turnover/52-week, advance-decline, and market status.
-The server serves the merged-by-index result at `/api/indices`.
-
-## Alerts
-
-Switch to the **Alerts** view (header toggle) to set price alerts per index. They are
-evaluated **on the server** during market hours, so they fire **even with no browser
-tab open**.
-
-Click **New alert** (or a row's **Edit**) to open the create/edit **modal**. Create an
-alert with (all required): **Index**, **Stock** (searchable), **Side**
-(Buy/Sell), **Alert price**, **Stop loss**, **Note**, **Zone creator**, and **Time
-frame** (1s…12mo). **Candle date & time are optional** - recorded with the alert (shown
-in the notification) but they don't affect firing. The trigger preview only appears once
-side + alert price + time frame are chosen.
-
-**The alert price is your entry; the trigger is offset% away, and re-alerts step back
-toward it.** BUY trigger = alert price **+ offset%** (above); SELL trigger = alert price
-**− offset%** (below). The **offset % depends on the time frame** — anchored at **2h =
-10%**, scaling down for shorter frames (1m = 0.5%, 15m = 3%, 1h = 7%) and up for longer
-(1d = 20%). The re-alert step is **0.5% for 1m–15m**, else offset ÷ 5.
-
-**Lifecycle: `armed → triggered → active → closed`.** How it fires (Buy, alert ₹1,000,
-**15m** → +3% → trigger ₹1,030):
-
-- **Trigger** when price rises to ₹1,030 (a Sell triggers when it falls to its trigger below).
-- **Re-alert** every step% as price moves **back toward your alert price**.
-- **Entry** (🎯) when the price **touches your alert price** (₹1,000) — the alert becomes
-  **active**. This is the gate: **targets and stop-loss are only tracked after entry**, so a
-  price that's already near a target when you create the alert can't fire a false Partial.
-- **Re-anchor**: if the live price is already **between** your alert price and the trigger
-  at creation, the trigger is set to the **current price**.
-
-**Profit targets & zone outcome** (tracked **only after entry**). From R = |alert − stop
-loss|, it computes **3× and 5× targets** (profit = 3R / 5R). Live: **Partial** at 3×,
-**Success** at 5×, **Fail** if the stop loss is hit first. **Success and Fail auto-close**
-the alert (no manual step); if it hits **3× then the stop loss**, it closes but **keeps the
-Partial** result. Entry/Partial/Success/Fail are quiet notifications; only Trigger/Re-alert
-ring with **Snooze / Close**. If the price is already past your entry when you create an
-alert, the form asks you to confirm (it'll start already-entered).
-
-Every fire also lands in the **notification center** (bell icon in the top bar) with
-read/unread state; it persists until you snooze/close/dismiss. Closed alerts move to an
-**archive** — the alerts list shows active alerts by default, with a **Show archived**
-toggle to review past ones. Each alert records **Created / Updated / Last fired** metadata
-(in its detail modal, opened by clicking a row).
-
-Every alert starts **Pending** and is not evaluated until an editor or admin approves it.
-Editors and admins can approve or reject any alert with a required review reason. The list
-shows **all indices together** (each row tagged with its index — no index tabs); filter it with **multi-select**
-dropdowns — **index**, **status**, **side**, **time frame**, **review**, **outcome** —
-pick any combination; active selections appear as removable **chips** (with Clear all).
-
-The **index list and stock list are dynamic** - alerts cover every dashboard index
-automatically, and each index's stock list is refreshed from the data source on every
-market tick (so it stays current each trading day). Add an index to `alerts.INDICES` and
-it appears in both the dashboard and the alert picker.
-
-### Telegram (optional)
-
-Notifications reach you with no tab open. Create `config.json` at the repo root:
-
-```json
+```jsonc
 {
-  "telegram": {
-    "botToken": "123456:ABC...",
-    "botUsername": "ZoneTrackerAlertBot"
-  }
+  "auth":    { "passwordPepper": "<64-hex from openssl rand -hex 32>" },   // REQUIRED
+  "feed": {                                                                // REQUIRED
+    "base": "https://<data-source-host>",
+    "indicesEndpoint": "/…?symbol=",       // open-session constituents
+    "preopenEndpoint": "/…?key=",          // pre-open auction + order book (09:00–09:15)
+    "referer": "/…",
+    "warmupPaths": ["/", "/…"],            // paths hit to warm the anti-bot session
+    "stream": { … }                        // optional: live WS feed (see config.example.json)
+  },
+  "mongo":    { "uri": "mongodb+srv://…" },                                // OPTIONAL (Atlas)
+  "telegram": { "botToken": "…", "botUsername": "…" }                      // OPTIONAL
 }
 ```
 
-Get the token and username from **@BotFather**. Each signed-in user opens **Telegram
-settings** and selects **Create connection link**, then **Open Telegram and connect**.
-Telegram opens **@ZoneTrackerAlertBot**; after the user taps **Start**, the bot confirms the
-linked application account. Send the copyable `/link CODE` fallback to
-**@ZoneTrackerAlertBot** if the direct link does not open. Link codes are single-use and
-expire after ten minutes. Eligible events are queued independently for every enabled linked
-user. Without this configuration, alerts remain **in-page only**.
+`config.json` is gitignored and holds live secrets. Only `config.example.json` (the
+template) is tracked.
 
-## Alert storage (local file or MongoDB Atlas)
+### Environment variables
 
-By default alerts persist to **`store/alerts.json`** (local, no setup). To share alerts **across
-devices**, point it at **MongoDB Atlas**: `npm install`, then add a `mongo.uri` to
-`config.json`:
+Runtime toggles and the LLM config are **environment variables**, not `config.json`:
 
-```json
-{ "mongo": { "uri": "mongodb+srv://USER:PASS@cluster0.xxxx.mongodb.net/trading_tracker" } }
+| Variable | Purpose |
+|---|---|
+| `PORT` | HTTP port (default `8787`). |
+| `STREAM_WS=1` | Enable the live WebSocket feed (needs `feed.stream`); serves SSE at `/api/stream`. Off = REST polling. |
+| `ALERTS_NO_TICK=1` | Serve UI + APIs but **don't** evaluate alerts (no fires / no Telegram). Also disables Telegram polling. |
+| `TELEGRAM_DISABLED=1` | Disable Telegram polling on this instance (run secondary instances with this so only one polls the bot). |
+| `MARKET_CAPTURE=1` | Log every `marketStatus` transition + a raw sample to `logs/market-capture-<date>.jsonl` (for documenting pre/open/post-market shapes). |
+| `LLM_PROVIDER` | `openai` \| `anthropic` \| `gemini` (LLM feature is off until set). |
+| `LLM_API_KEY` | Provider key. **Feature stays dormant with no key.** |
+| `LLM_MODEL` | Optional (defaults per provider). |
+| `LLM_TEMPERATURE`, `LLM_MAX_TOKENS` | Optional. |
+| `LLM_ENABLED=false` | Force the LLM off even if a key is set. |
+
+---
+
+## Running
+
+Cross-platform (macOS / Windows / Linux) via npm scripts or the `run.js` launcher — no
+shell-specific env syntax needed:
+
+```bash
+npm start              # normal run                → http://localhost:8787/
+npm run live           # live WS feed + market capture
+npm run stream         # live WS feed only
+npm run capture        # market-status capture only
+npm run closed         # no alert evaluation (ALERTS_NO_TICK)
 ```
 
-It uses separate collections for alerts, archived alerts, immutable events, per-user
-notification receipts, Telegram deliveries, processed operation IDs, and tombstones. It
-**always also writes local cache files** and appends offline mutations to durable outboxes.
-When Atlas returns, operations replay idempotently instead of replacing entire collections.
-At startup it makes one connection attempt followed by three retries
-at three-second intervals before falling back, so the app never blanks. The startup log
-shows `store: mongo` or `store: file`. Only the final exhausted connection failure, plus
-write or Telegram failures, is logged (dated, IST) to **`logs/alerts-errors.log`**.
+Or call the launcher directly with flags (identical on every OS):
 
-Set **`ALERTS_NO_TICK=1`** to run the server without evaluating alerts (serves the UI +
-APIs with no alert fires or Telegram delivery); handy for local inspection.
-
-## Files
-
-```
-backend/   server.js  · alerts.js · auth.js · telegram.js · durable-outbox.js
-frontend/  index.html · css/{base,components,dashboard,alerts,auth}.css
-           js/{main,dashboard,alerts-ui,auth-ui}.js
-store/     (gitignored) alerts.json · users.json · telegram.json · *-outbox.json
-root       package.json · package-lock.json   +  (gitignored) config.json · logs/
+```bash
+node run.js --stream --capture --port=9000
+node run.js --no-tick          # ALERTS_NO_TICK
+node run.js --no-telegram      # TELEGRAM_DISABLED
 ```
 
-- `backend/server.js` - zero-dependency Node proxy: warms the session, serves `frontend/`
-  statically, gates `/api/*` behind auth, runs the alert eval loop. Run: `node backend/server.js`.
-- `backend/alerts.js` - alert engine, versioned state, events, and notification receipts.
-- `backend/telegram.js` - account linking, long polling, delivery queue, and retries.
-- `backend/auth.js` - user accounts (scrypt), sessions, roles (admin/editor/viewer).
-- `frontend/index.html` - markup only; loads `css/*` and `js/main.js` (native ES modules,
-  no build step). `js/`: `main` (entry) + `dashboard`, `alerts-ui`, `auth-ui`.
-- `package.json` (root) - only the optional `mongodb` driver (needed just for Atlas).
-- `config.json` (root, gitignored) - feed endpoints, Mongo URI, auth pepper, and bot settings.
+On Windows you can also double-click / run **`run.cmd`** (passes flags through). macOS/Linux
+users can use **`run.sh`**.
+
+To enable the LLM later, set its env vars, e.g.:
+
+```bash
+LLM_PROVIDER=gemini LLM_API_KEY=<key> LLM_MODEL=gemini-2.5-flash node run.js
+# Windows PowerShell:
+#   $env:LLM_PROVIDER="gemini"; $env:LLM_API_KEY="<key>"; node run.js
+```
+
+Startup connects to storage in parallel and runs the data-source self-test in the
+background, so the server is reachable in ~2s. Stop with **Ctrl-C**.
+
+---
+
+## Market hours & data
+
+Live data flows **Mon–Fri, IST**: pre-open **09:00–09:15**, continuous session
+**09:15–15:30**; otherwise **closed** (weekends included). Off-hours the index cards show the
+**last close** and the constituents table is empty until the market opens — this is expected.
+
+- The **order book / depth** is available **only during pre-open** (in the stock detail
+  modal). The continuous-session feed and the WS stream carry no per-stock depth.
+- `/api/indices` returns each index's level + all constituents (OHLC, LTP, prev close,
+  change, volume, turnover, 52-week, advance/decline, market status).
+
+---
+
+## Storage (local file or MongoDB Atlas)
+
+By default everything persists to local files in **`store/`** (no setup). To share data
+**across devices**, add `mongo.uri` to `config.json` and run `npm install`. It always also
+writes the local cache files and replays offline changes idempotently when Atlas returns, so
+the app never blanks. Startup logs show `store: mongo` or `store: file`.
+
+**Connecting from another device / network:**
+
+- **`querySrv ECONNREFUSED …mongodb.net`** = the network's DNS can't resolve the
+  `mongodb+srv://` SRV record. Fix by switching that device's DNS to `1.1.1.1` / `8.8.8.8`,
+  **or** use Atlas's **standard (non-SRV) connection string** (`mongodb://host1,host2,host3/…`)
+  in `mongo.uri`.
+- If you get a *connection timeout* instead, either the **IP isn't allow-listed** in Atlas
+  (Network Access → add your IP or `0.0.0.0/0`) or outbound **port 27017** is blocked on that
+  network.
+
+---
+
+## Alerts (summary)
+
+Set price alerts per index (or from a stock's detail modal). Alerts are evaluated **on the
+server** during market hours, so they fire with no tab open.
+
+- Fields: index, stock, side (Buy/Sell), **entry price**, stop loss, note, **time frame**
+  (1s…12mo). The **trigger** sits offset% away from entry (offset scales with the time frame);
+  re-alerts step back toward entry.
+- Lifecycle **armed → triggered → active → closed**. **Entry** (touching the entry price) is
+  the gate — profit targets (3×/5×) and stop-loss are tracked only after entry. Success/Fail
+  auto-close.
+- **Review gate:** every alert starts *raw* and only fires once an editor/admin **approves**
+  it (with a reason); rejected alerts stay silent except terminal outcomes.
+- Fires reach the in-page **notification center** (bell) and, if configured, **Telegram**.
+  Filter the list by index / status / side / time frame / review / outcome; closed alerts move
+  to an archive.
+
+### Telegram (optional)
+
+Add `telegram.botToken` + `botUsername` (from **@BotFather**) to `config.json`. Each user
+opens **Telegram settings → Create connection link** and connects the bot; link codes are
+single-use and expire in 10 minutes. Without this, alerts are **in-page only**. Run only
+**one** instance with Telegram enabled (others with `TELEGRAM_DISABLED=1`) — Telegram allows
+one poller per bot.
+
+---
+
+## Trades & Reports (summary)
+
+- **Trades** — log each trade manually: type (intraday/swing), symbol, side, qty, entry
+  price/date/time, and later exit + charges to close it. P&L (gross/net/%, R-multiple,
+  holding period) is derived. Filter by type/status/side/date; edit/delete is creator-scoped.
+- **Reports** — analytics computed from your closed trades: equity curve, per-period P&L
+  (daily/weekly/monthly), win rate, profit factor, expectancy, max drawdown, avg R,
+  best/worst trades, and a by-strategy breakdown. Segment by intraday/swing.
+
+---
+
+## Roles & security
+
+Roles: **admin** (users + alerts + trades), **editor** (alerts + trades), **viewer**
+(read-only). Passwords use scrypt + a per-user salt + the config pepper; sessions are
+in-memory HttpOnly cookies (12h idle). Every `/api/*` needs a session; writes need
+editor/admin; non-GET requires an `X-Requested-With` header (CSRF).
+
+---
+
+## Logging
+
+Errors/warnings/info are written to a **daily-rotating** file `logs/<YYYY-MM-DD>.log`
+(IST), pruned after 14 days. Persistence/connection/Telegram failures are logged there and
+echoed to the console.
+
+---
+
+## Project layout
+
+```
+backend/   server.js        HTTP server, data-source proxy, market state, /api/*
+           alerts.js         alert engine + storage + Telegram sender
+           trades.js         manual trade journal engine + storage + P&L
+           auth.js           users, sessions, roles (scrypt)
+           telegram.js       account linking, polling, durable delivery
+           llm.js            provider-agnostic LLM analysis (env-configured)
+           stream.js         live WebSocket feed client (STREAM_WS)
+           logger.js         daily-rotating logger
+           utils.js          IST time helpers
+           mongo-retry.js · durable-outbox.js · alert-policy.js
+frontend/  index.html        markup only; loads css/* + js/main.js (ES modules, no build)
+           css/  base · system · components · dashboard · alerts · trades · reports · market · auth
+           js/   main · dashboard · overview-ui · market-ui · alerts-ui · trades-ui
+                 reports-ui · shell-ui · auth-ui
+store/     (gitignored) alerts.json · users.json · trades.json · telegram.json · *-outbox.json
+root       package.json · run.js · run.cmd · run.sh
+           (gitignored) config.json · logs/
+```
+
+---
 
 ## Notes / limitations
 
-- Data is **unofficial** (scraped from a public market site) - for personal/informational
-  use, not trading decisions.
-- Intended to run **locally**. Hosting the live proxy on the free cloud tiers is
-  unreliable because the data source tends to block datacentre IPs.
+- Data is **unofficial** (a public market source) — for personal/informational use, not
+  trading decisions.
+- Intended to run **locally**. Free cloud tiers are unreliable here because the data source
+  blocks datacentre IPs.
