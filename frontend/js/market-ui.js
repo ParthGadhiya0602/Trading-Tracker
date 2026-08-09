@@ -215,7 +215,7 @@
         const rowCls = rank === 1 ? "down-row" : rank === -1 ? "up-row" : "";
         const dot = rank === 1 ? "down" : rank === -1 ? "up" : "flat";
         return (
-          '<tr class="' + rowCls + '">' +
+          '<tr class="mw-row ' + rowCls + '" data-symbol="' + esc(r.symbol) + '" tabindex="0" aria-label="Open ' + esc(r.symbol) + ' details">' +
           '<td class="col-symbol"><span class="dotmark ' + dot + '"></span><strong>' + esc(r.symbol) + "</strong></td>" +
           '<td class="col-ltp num">' + rs(r.lastPrice) + "</td>" +
           '<td class="col-open num">' + rs(r.open) + "</td>" +
@@ -261,6 +261,27 @@
       if (!seg || !cache) return;
       mwIndex = seg.dataset.index;
       render(); // cache already holds all indices
+    });
+    // row -> shared stock detail modal (details + pre-open order book + tabs)
+    const openStock = (sym) => {
+      if (!cache || !mwIndex || !window.__openStock) return;
+      const row = ((cache[mwIndex] && cache[mwIndex].data) || []).find((r) => r.symbol === sym);
+      if (!row) return;
+      const o = Number(row.open);
+      window.__openStock({
+        ...row,
+        ohPct: o > 0 ? ((Number(row.dayHigh) - o) / o) * 100 : null,
+        olPct: o > 0 ? ((Number(row.dayLow) - o) / o) * 100 : null,
+      });
+    };
+    $("#mwBody").addEventListener("click", (e) => {
+      const tr = e.target.closest("tr[data-symbol]");
+      if (tr) openStock(tr.dataset.symbol);
+    });
+    $("#mwBody").addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      const tr = e.target.closest("tr[data-symbol]");
+      if (tr) openStock(tr.dataset.symbol);
     });
     $("#mwFilterSeg").addEventListener("click", (e) => {
       const seg = e.target.closest(".seg");

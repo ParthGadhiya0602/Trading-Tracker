@@ -1324,3 +1324,6 @@
       }
       // started by the auth controller once the user is signed in (see #authOverlay script)
       window.__initDash = init;
+      // expose the shared stock detail modal (details + pre-open order book +
+      // Alerts + AI Analysis tabs) so other views (Market Watch) can open it
+      window.__openStock = openStockModal;

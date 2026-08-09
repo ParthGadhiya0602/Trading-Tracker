@@ -139,3 +139,12 @@
     max-height: 100%;
   }
 }
+
+/* constituents rows open the shared stock detail modal */
+#mwTable tbody tr.mw-row {
+  cursor: pointer;
+}
+#mwTable tbody tr.mw-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
