@@ -79,4 +79,18 @@ function logInfo(scope, msg) {
   return write("INFO", scope, msg);
 }
 
-module.exports = { logError, logWarn, logInfo, LOG_DIR };
+// De-duplicated error: logs only when the message CHANGES for a given scope, so a
+// chronic failure (e.g. a 15s reconnect loop against a down DB) produces one line,
+// not one every retry. Call resetErrorOnce(scope) on recovery to re-arm logging.
+const _lastByScope = {};
+function logErrorOnce(scope, err) {
+  const msg = err && err.message ? err.message : String(err == null ? "" : err);
+  if (_lastByScope[scope] === msg) return null; // suppress repeat
+  _lastByScope[scope] = msg;
+  return logError(scope, err);
+}
+function resetErrorOnce(scope) {
+  delete _lastByScope[scope];
+}
+
+module.exports = { logError, logWarn, logInfo, logErrorOnce, resetErrorOnce, LOG_DIR };

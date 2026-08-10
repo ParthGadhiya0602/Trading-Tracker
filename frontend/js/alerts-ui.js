@@ -669,6 +669,29 @@
               ),
             );
           }
+          // shortcut: log a trade from this alert (prefilled symbol/side/entry/stop)
+          if (canCreate() && window.openCreateTrade)
+            acts.appendChild(
+              btn(
+                "Create trade",
+                "btn-sm primary",
+                () => {
+                  closeAlertView();
+                  const today = new Date().toLocaleDateString("en-CA", {
+                    timeZone: "Asia/Kolkata",
+                  });
+                  window.openCreateTrade({
+                    symbol: a.symbol,
+                    index: a.index,
+                    side: a.side,
+                    entryPrice: a.alertPrice,
+                    stopLoss: a.stopLoss,
+                    entryDate: today,
+                  });
+                },
+                "notebook-pen",
+              ),
+            );
           if (!acts.children.length)
             acts.innerHTML =
               `<span class="av-readonly">View access only for this alert.</span>`;
@@ -917,7 +940,8 @@
               `</div>` +
               `<div class="ai-levels">` +
               `<span class="ai-metric"><small>Entry</small><strong>${fmtRs(a.alertPrice)}</strong></span>` +
-              `<span class="ai-metric trigger"><small>Trigger</small><strong>${fmtRs(a.triggerPrice)}</strong></span>` +
+              `<span class="ai-metric current"><small>Current</small><strong data-cur="${esc(a.symbol)}">${fmtRs(a.currentPrice)}</strong></span>` +
+              `<span class="ai-metric trigger"><small>Alert</small><strong>${fmtRs(a.triggerPrice)}</strong></span>` +
               `<span class="ai-metric stop"><small>Stop loss</small><strong>${fmtRs(a.stopLoss)}</strong></span>` +
               `</div>` +
               `<div class="ai-plan">` +
@@ -958,7 +982,18 @@
             host.appendChild(div);
           }
           drawIcons();
+          updateCurrentCells(); // seed freshly-rendered rows with the live price
         }
+        // Live "Current" price: tick the alert-list Current cells off the dashboard's
+        // market cache (fed by SSE in stream mode). Falls back to the fetched value.
+        function updateCurrentCells() {
+          if (!window.__livePrice) return;
+          document.querySelectorAll("#alertList strong[data-cur]").forEach((el) => {
+            const p = window.__livePrice(el.getAttribute("data-cur"));
+            if (p != null) el.textContent = fmtRs(p);
+          });
+        }
+        if (window.__onLive) window.__onLive(updateCurrentCells);
         $("#alertList").addEventListener("click", (event) => {
           const row = event.target.closest(".alert-item");
           const alert = row && listedAlerts.get(row.dataset.alertId);

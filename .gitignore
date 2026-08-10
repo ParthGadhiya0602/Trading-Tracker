@@ -1,5 +1,8 @@
-# Secrets & local config (keep config.example.json tracked)
+# Secrets & local config (keep config.example.json / .env.sample tracked)
 config.json
+.env
+.env.*
+!.env.sample
 
 # Runtime / generated data
 store/*

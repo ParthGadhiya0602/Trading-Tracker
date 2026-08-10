@@ -101,6 +101,32 @@
       let cache = null, // { "NIFTY 50": {...}, "NIFTY NEXT 50": {...} }
         lastGoodAt = 0,
         timer = null;
+      // ---- live-price bridge: let other views (Alerts) read live prices + subscribe ----
+      // dashboard.js owns the market cache (SSE + poll); expose a read + a pub/sub so the
+      // alert list can tick its "Current" cell without its own feed.
+      const liveSubs = new Set();
+      function livePrice(symbol) {
+        if (!cache) return null;
+        for (const idx in cache) {
+          const d = cache[idx] && cache[idx].data;
+          if (!d) continue;
+          const r = d.find((x) => x.symbol === symbol);
+          if (r && r.lastPrice != null) return r.lastPrice;
+        }
+        return null;
+      }
+      function emitLive() {
+        for (const cb of liveSubs) {
+          try {
+            cb();
+          } catch (_) {}
+        }
+      }
+      window.__livePrice = livePrice;
+      window.__onLive = (cb) => {
+        liveSubs.add(cb);
+        return () => liveSubs.delete(cb);
+      };
       // ---------- live stream (SSE) state ----------
       let streamLive = false, // true once a snapshot/patch has been applied
         es = null; // EventSource handle
@@ -796,6 +822,7 @@
           });
           body.appendChild(tr);
         }
+        emitLive(); // notify subscribers (alert list) that live prices refreshed
       }
       const tableBody = document.getElementById("body");
       tableBody.addEventListener("click", (event) => {

@@ -25,8 +25,10 @@ mobile. Light/dark follow the system theme.
 
 ## Requirements
 
-- **Node.js 18+** (needs built-in `fetch`). Check: `node --version`.
-- A `config.json` (gitignored) with the **feed endpoints** and an **auth pepper** (below).
+- **Node.js 18+** (needs built-in `fetch`; **20.6+** to use `--env-file`). Check: `node --version`.
+- **Environment variables** for all config (see `.env.sample`): `AUTH_PASSWORD_PEPPER` + `FEED_JSON`
+  are required; `MONGO_URI` / Telegram / LLM are optional. There is **no config file** — nothing
+  secret gets committed or uploaded.
 - A network the data source answers on — home/office broadband is fine; VPN/datacentre IPs
   are often blocked (HTTP 401/403).
 - `npm install` **only if** you want MongoDB Atlas storage (the `mongodb` driver). File mode
@@ -36,57 +38,51 @@ mobile. Light/dark follow the system theme.
 
 ## Setup
 
-1. Copy the template and fill it in:
+1. Copy the sample and fill it in:
    ```bash
-   cp config.example.json config.json
+   cp .env.sample .env
    ```
-2. Generate the required auth pepper (server refuses to start without it, min 32 chars):
+2. Generate the required auth pepper (server refuses to start without it, min 32 chars) and
+   put it in `.env` → `AUTH_PASSWORD_PEPPER`:
    ```bash
    openssl rand -hex 32
    ```
-   Put it in `config.json` → `auth.passwordPepper`. Back it up; don't rotate it without
-   resetting every user's password.
-3. Fill the `feed` block (the upstream endpoints are **not** shipped in the repo — see the
-   shape in `config.example.json`).
-4. Start the app (see **Running**) and open it; the first run shows a **Create admin** screen.
-
-### `config.json` reference
-
-```jsonc
-{
-  "auth":    { "passwordPepper": "<64-hex from openssl rand -hex 32>" },   // REQUIRED
-  "feed": {                                                                // REQUIRED
-    "base": "https://<data-source-host>",
-    "indicesEndpoint": "/…?symbol=",       // open-session constituents
-    "preopenEndpoint": "/…?key=",          // pre-open auction + order book (09:00–09:15)
-    "referer": "/…",
-    "warmupPaths": ["/", "/…"],            // paths hit to warm the anti-bot session
-    "stream": { … }                        // optional: live WS feed (see config.example.json)
-  },
-  "mongo":    { "uri": "mongodb+srv://…" },                                // OPTIONAL (Atlas)
-  "telegram": { "botToken": "…", "botUsername": "…" }                      // OPTIONAL
-}
-```
-
-`config.json` is gitignored and holds live secrets. Only `config.example.json` (the
-template) is tracked.
+   Back it up; don't rotate it without resetting every user's password.
+3. Set **`FEED_JSON`** in `.env` — the data-source `feed` block as **one-line JSON**
+   (`base`, `indicesEndpoint`, `preopenEndpoint`, `referer`, `warmupPaths`, optional `stream`).
+   The endpoints aren't shipped in the repo.
+4. (Optional) Set `MONGO_URI` (Atlas), `TELEGRAM_BOT_TOKEN`, `LLM_*`.
+5. Start the app (see **Running**) and open it; the first run shows a **Create admin** screen.
 
 ### Environment variables
 
-Runtime toggles and the LLM config are **environment variables**, not `config.json`:
+**Secrets / config (all via env):**
+
+| Variable | Purpose |
+|---|---|
+| `AUTH_PASSWORD_PEPPER` | **Required** (>= 32 chars, `openssl rand -hex 32`). Replaces `auth.passwordPepper`. |
+| `MONGO_URI` | MongoDB Atlas connection string (omit for local file storage). Replaces `mongo.uri`. |
+| `FEED_JSON` | The whole `feed` block as **one-line JSON** — the data-source endpoints. |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_BOT_USERNAME` | Telegram bot (optional). Replace `telegram.*`. |
+| `LLM_PROVIDER` / `LLM_API_KEY` / `LLM_MODEL` / `LLM_TEMPERATURE` / `LLM_MAX_TOKENS` | LLM analysis (dormant without a key). `LLM_ENABLED=false` forces off. |
+
+**Runtime toggles:**
 
 | Variable | Purpose |
 |---|---|
 | `PORT` | HTTP port (default `8787`). |
+| `HOST` | Bind address (default `127.0.0.1`). Set `0.0.0.0` to accept external connections directly (e.g. an EC2 security group). |
 | `STREAM_WS=1` | Enable the live WebSocket feed (needs `feed.stream`); serves SSE at `/api/stream`. Off = REST polling. |
+| `STORE_REFRESH_SECONDS` | Market-hours background refresh cadence for the store (default `3`). |
 | `ALERTS_NO_TICK=1` | Serve UI + APIs but **don't** evaluate alerts (no fires / no Telegram). Also disables Telegram polling. |
 | `TELEGRAM_DISABLED=1` | Disable Telegram polling on this instance (run secondary instances with this so only one polls the bot). |
-| `MARKET_CAPTURE=1` | Log every `marketStatus` transition + a raw sample to `logs/market-capture-<date>.jsonl` (for documenting pre/open/post-market shapes). |
-| `LLM_PROVIDER` | `openai` \| `anthropic` \| `gemini` (LLM feature is off until set). |
-| `LLM_API_KEY` | Provider key. **Feature stays dormant with no key.** |
-| `LLM_MODEL` | Optional (defaults per provider). |
-| `LLM_TEMPERATURE`, `LLM_MAX_TOKENS` | Optional. |
-| `LLM_ENABLED=false` | Force the LLM off even if a key is set. |
+| `MARKET_CAPTURE=1` | Log every `marketStatus` transition + a raw sample to `logs/market-capture-<date>.jsonl`. |
+
+**Deploy with no config file:** set `AUTH_PASSWORD_PEPPER` + `FEED_JSON` (+ `MONGO_URI` / Telegram / LLM as needed), then either load a `.env` natively —
+```bash
+node --env-file=.env run.js      # Node 20.6+
+```
+— or export the vars in your process manager (pm2 env / systemd `Environment=`).
 
 ---
 
@@ -143,7 +139,7 @@ Live data flows **Mon–Fri, IST**: pre-open **09:00–09:15**, continuous sessi
 ## Storage (local file or MongoDB Atlas)
 
 By default everything persists to local files in **`store/`** (no setup). To share data
-**across devices**, add `mongo.uri` to `config.json` and run `npm install`. It always also
+**across devices**, set `MONGO_URI` and run `npm install`. It always also
 writes the local cache files and replays offline changes idempotently when Atlas returns, so
 the app never blanks. Startup logs show `store: mongo` or `store: file`.
 
@@ -152,7 +148,7 @@ the app never blanks. Startup logs show `store: mongo` or `store: file`.
 - **`querySrv ECONNREFUSED …mongodb.net`** = the network's DNS can't resolve the
   `mongodb+srv://` SRV record. Fix by switching that device's DNS to `1.1.1.1` / `8.8.8.8`,
   **or** use Atlas's **standard (non-SRV) connection string** (`mongodb://host1,host2,host3/…`)
-  in `mongo.uri`.
+  as `MONGO_URI`.
 - If you get a *connection timeout* instead, either the **IP isn't allow-listed** in Atlas
   (Network Access → add your IP or `0.0.0.0/0`) or outbound **port 27017** is blocked on that
   network.
@@ -178,7 +174,7 @@ server** during market hours, so they fire with no tab open.
 
 ### Telegram (optional)
 
-Add `telegram.botToken` + `botUsername` (from **@BotFather**) to `config.json`. Each user
+Set `TELEGRAM_BOT_TOKEN` + `TELEGRAM_BOT_USERNAME` (from **@BotFather**) in the env. Each user
 opens **Telegram settings → Create connection link** and connects the bot; link codes are
 single-use and expire in 10 minutes. Without this, alerts are **in-page only**. Run only
 **one** instance with Telegram enabled (others with `TELEGRAM_DISABLED=1`) — Telegram allows
@@ -233,7 +229,7 @@ frontend/  index.html        markup only; loads css/* + js/main.js (ES modules, 
                  reports-ui · shell-ui · auth-ui
 store/     (gitignored) alerts.json · users.json · trades.json · telegram.json · *-outbox.json
 root       package.json · run.js · run.cmd · run.sh
-           (gitignored) config.json · logs/
+           (gitignored) .env · logs/
 ```
 
 ---

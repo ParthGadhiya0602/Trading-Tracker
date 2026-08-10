@@ -25,4 +25,12 @@ function istLogTs() {
   return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second} IST`;
 }
 
-module.exports = { istNow, istFromMs, istLogTs };
+// Boolean env flag: on for any value EXCEPT unset / "" / "0" / "false" / "no" / "off"
+// (case-insensitive). So FLAG=1 -> on, FLAG=0/false -> off, unset -> off.
+function envFlag(v) {
+  if (v == null) return false;
+  const s = String(v).trim().toLowerCase();
+  return !(s === "" || s === "0" || s === "false" || s === "no" || s === "off");
+}
+
+module.exports = { istNow, istFromMs, istLogTs, envFlag };

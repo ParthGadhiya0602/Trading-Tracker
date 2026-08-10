@@ -4,13 +4,13 @@ const fs = require("fs");
 const path = require("path");
 const { connectMongoWithRetry } = require("./mongo-retry");
 const { DurableOutbox } = require("./durable-outbox");
-const { istNow, istFromMs } = require("./utils");
+const { istNow, istFromMs, envFlag } = require("./utils");
+const { logErrorOnce, resetErrorOnce } = require("./logger");
 
 const ROOT = path.join(__dirname, "..");
 const STORE_DIR = path.join(ROOT, "store");
 const STORE_FILE = path.join(STORE_DIR, "telegram.json");
 const OUTBOX_FILE = path.join(STORE_DIR, "telegram-outbox.json");
-const CONFIG_FILE = path.join(ROOT, "config.json");
 const MAX_ATTEMPTS = 6;
 const WORKER_MS = 1000;
 const DEFAULT_BOT_USERNAME = "ZoneTrackerAlertBot";
@@ -29,28 +29,26 @@ let reconnecting = false;
 let polling = false;
 let logError = () => {};
 let onUserChange = () => {};
+let isMarketOpen = () => true; // gate getUpdates polling to market hours (set in load)
+let pollBackoffMs = 1000; // grows on repeated poll errors (e.g. bad token), caps at 60s
 
 const outbox = new DurableOutbox(OUTBOX_FILE, {
   logError: (scope, error) => logError(scope, error),
 });
 
 function readConfig() {
-  if (process.env.TELEGRAM_DISABLED || process.env.ALERTS_NO_TICK) return null;
-  try {
-    const parsed = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
-    const telegram = parsed && parsed.telegram;
-    if (!telegram || !telegram.botToken) return null;
-    return {
-      botToken: String(telegram.botToken).trim(),
-      botUsername: String(telegram.botUsername || DEFAULT_BOT_USERNAME)
-        .replace(/^@/, "")
-        .trim(),
-      mongoUri:
-        parsed.mongo && parsed.mongo.uri ? String(parsed.mongo.uri).trim() : "",
-    };
-  } catch (_) {
+  if (envFlag(process.env.TELEGRAM_DISABLED) || envFlag(process.env.ALERTS_NO_TICK))
     return null;
-  }
+  // env only (TELEGRAM_BOT_TOKEN / TELEGRAM_BOT_USERNAME / MONGO_URI)
+  const botToken = String(process.env.TELEGRAM_BOT_TOKEN || "").trim();
+  if (!botToken) return null;
+  return {
+    botToken,
+    botUsername: String(process.env.TELEGRAM_BOT_USERNAME || DEFAULT_BOT_USERNAME)
+      .replace(/^@/, "")
+      .trim(),
+    mongoUri: String(process.env.MONGO_URI || "").trim(),
+  };
 }
 
 function readStore() {
@@ -146,11 +144,12 @@ async function reconnectMongo() {
     );
     await outbox.drain();
     backend = "mongo";
+    resetErrorOnce("telegram.mongo.reconnect");
     console.log("  Telegram: MongoDB connection restored; pending deliveries synced");
   } catch (error) {
     backend = "file";
     outbox.setProcessor(null);
-    logError("telegram.mongo.reconnect", error);
+    logErrorOnce("telegram.mongo.reconnect", error); // log once per outage
   } finally {
     reconnecting = false;
   }
@@ -166,6 +165,7 @@ async function load(options = {}) {
   auth = options.auth;
   logError = options.logError || logError;
   onUserChange = options.onUserChange || onUserChange;
+  isMarketOpen = options.isMarketOpen || isMarketOpen;
   config = readConfig();
   store = readStore();
   if (!config || !config.botToken) return "disabled";
@@ -373,7 +373,14 @@ function parseLinkCommand(text) {
 
 async function pollUpdates() {
   if (!configured() || polling) return;
+  // Only poll for inbound updates during market hours; recheck every 30s otherwise.
+  if (!isMarketOpen()) {
+    pollTimer = setTimeout(pollUpdates, 30_000);
+    if (pollTimer.unref) pollTimer.unref();
+    return;
+  }
   polling = true;
+  let ok = false;
   try {
     const updates = await telegramRequest("getUpdates", {
       offset: store.updateOffset,
@@ -386,11 +393,19 @@ async function pollUpdates() {
       queueOffset();
       saveStore();
     }
+    ok = true;
   } catch (error) {
-    logError("telegram.poll", error);
+    // dedupe (log once) + exponential backoff so a bad token can't spam every 1s
+    logErrorOnce("telegram.poll", error);
   } finally {
     polling = false;
-    pollTimer = setTimeout(pollUpdates, 1000);
+    if (ok) {
+      pollBackoffMs = 1000;
+      resetErrorOnce("telegram.poll");
+    } else {
+      pollBackoffMs = Math.min(60_000, pollBackoffMs * 2);
+    }
+    pollTimer = setTimeout(pollUpdates, pollBackoffMs);
     if (pollTimer.unref) pollTimer.unref();
   }
 }

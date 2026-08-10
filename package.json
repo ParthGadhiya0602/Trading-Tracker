@@ -4,12 +4,16 @@
   "private": true,
   "description": "NIFTY OHL dashboard + server-side price alerts (local data proxy)",
   "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
-    "start": "node run.js",
-    "live": "node run.js --stream --capture",
-    "stream": "node run.js --stream",
-    "capture": "node run.js --capture",
-    "closed": "node run.js --no-tick",
+    "start": "node --env-file-if-exists=.env run.js",
+    "live": "node --env-file-if-exists=.env run.js --stream --capture",
+    "stream": "node --env-file-if-exists=.env run.js --stream",
+    "capture": "node --env-file-if-exists=.env run.js --capture",
+    "closed": "node --env-file-if-exists=.env run.js --no-tick",
+    "prod": "node --env-file=.env backend/server.js",
     "deploy": "cloudflared tunnel --url http://127.0.0.1:8787/",
     "test": "node --test backend/*.test.js"
   },

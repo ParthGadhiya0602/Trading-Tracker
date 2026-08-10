@@ -2,11 +2,10 @@
 /**
  * Auth + user management for the Trading Tracker portal (ZERO dependencies).
  *
- * - Users live in a `users` collection (MongoDB Atlas, if `mongo.uri` is set in
- *   config.json and reachable) or the local `users.json` file (offline cache / fallback).
+ * - Users live in a `users` collection (MongoDB Atlas, if MONGO_URI is set and reachable) or the local `users.json` file (offline cache / fallback).
  *   Mirrors alerts.js: in-memory `store` is the source of truth; save() writes through.
  * - Passwords are hashed with the built-in `crypto.scrypt`, a per-user random salt, and
- *   a required secret pepper from config.json. Hashes are verified with
+ *   a required secret pepper (AUTH_PASSWORD_PEPPER env). Hashes are verified with
  *   `timingSafeEqual`; plaintext passwords and the pepper are never stored with users.
  * - Sessions are random 256-bit tokens kept in memory (cleared on restart), 12h idle TTL.
  *
@@ -19,12 +18,12 @@ const crypto = require("crypto");
 const { connectMongoWithRetry } = require("./mongo-retry");
 const { DurableOutbox } = require("./durable-outbox");
 const { istNow, istFromMs, istLogTs } = require("./utils");
+const { logErrorOnce, resetErrorOnce } = require("./logger");
 
 const ROOT = path.join(__dirname, ".."); // repo root (config lives here)
 const STORE_DIR = path.join(ROOT, "store"); // alert + user data files live here
 const STORE_FILE = path.join(STORE_DIR, "users.json");
 const OUTBOX_FILE = path.join(STORE_DIR, "auth-outbox.json");
-const CONFIG_FILE = path.join(ROOT, "config.json");
 const LOG_DIR = path.join(ROOT, "logs");
 const LOG_FILE = path.join(LOG_DIR, "alerts-errors.log");
 
@@ -90,20 +89,10 @@ function verifyPassword(password, salt, hash, pepper = passwordPepper) {
 // ---------- persistence (mirrors alerts.js) ----------
 function loadConfig() {
   passwordPepper = "";
-  let cfg;
-  try {
-    cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
-  } catch (error) {
-    throw new Error(`cannot read config.json: ${error.message}`);
-  }
-  const mongoUri =
-    cfg && cfg.mongo && cfg.mongo.uri ? String(cfg.mongo.uri).trim() : "";
-  const configuredPepper =
-    cfg && cfg.auth && cfg.auth.passwordPepper
-      ? String(cfg.auth.passwordPepper).trim()
-      : "";
+  const mongoUri = String(process.env.MONGO_URI || "").trim();
+  const configuredPepper = String(process.env.AUTH_PASSWORD_PEPPER || "").trim();
   if (configuredPepper.length < 32)
-    throw new Error("auth.passwordPepper must contain at least 32 characters");
+    throw new Error("AUTH_PASSWORD_PEPPER env must be set to >= 32 chars (openssl rand -hex 32)");
   passwordPepper = configuredPepper;
   return mongoUri;
 }
@@ -251,12 +240,13 @@ async function reconnectMongo() {
       },
     );
     backend = "mongo";
+    resetErrorOnce("auth.mongo.reconnect");
     await outbox.drain();
     console.log("  auth: MongoDB reconnected; durable outbox replayed");
   } catch (error) {
     backend = "file";
     outbox.setProcessor(null);
-    logError("auth.mongo.reconnect", error);
+    logErrorOnce("auth.mongo.reconnect", error); // log once per outage
   }
 }
 function startReconnectWorker() {

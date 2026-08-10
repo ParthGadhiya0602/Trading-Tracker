@@ -3,7 +3,7 @@
 /**
  * Provider-agnostic LLM pre-market analysis.
  *
- * Reads its own `llm` block from config.json (like telegram.js). During pre-open
+ * Reads LLM_* env vars. During pre-open
  * (09:00-09:15 IST) server.js fires analyze(payload) fire-and-forget; this module
  * batches the pre-open data into LLM prompts and caches per-stock signals
  * (bullish/bearish/neutral + confidence + reasoning) for the trading day.

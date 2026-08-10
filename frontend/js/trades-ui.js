@@ -724,8 +724,19 @@
     const tab = document.getElementById("view-tab-trades");
     if (tab) tab.click(); // switch to Trades via the existing viewnav wiring (runs __initTrades)
     bindOnce();
-    if (prefill && prefill.tradeType) trType = prefill.tradeType;
+    prefill = prefill || {};
+    if (prefill.tradeType) trType = prefill.tradeType;
     openTradeModal("create");
-    if (prefill && prefill.symbol) $("#tr-symbol").value = String(prefill.symbol).toUpperCase();
+    const set = (id, v) => {
+      const el = $(id);
+      if (el && v != null && v !== "") el.value = v;
+    };
+    if (prefill.symbol) set("#tr-symbol", String(prefill.symbol).toUpperCase());
+    if (prefill.side) set("#tr-f-side", prefill.side);
+    set("#tr-index", prefill.index);
+    set("#tr-entry", prefill.entryPrice);
+    set("#tr-stop", prefill.stopLoss);
+    set("#tr-target", prefill.target);
+    set("#tr-entry-date", prefill.entryDate);
   };
 })();

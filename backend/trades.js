@@ -18,13 +18,12 @@ const crypto = require("crypto");
 const { connectMongoWithRetry } = require("./mongo-retry");
 const { DurableOutbox } = require("./durable-outbox");
 const { istNow } = require("./utils");
-const { logError } = require("./logger");
+const { logError, logErrorOnce, resetErrorOnce } = require("./logger");
 
 const ROOT = path.join(__dirname, ".."); // repo root (config lives here)
 const STORE_DIR = path.join(ROOT, "store"); // alert + user data files live here
 const STORE_FILE = path.join(STORE_DIR, "trades.json");
 const OUTBOX_FILE = path.join(STORE_DIR, "trades-outbox.json");
-const CONFIG_FILE = path.join(ROOT, "config.json");
 
 const SCHEMA_VERSION = 1;
 const TRADE_TYPES = ["intraday", "swing"];
@@ -67,12 +66,8 @@ function pad2(hhmm) {
 
 // ---------- persistence (mirrors auth.js) ----------
 function loadConfig() {
-  try {
-    const cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
-    return cfg && cfg.mongo && cfg.mongo.uri ? String(cfg.mongo.uri).trim() : "";
-  } catch (_) {
-    return ""; // no/broken config -> file mode
-  }
+  // MONGO_URI env only; unset -> Mongo disabled (local file mode)
+  return String(process.env.MONGO_URI || "").trim();
 }
 function readFileStore() {
   try {
@@ -186,12 +181,13 @@ async function reconnectMongo() {
     });
     configureMongo(client.db(mongoDbName(mongoUri)));
     backend = "mongo";
+    resetErrorOnce("trades.mongo.reconnect");
     await outbox.drain();
     console.log("  trades: MongoDB reconnected; durable outbox replayed");
   } catch (error) {
     backend = "file";
     outbox.setProcessor(null);
-    logError("trades.mongo.reconnect", error);
+    logErrorOnce("trades.mongo.reconnect", error); // log once per outage
   }
 }
 function startReconnectWorker() {

@@ -8,7 +8,7 @@
  * headers. A browser cannot set those cross-origin, so this is a tiny Node server:
  * it warms an upstream session, then re-serves the JSON to our page from the SAME
  * origin (localhost). No CORS, no public proxy, live data. Endpoints come from
- * config.json's `feed` block (not shipped in the code).
+ * the FEED_JSON env var (the `feed` block as one-line JSON).
  *
  * Uses Node's built-in fetch (Node 18+) and a hand-rolled cookie jar - no npm install.
  *
@@ -28,22 +28,24 @@ const stream = require("./stream");
 const telegram = require("./telegram");
 const llm = require("./llm");
 const trades = require("./trades");
+const store = require("./market-store"); // single in-memory source of truth for market data
 const { logInfo, logWarn } = require("./logger");
-const { istNow } = require("./utils");
+const { istNow, envFlag } = require("./utils");
 const { ACTION, authorize } = require("./alert-policy");
 
-const HOST = "127.0.0.1";
+// Bind address: localhost by default (safe for tunnels / same-box reverse proxy).
+// Set HOST=0.0.0.0 to accept external connections directly (e.g. an EC2 security group).
+const HOST = process.env.HOST || "127.0.0.1";
 const PORT = Number(process.env.PORT || 8787);
 const HERE = __dirname;
 
-// Data-source endpoints are NOT hardcoded - they're read from config.json's `feed` block
-// (gitignored), so the upstream source isn't exposed in the committed code. Shape:
-//   { base, indicesEndpoint, referer, warmupPaths: [] }  (see config.example.json)
-const CONFIG_FILE = path.join(HERE, "..", "config.json"); // config lives at repo root
+// Data-source endpoints come from the FEED_JSON env var (the feed block as one-line
+// JSON) - not hardcoded, not in the repo. Shape: { base, indicesEndpoint,
+// preopenEndpoint, referer, warmupPaths:[], stream? } (see .env.sample).
 function loadFeedConfig() {
+  if (!process.env.FEED_JSON) return null;
   try {
-    const cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
-    const f = cfg && cfg.feed;
+    const f = JSON.parse(process.env.FEED_JSON);
     if (f && f.base && f.indicesEndpoint) return f;
   } catch (_) {}
   return null;
@@ -53,7 +55,7 @@ const BASE = FEED ? FEED.base : null;
 function requireFeed() {
   if (!FEED)
     throw new Error(
-      "data source not configured - add a `feed` block to config.json (see config.example.json)",
+      "data source not configured - set the FEED_JSON env var (see .env.sample)",
     );
 }
 // Live WS feed is opt-in (STREAM_WS env). When the flag is set but `feed.stream` (or its
@@ -64,15 +66,15 @@ function requireStream() {
   if (!s || !s.wsBase || !s.constituents) {
     logWarn(
       "stream",
-      "STREAM_WS is set but `feed.stream` is missing/incomplete in config.json " +
-        "(see config.example.json) - continuing in pure-REST mode.",
+      "STREAM_WS is set but `feed.stream` is missing/incomplete in FEED_JSON " +
+        "(see .env.sample) - continuing in pure-REST mode.",
     );
     return null;
   }
   return s;
 }
 // One call per index returns everything we need (index level + all constituents +
-// advance-decline + marketStatus). endpoint/query come from config.json.
+// advance-decline + marketStatus). endpoint/query come from FEED_JSON.
 const INDEX_URL = (name) =>
   `${BASE}${FEED.indicesEndpoint}${encodeURIComponent(name)}`;
 // Indices shown on the dashboard = the shared list from alerts.js (single source of
@@ -403,7 +405,7 @@ async function fetchMarketData() {
 // marketStatus transition to logs/market-capture-<IST-date>.jsonl, saving a full
 // raw sample the first time each status is seen. Purpose: document the post-market
 // (15:30-16:15) structure so marketState() can gain a proper post-market bucket.
-const MARKET_CAPTURE = !!process.env.MARKET_CAPTURE;
+const MARKET_CAPTURE = envFlag(process.env.MARKET_CAPTURE);
 const CAPTURE_DIR = path.join(HERE, "..", "logs");
 const captureSeen = new Set(); // `${date}:${scope}:${status}` -> raw already saved
 const lastStatusByScope = {}; // scope -> last logged status (transition detection)
@@ -463,35 +465,18 @@ function marketState(d = new Date()) {
 // ---------------- live WS feed (opt-in via STREAM_WS; open session only) ----------------
 // When unset, every path below is bypassed - getMarketData() delegates straight through to
 // fetchMarketData(), byte-for-byte today's behaviour. This is the safety guarantee.
-const STREAM_WS = !!process.env.STREAM_WS;
-const STALE_MAX_MS = 15_000; // liveCache older than this -> treat as stale, fall back to REST
-const SLOW_REFRESH_MS = 15_000; // REST reseed cadence while the WS feed is driving the cache (covers fields not carried by a WS tick)
+const STREAM_WS = envFlag(process.env.STREAM_WS);
+const STALE_MAX_MS = 15_000; // store considered stale after this (WS reseed / fallback)
+const SLOW_REFRESH_MS = 15_000; // REST reseed cadence while the WS feed is driving the store (covers fields not carried by a WS tick)
 const FANOUT_MIN_MS = 150; // coalesce bursts of WS ticks into at most one SSE frame per this window
-// liveCache mirrors the exact buildPayloadNext envelope, keyed by DASH_INDICES.
-let liveCache = {};
-let liveCacheStampMs = 0;
-// Full-fidelity reseed from a REST fetch (all fields, incl. enrichment-only ones).
+const STORE_REFRESH_MS = Math.max(1, Number(process.env.STORE_REFRESH_SECONDS) || 3) * 1000; // background REST refresh cadence (market hours)
+// The market snapshot lives in the central store (backend/market-store.js).
+// seedLiveCache/applyTick delegate to it so existing call sites keep working.
 function seedLiveCache(payload) {
-  liveCache = payload;
-  liveCacheStampMs = Date.now();
+  store.ingestSnapshot(payload);
 }
-// Merge one normalized WS tick into liveCache, preserving REST-only enrichment fields.
 function applyTick(t) {
-  if (!t || !t.index || !liveCache[t.index]) return;
-  const entry = liveCache[t.index];
-  if (t.kind === "stock" && t.symbol) {
-    const rows = entry.data || (entry.data = []);
-    const row = rows.find((r) => r.symbol === t.symbol);
-    if (!row) return; // unknown symbol - ignore (constituent list is REST-owned)
-    Object.assign(row, t.patch);
-    if (row.lastPrice > 0) latestPrices[t.symbol] = row.lastPrice;
-  } else if (t.kind === "level") {
-    entry.level = Object.assign(entry.level || {}, t.patch);
-  } else {
-    return;
-  }
-  entry.timestamp = Date.now();
-  liveCacheStampMs = Date.now();
+  store.applyTick(t);
 }
 // SSE fan-out for /api/stream (only ever populated when STREAM_WS is on - the endpoint
 // itself 404s otherwise, so nothing subscribes).
@@ -510,8 +495,8 @@ function sseWrite(res, chunk) {
     sseClients.delete(res);
   }
 }
-// Event-driven SSE fan-out: relay liveCache to subscribers as soon as a tick (or
-// REST reseed) changes it, coalescing bursts to one frame per FANOUT_MIN_MS so a
+// Event-driven SSE fan-out: relay the store snapshot to subscribers as soon as a tick
+// (or REST reseed) changes it, coalescing bursts to one frame per FANOUT_MIN_MS so a
 // flood of ticks can't spam the socket. Replaces the old fixed-interval push, which
 // added up to its interval of latency to every update.
 let fanoutTimer = null;
@@ -520,7 +505,7 @@ function fanoutNow() {
   fanoutTimer = null;
   lastFanoutMs = Date.now();
   if (!(STREAM_WS && marketState() === "open" && sseClients.size > 0)) return;
-  const chunk = `event: patch\ndata: ${JSON.stringify(liveCache)}\n\n`;
+  const chunk = `event: patch\ndata: ${JSON.stringify(store.getSnapshot())}\n\n`;
   for (const client of sseClients) sseWrite(client, chunk);
 }
 function scheduleFanout() {
@@ -554,27 +539,51 @@ function broadcastState(change) {
 async function reseedLiveCache() {
   if (!(STREAM_WS && marketState() === "open")) return;
   try {
-    const payload = await fetchAllIndices();
-    seedLiveCache(payload);
+    store.ingestSnapshot(await fetchAllIndices());
     scheduleFanout(); // push the reseeded fields (esp. ones no WS tick carries)
   } catch (_) {
-    /* transient - keep serving the existing liveCache/REST fallback */
+    /* transient - keep serving the existing store snapshot */
   }
 }
-// Wrapper the rest of the server calls instead of fetchMarketData() directly. Flag-off (or
-// outside the open session) -> identical to calling fetchMarketData() today.
+// The store is the single source of truth; a background updater (startStoreUpdater)
+// keeps it warm, so this just returns the current snapshot - fetching once only if the
+// store is still empty (e.g. a request arrives before the first refresh).
 async function getMarketData() {
-  if (!STREAM_WS) return fetchMarketData();
-  const st = marketState();
-  if (st === "open") {
-    const fresh =
-      liveCacheStampMs && Date.now() - liveCacheStampMs < STALE_MAX_MS;
-    if (fresh && Object.keys(liveCache).length) return liveCache;
-    const payload = await fetchAllIndices();
-    seedLiveCache(payload);
-    return liveCache;
+  if (!store.hasData()) {
+    try {
+      store.ingestSnapshot(await fetchMarketData());
+    } catch (_) {
+      /* fall through - return whatever the store has (possibly {}) */
+    }
   }
-  return fetchMarketData(); // pre-open / closed: unchanged REST paths
+  return store.getSnapshot();
+}
+// Background refresh: keep the store warm without fetching per request.
+let refreshingStore = false;
+async function refreshStore() {
+  if (refreshingStore) return;
+  refreshingStore = true;
+  try {
+    store.ingestSnapshot(await fetchMarketData());
+    if (STREAM_WS) scheduleFanout();
+  } catch (_) {
+    /* transient upstream error - keep the last good snapshot */
+  } finally {
+    refreshingStore = false;
+  }
+}
+function startStoreUpdater() {
+  refreshStore(); // initial warm
+  // market-hours cadence (skip when a live WS stream is already driving the store)
+  setInterval(() => {
+    const st = marketState();
+    if (STREAM_WS && st === "open") return; // ticks + reseedLiveCache drive it
+    if (st === "pre-open" || st === "open") refreshStore();
+  }, STORE_REFRESH_MS);
+  // closed-hours: refresh slowly so last-close data stays present without hammering
+  setInterval(() => {
+    if (marketState() === "closed") refreshStore();
+  }, 60_000);
 }
 
 // ---------------- alert evaluation loop (server-side; fires with no tab open) ----------------
@@ -583,24 +592,16 @@ const ALERT_POLL_MS =
 // Safety switch for local testing/screenshots: when ALERTS_NO_TICK is set the server
 // serves the UI + APIs but never evaluates alerts (no fires, no Telegram, no state writes
 // from the engine). Use it to inspect the live UI without mutating real data.
-const NO_TICK = !!process.env.ALERTS_NO_TICK;
+const NO_TICK = envFlag(process.env.ALERTS_NO_TICK);
 let evaluating = false;
-// latest live price per symbol - used to re-anchor a trigger at create/edit time
-const latestPrices = Object.create(null);
-function cachePrices(payload) {
-  for (const idx of DASH_INDICES) {
-    for (const r of (payload[idx] && payload[idx].data) || []) {
-      if (r.symbol && r.lastPrice > 0) latestPrices[r.symbol] = r.lastPrice;
-    }
-  }
-}
+// live price per symbol now comes from the central store (store.getPrice) — used to
+// re-anchor a trigger at create/edit time.
 async function alertTick() {
   const st = marketState(); // fire during pre-open (IEP) and the regular session
   if (evaluating || NO_TICK || (st !== "open" && st !== "pre-open")) return;
   evaluating = true;
   try {
     const payload = await getMarketData();
-    cachePrices(payload);
     if (st === "open") alerts.updateSymbols(payload); // refresh symbol cache from real constituents only
     alerts.evaluate(payload);
     if (st === "pre-open" && llm.configured())
@@ -817,11 +818,11 @@ async function handleAlertsApi(req, res, url, method, user) {
   if (url === "/api/price" && method === "GET") {
     const q = new URL(req.url, `http://${HOST}`);
     const sym = (q.searchParams.get("symbol") || "").toUpperCase();
-    sendJson(res, 200, { symbol: sym, price: latestPrices[sym] ?? null });
+    sendJson(res, 200, { symbol: sym, price: store.getPrice(sym) ?? null });
     return true;
   }
   if (url === "/api/alerts/active" && method === "GET") {
-    sendJson(res, 200, { alerts: alerts.active(user.id) });
+    sendJson(res, 200, { alerts: store.enrichAlerts(alerts.active(user.id)) });
     return true;
   }
   // active + archived together (used by the notification center so archived events survive)
@@ -829,8 +830,8 @@ async function handleAlertsApi(req, res, url, method, user) {
     const q = new URL(req.url, `http://${HOST}`);
     const index = q.searchParams.get("index") || undefined;
     sendJson(res, 200, {
-      alerts: alerts.list(index),
-      archived: alerts.listArchived(index),
+      alerts: store.enrichAlerts(alerts.list(index)),
+      archived: store.enrichAlerts(alerts.listArchived(index)),
     });
     return true;
   }
@@ -838,14 +839,14 @@ async function handleAlertsApi(req, res, url, method, user) {
   if (url === "/api/alerts/archived" && method === "GET") {
     const q = new URL(req.url, `http://${HOST}`);
     sendJson(res, 200, {
-      alerts: alerts.listArchived(q.searchParams.get("index") || undefined),
+      alerts: store.enrichAlerts(alerts.listArchived(q.searchParams.get("index") || undefined)),
     });
     return true;
   }
   if (url === "/api/alerts" && method === "GET") {
     const q = new URL(req.url, `http://${HOST}`);
     sendJson(res, 200, {
-      alerts: alerts.list(q.searchParams.get("index") || undefined),
+      alerts: store.enrichAlerts(alerts.list(q.searchParams.get("index") || undefined)),
     });
     return true;
   }
@@ -860,7 +861,7 @@ async function handleAlertsApi(req, res, url, method, user) {
     const cp =
       formCp > 0
         ? formCp
-        : latestPrices[String(body.symbol || "").toUpperCase()];
+        : store.getPrice(String(body.symbol || "").toUpperCase());
     const r = alerts.create(body, cp, user);
     if (r.error) sendJson(res, 400, { error: r.error });
     else
@@ -918,7 +919,7 @@ async function handleAlertsApi(req, res, url, method, user) {
       }
       if (!permit(res, user, ACTION.REARM, a)) return true;
       const body = await readJson(req);
-      const cp = a ? latestPrices[a.symbol] : undefined;
+      const cp = a ? store.getPrice(a.symbol) : undefined;
       finishAlert(res, alerts.rearm(id, cp, user, body.expectedVersion));
       return true;
     }
@@ -950,7 +951,7 @@ async function handleAlertsApi(req, res, url, method, user) {
       const cp =
         formCp > 0
           ? formCp
-          : latestPrices[String(body.symbol || "").toUpperCase()];
+          : store.getPrice(String(body.symbol || "").toUpperCase());
       finishAlert(res, alerts.update(id, body, cp, user, body.expectedVersion));
       return true;
     }
@@ -1285,8 +1286,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       if (url === "/api/indices") {
-        const data = await getMarketData(); // pre-open feed during 09:00-09:15, else live (WS-backed when STREAM_WS is on)
-        cachePrices(data);
+        const data = await getMarketData(); // served from the central store (kept warm by startStoreUpdater)
         send(res, 200, JSON.stringify(data), "application/json; charset=utf-8");
         return;
       }
@@ -1326,8 +1326,8 @@ async function main() {
   );
   console.log(
     FEED
-      ? "  Data source: configured from config.json (feed)"
-      : "  Data source: NOT configured - add a `feed` block to config.json (see config.example.json)",
+      ? "  Data source: configured from FEED_JSON"
+      : "  Data source: NOT configured - set FEED_JSON (see .env.sample)",
   );
   await auth.load();
   console.log(
@@ -1347,6 +1347,11 @@ async function main() {
     telegram.load({
       auth,
       logError: alerts.logError,
+      // poll Telegram for inbound updates only during market hours (pre-open + open)
+      isMarketOpen: () => {
+        const s = marketState();
+        return s === "open" || s === "pre-open";
+      },
       onUserChange: (userId) => {
         broadcastState({ kind: "telegram", userId });
         broadcastState({ kind: "users" });
@@ -1376,9 +1381,8 @@ async function main() {
   console.log("  Self-test: fetching indices from the data source ...");
   try {
     const j = await fetchAllIndices();
-    cachePrices(j); // seed live prices so create/edit can re-anchor immediately
+    store.ingestSnapshot(j); // warm the central store from the startup self-test fetch
     alerts.updateSymbols(j); // seed the create-form dropdown when started in market hours
-    if (STREAM_WS) seedLiveCache(j); // seed liveCache from the startup self-test fetch
     for (const key of DASH_INDICES) {
       const n = (j[key].data || []).length;
       const lv = j[key].level;
@@ -1424,6 +1428,7 @@ async function main() {
         "  ALERTS_NO_TICK set - alert engine PAUSED (read-only, no fires).\n",
       );
     else setInterval(alertTick, ALERT_POLL_MS); // server-side alert engine
+    startStoreUpdater(); // keep the central market store warm (background refresh)
     if (MARKET_CAPTURE) {
       console.log("  Market capture: ON - transitions + raw samples -> logs/market-capture-<date>.jsonl");
       // fire-and-forget; captureTick has its own try/catch, .catch is a belt-and-braces

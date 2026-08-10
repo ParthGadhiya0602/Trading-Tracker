@@ -19,13 +19,12 @@ const crypto = require("crypto");
 const { connectMongoWithRetry } = require("./mongo-retry");
 const { DurableOutbox } = require("./durable-outbox");
 const { istNow, istFromMs } = require("./utils");
-const { logError } = require("./logger"); // daily-rotating logger, shared app-wide
+const { logError, logErrorOnce, resetErrorOnce } = require("./logger"); // daily-rotating logger, shared app-wide
 
 const ROOT = path.join(__dirname, ".."); // repo root (config lives here)
 const STORE_DIR = path.join(ROOT, "store"); // alert + user data files live here
 const STORE_FILE = path.join(STORE_DIR, "alerts.json");
 const OUTBOX_FILE = path.join(STORE_DIR, "alert-outbox.json");
-const CONFIG_FILE = path.join(ROOT, "config.json");
 
 const outbox = new DurableOutbox(OUTBOX_FILE, { logError });
 
@@ -537,12 +536,13 @@ async function reconnectMongo() {
       { unique: true },
     );
     backend = "mongo";
+    resetErrorOnce("mongo.reconnect"); // re-arm logging for the next outage
     await outbox.drain();
     console.log("  alerts: MongoDB reconnected; durable outbox replayed");
   } catch (error) {
     outbox.setProcessor(null);
     backend = "file";
-    logError("mongo.reconnect", error);
+    logErrorOnce("mongo.reconnect", error); // log once per outage, not every 15s
   }
 }
 function startReconnectWorker() {
@@ -551,15 +551,8 @@ function startReconnectWorker() {
   if (reconnectTimer.unref) reconnectTimer.unref();
 }
 function loadConfig() {
-  let mongoUri = "";
-  try {
-    const cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
-    if (cfg && cfg.mongo && cfg.mongo.uri)
-      mongoUri = String(cfg.mongo.uri).trim();
-  } catch (_) {
-    /* no config.json -> Mongo stays disabled (file mode) */
-  }
-  return mongoUri;
+  // MONGO_URI env only; unset -> Mongo disabled (local file mode)
+  return String(process.env.MONGO_URI || "").trim();
 }
 function setEventSink(sink) {
   eventSink = typeof sink === "function" ? sink : () => {};
