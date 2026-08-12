@@ -15,6 +15,7 @@
         let editId = null;
         let editVersion = null;
         let SYMS = {};
+        let ALERT_CREATORS = [];
         let OFFSETS = {}; // { timeframe: pct } from the server
         let DEFAULT_OFFSET = 10;
         let curPrice = 0; // live price of the selected symbol (for the trigger preview)
@@ -383,6 +384,37 @@
               buildIndexUI();
             }
           } catch (_) {}
+        }
+        function renderCreatorOptions(selectedId, fallback) {
+          const select = $("#al-creator");
+          const users = ALERT_CREATORS.slice();
+          if (
+            fallback &&
+            fallback.id &&
+            !users.some((user) => user.id === fallback.id)
+          ) {
+            users.push({ ...fallback, unavailable: true });
+          }
+          select.replaceChildren();
+          for (const user of users) {
+            const option = document.createElement("option");
+            option.value = user.id;
+            option.textContent = `${user.username} · ${niceLabel(user.role)}`;
+            if (user.unavailable) option.textContent += " (unavailable)";
+            select.appendChild(option);
+          }
+          if (selectedId && users.some((user) => user.id === selectedId))
+            select.value = selectedId;
+        }
+        async function loadCreators(selectedId) {
+          const user = currentUser();
+          try {
+            const payload = await api("/api/alert-creators");
+            ALERT_CREATORS = Array.isArray(payload.users) ? payload.users : [];
+          } catch (_) {
+            ALERT_CREATORS = user ? [user] : [];
+          }
+          renderCreatorOptions(selectedId || (user && user.id));
         }
         // build the create-form index dropdown from the server's index list; also
         // rebuild the filters so the Index filter reflects the loaded indices
@@ -782,10 +814,11 @@
           $("#al-date").value = "";
           $("#al-hour").value = "";
           $("#al-min").value = "";
-          // zone creator = the signed-in user (read-only; server sets it authoritatively)
-          $("#al-creator").value =
-            (window.APP_AUTH && window.APP_AUTH.user && window.APP_AUTH.user.username) ||
-            "";
+          // Creator defaults to the signed-in user but can be assigned to another
+          // enabled editor/admin while creating the alert.
+          const user = currentUser();
+          $("#al-creator").disabled = false;
+          renderCreatorOptions(user && user.id);
           $("#al-err").textContent = "";
           fillDatalist();
           updatePreview();
@@ -802,7 +835,12 @@
           $("#al-side").value = a.side;
           $("#al-price").value = a.alertPrice;
           $("#al-stop").value = a.stopLoss != null ? a.stopLoss : "";
-          $("#al-creator").value = a.zoneCreator || "";
+          renderCreatorOptions(a.createdByUserId, {
+            id: a.createdByUserId,
+            username: a.createdByUsername || a.zoneCreator || "Unknown creator",
+            role: a.createdByRole || "editor",
+          });
+          $("#al-creator").disabled = true;
           $("#al-note").value = a.note || "";
           $("#al-tf").value = a.timeframe || "";
           $("#al-date").value = a.candleDate || "";
@@ -824,12 +862,12 @@
             side: $("#al-side").value,
             alertPrice: parseFloat($("#al-price").value),
             stopLoss: parseFloat($("#al-stop").value),
-            // zoneCreator is set server-side from the session (create) / preserved (edit)
             note: $("#al-note").value.trim(),
             timeframe: $("#al-tf").value,
             candleDate: $("#al-date").value || "",
             candleTime: hh && mm ? `${hh}:${mm}` : "",
           };
+          if (!editId) body.creatorUserId = $("#al-creator").value;
           // Anchor the Alert (trigger) price to the price the form already had once
           // side + entry + time frame were set (what the preview used) - NOT a fresh
           // save-time tick. Server re-anchors against this instead of its latest price.
@@ -1192,6 +1230,7 @@
           SUCCESS: "✅",
           FAIL: "❌",
           SL_AFTER_PARTIAL: "🟡",
+          UPDATED: "✏️",
         };
         function agoText(iso) {
           if (!iso) return "";
@@ -1360,10 +1399,11 @@
               ev.text || `${ev.type} @ ${fmtRs(ev.price)}`;
             const acts = item.querySelector(".ni-actions");
             const closed = a.status === "closed";
-            if (!closed)
+            const lifecycleNotice = ev.type !== "UPDATED";
+            if (!closed && lifecycleNotice)
               acts.innerHTML +=
                 `<button type="button" class="btn-sm" data-notif-action="snooze"><i data-lucide="clock"></i>Snooze</button>`;
-            if (!closed && canCloseAlert(a))
+            if (!closed && lifecycleNotice && canCloseAlert(a))
               acts.innerHTML +=
                 `<button type="button" class="btn-sm" data-notif-action="close"><i data-lucide="circle-x"></i>Close alert</button>`;
             acts.innerHTML +=
@@ -1584,17 +1624,23 @@
           const user = currentUser();
           return !!user && !!alert && alert.createdByUserId === user.id;
         };
-        const canEditAlert = (alert) => canCreate() && isAlertCreator(alert);
+        const canEditAlert = (alert) => {
+          const user = currentUser();
+          if (!canCreate() || !user || !alert) return false;
+          if (isAlertCreator(alert)) return true;
+          return user.role === "admin" && alert.createdByRole === "editor";
+        };
         const canCloseAlert = (alert) => {
           const user = currentUser();
           if (!user || !alert || !canCreate()) return false;
           if (isAlertCreator(alert)) return true;
           return user.role === "admin" && alert.createdByRole === "editor";
         };
-        const canRearmAlert = (alert) => canEditAlert(alert);
-        const canDeleteAlert = (alert) => canEditAlert(alert);
+        const canRearmAlert = (alert) => canCreate() && isAlertCreator(alert);
+        const canDeleteAlert = (alert) => canCreate() && isAlertCreator(alert);
         window.__alertsCanEdit = canCreate;
         window.__reloadAlerts = () => refreshAll(true); // refresh after login
+        window.__reloadAlertCreators = () => loadCreators();
         // open a specific alert's detail view from another surface (e.g. the dashboard
         // stock modal) — switch to the Alerts view first so the modal is visible.
         window.__viewAlert = function (a) {
@@ -1619,9 +1665,7 @@
         // started by the auth controller once the user is signed in
         window.__initAlerts = async function () {
           document.body.classList.toggle("role-viewer", !canCreate());
-          try {
-            await loadConfig(); // builds the index dropdown, loads offsets
-          } catch (_) {}
+          await Promise.all([loadConfig(), loadCreators()]);
           resetForm();
           loadSymbols();
           updatePreview();

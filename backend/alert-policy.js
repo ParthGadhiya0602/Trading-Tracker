@@ -3,6 +3,7 @@
 const ACTION = Object.freeze({
   CREATE: "create",
   EDIT: "edit",
+  ALERT_EDIT: "alert-edit",
   REVIEW: "review",
   CLOSE: "close",
   REARM: "rearm",
@@ -11,6 +12,21 @@ const ACTION = Object.freeze({
 
 function isAlertOperator(user) {
   return !!user && (user.role === "editor" || user.role === "admin");
+}
+
+function eligibleAlertCreators(users) {
+  return (Array.isArray(users) ? users : [])
+    .filter((user) => isAlertOperator(user) && !user.disabled)
+    .map((user) => ({
+      id: user.id,
+      username: user.username,
+      role: user.role,
+    }));
+}
+
+function resolveAlertCreator(users, requestedUserId, actor) {
+  const id = String(requestedUserId || (actor && actor.id) || "");
+  return eligibleAlertCreators(users).find((user) => user.id === id) || null;
 }
 
 function isCreator(user, alert) {
@@ -27,6 +43,12 @@ function canReview(user) {
 
 function canEdit(user, alert) {
   return isAlertOperator(user) && isCreator(user, alert);
+}
+
+function canEditAlert(user, alert) {
+  if (!isAlertOperator(user) || !alert) return false;
+  if (isCreator(user, alert)) return true;
+  return user.role === "admin" && alert.createdByRole === "editor";
 }
 
 function canClose(user, alert) {
@@ -51,13 +73,15 @@ function authorize(user, action, alert) {
         ? canReview(user)
         : action === ACTION.EDIT
           ? canEdit(user, alert)
-          : action === ACTION.CLOSE
-            ? canClose(user, alert)
-            : action === ACTION.REARM
-              ? canRearm(user, alert)
-              : action === ACTION.DELETE
-                ? canDelete(user, alert)
-                : false;
+          : action === ACTION.ALERT_EDIT
+            ? canEditAlert(user, alert)
+            : action === ACTION.CLOSE
+              ? canClose(user, alert)
+              : action === ACTION.REARM
+                ? canRearm(user, alert)
+                : action === ACTION.DELETE
+                  ? canDelete(user, alert)
+                  : false;
   return allowed ? null : { error: "alert action not permitted", status: 403 };
 }
 
@@ -67,8 +91,11 @@ module.exports = {
   canCreate,
   canReview,
   canEdit,
+  canEditAlert,
   canClose,
   canRearm,
   canDelete,
   isCreator,
+  eligibleAlertCreators,
+  resolveAlertCreator,
 };

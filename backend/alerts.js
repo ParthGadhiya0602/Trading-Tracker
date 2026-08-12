@@ -114,6 +114,10 @@ let store = {
   notifications: [],
   symbols: {},
 };
+// Cross-user edit notices are deliberately process-local. They are normal notification
+// center items, but never enter alerts.json, the durable outbox, MongoDB, or Telegram.
+const transientNotifications = [];
+const MAX_TRANSIENT_NOTIFICATIONS = 500;
 let usersProvider = () => [];
 let eventSink = () => {};
 let changeSink = () => {};
@@ -701,19 +705,67 @@ function createNotificationReceipts(event) {
     emitChange({ kind: "notification", userId: user.id, eventId: event.id });
   }
 }
+function createTransientEditNotification(alert, actor) {
+  const creatorId = alert && alert.createdByUserId;
+  if (!creatorId || !actor || !actor.id || actor.id === creatorId) return null;
+  const at = istNow();
+  const event = {
+    id: crypto.randomUUID(),
+    alertId: alert.id,
+    type: "UPDATED",
+    price: null,
+    at,
+    marketTime: at,
+    stateVersion: alert.version,
+    actorUserId: actor.id,
+    actorUsername: actor.username || "",
+    actorRole: actor.role || "",
+    text: `${actor.username || "An administrator"} updated your ${alert.symbol} alert.`,
+    metadata: {
+      symbol: alert.symbol,
+      index: alert.index,
+      side: alert.side,
+      transient: true,
+    },
+  };
+  const receipt = {
+    userId: creatorId,
+    eventId: event.id,
+    readAt: null,
+    dismissedAt: null,
+    acknowledgedAt: null,
+    snoozedUntil: null,
+    transient: true,
+    event,
+  };
+  transientNotifications.push(receipt);
+  if (transientNotifications.length > MAX_TRANSIENT_NOTIFICATIONS)
+    transientNotifications.splice(
+      0,
+      transientNotifications.length - MAX_TRANSIENT_NOTIFICATIONS,
+    );
+  emitChange({
+    kind: "notification",
+    userId: creatorId,
+    eventId: event.id,
+    transient: true,
+  });
+  return receipt;
+}
 function listNotifications(userId) {
   const byId = new Map(store.events.map((event) => [event.id, event]));
-  return store.notifications
+  const persisted = store.notifications
     .filter((receipt) => receipt.userId === userId)
     .map((receipt) => ({ ...receipt, event: byId.get(receipt.eventId) || null }))
-    .filter((notification) => notification.event)
+    .filter((notification) => notification.event);
+  const transient = transientNotifications
+    .filter((receipt) => receipt.userId === userId)
+    .map((receipt) => ({ ...receipt, event: { ...receipt.event } }));
+  return persisted
+    .concat(transient)
     .sort((a, b) => b.event.at.localeCompare(a.event.at));
 }
-function updateNotification(userId, eventId, action, options = {}) {
-  const receipt = store.notifications.find(
-    (item) => item.userId === userId && item.eventId === eventId,
-  );
-  if (!receipt) return { error: "not found" };
+function applyNotificationAction(receipt, action, options = {}) {
   const now = istNow();
   if (action === "read") receipt.readAt = receipt.readAt || now;
   else if (action === "dismiss") {
@@ -727,6 +779,24 @@ function updateNotification(userId, eventId, action, options = {}) {
   } else {
     return { error: "invalid notification action" };
   }
+  return null;
+}
+function updateNotification(userId, eventId, action, options = {}) {
+  const transient = transientNotifications.find(
+    (item) => item.userId === userId && item.eventId === eventId,
+  );
+  if (transient) {
+    const error = applyNotificationAction(transient, action, options);
+    if (error) return error;
+    emitChange({ kind: "notification", userId, eventId, transient: true });
+    return { notification: { ...transient, event: { ...transient.event } } };
+  }
+  const receipt = store.notifications.find(
+    (item) => item.userId === userId && item.eventId === eventId,
+  );
+  if (!receipt) return { error: "not found" };
+  const error = applyNotificationAction(receipt, action, options);
+  if (error) return error;
   queueNotification(receipt);
   emitChange({ kind: "notification", userId, eventId });
   save();
@@ -850,7 +920,7 @@ function markEnteredIfPastEntry(alert, currentPrice) {
   }
 }
 
-function create(input, currentPrice, actor) {
+function create(input, currentPrice, creator, actor = creator) {
   const { errors, clean } = validate(input);
   if (errors.length) return { error: errors.join("; ") };
   const now = istNow();
@@ -877,10 +947,10 @@ function create(input, currentPrice, actor) {
     stepPct,
     triggerPrice,
     timeframe: clean.timeframe,
-    zoneCreator: actor.username,
-    createdByUserId: actor.id,
-    createdByUsername: actor.username,
-    createdByRole: actor.role,
+    zoneCreator: creator.username,
+    createdByUserId: creator.id,
+    createdByUsername: creator.username,
+    createdByRole: creator.role,
     version: 1,
     note: clean.note,
     candleDate: clean.candleDate, // optional
@@ -895,6 +965,32 @@ function create(input, currentPrice, actor) {
   return { alert };
 }
 
+function applyDefinitionUpdate(alert, clean) {
+  const preserveEnteredState = alert.entered === true;
+  alert.index = clean.index;
+  alert.symbol = clean.symbol;
+  alert.side = clean.side;
+  alert.alertPrice = round2(clean.alertPrice);
+  alert.stopLoss = round2(clean.stopLoss);
+  alert.offsetPct = offsetFor(clean.timeframe);
+  alert.stepPct = stepFor(clean.timeframe, alert.offsetPct);
+  const rawTrigger = triggerFor(clean.side, clean.alertPrice, alert.offsetPct);
+  const targets = targetsFor(clean.side, alert.alertPrice, alert.stopLoss);
+  alert.riskR = targets.riskR;
+  alert.target3 = targets.target3;
+  alert.target5 = targets.target5;
+  alert.profit3 = targets.profit3;
+  alert.profit5 = targets.profit5;
+  alert.timeframe = clean.timeframe;
+  alert.zoneCreator = clean.zoneCreator;
+  alert.note = clean.note;
+  alert.candleDate = clean.candleDate;
+  alert.candleTime = clean.candleTime;
+  if (!preserveEnteredState) freshState(alert);
+  alert.triggerPrice = rawTrigger;
+  return preserveEnteredState;
+}
+
 function update(id, input, currentPrice, actor, expectedVersion) {
   const alert = store.alerts.find((a) => a.id === id);
   if (!alert) return { error: "not found" };
@@ -906,29 +1002,13 @@ function update(id, input, currentPrice, actor, expectedVersion) {
   // backfill from the existing alert if the update input carried no creator (or the
   // stored value is blank/legacy) - never let that block an otherwise-valid edit.
   clean.zoneCreator = clean.zoneCreator || alert.zoneCreator || "";
-  alert.index = clean.index;
-  alert.symbol = clean.symbol;
-  alert.side = clean.side;
-  alert.alertPrice = round2(clean.alertPrice);
-  alert.stopLoss = round2(clean.stopLoss);
-  alert.offsetPct = offsetFor(clean.timeframe);
-  alert.stepPct = stepFor(clean.timeframe, alert.offsetPct);
-  const rawTrigger = triggerFor(clean.side, clean.alertPrice, alert.offsetPct);
-  const t = targetsFor(clean.side, alert.alertPrice, alert.stopLoss);
-  alert.riskR = t.riskR;
-  alert.target3 = t.target3;
-  alert.target5 = t.target5;
-  alert.profit3 = t.profit3;
-  alert.profit5 = t.profit5;
-  alert.timeframe = clean.timeframe;
-  alert.zoneCreator = clean.zoneCreator;
-  alert.note = clean.note;
-  alert.candleDate = clean.candleDate;
-  alert.candleTime = clean.candleTime;
-  freshState(alert); // editing re-arms the alert from scratch
-  alert.triggerPrice = rawTrigger;
+  const enteredStatePreserved = applyDefinitionUpdate(alert, clean);
   bumpVersion(alert);
-  recordEvent(alert, "UPDATED", { actor });
+  recordEvent(alert, "UPDATED", {
+    actor,
+    metadata: { enteredStatePreserved },
+  });
+  createTransientEditNotification(alert, actor);
   queueAlert(alert, "active");
   save();
   return { alert };
@@ -1350,4 +1430,11 @@ module.exports = {
   INDICES,
   OFFSET_PCT,
   STEP_PCT,
+  _test: {
+    applyDefinitionUpdate,
+    createTransientEditNotification,
+    resetTransientNotifications: () => {
+      transientNotifications.length = 0;
+    },
+  },
 };

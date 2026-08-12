@@ -32,7 +32,12 @@ const trades = require("./trades");
 const store = require("./market-store"); // single in-memory source of truth for market data
 const { logInfo, logWarn } = require("./logger");
 const { istNow, envFlag } = require("./utils");
-const { ACTION, authorize } = require("./alert-policy");
+const {
+  ACTION,
+  authorize,
+  eligibleAlertCreators,
+  resolveAlertCreator,
+} = require("./alert-policy");
 
 // Bind address: localhost by default (safe for tunnels / same-box reverse proxy).
 // Set HOST=0.0.0.0 to accept external connections directly (e.g. an EC2 security group).
@@ -808,6 +813,11 @@ async function handleUsersApi(req, res, url, method, actor) {
 
 // Alert + symbol API. Returns true if it handled the request.
 async function handleAlertsApi(req, res, url, method, user) {
+  if (url === "/api/alert-creators" && method === "GET") {
+    if (!permit(res, user, ACTION.CREATE)) return true;
+    sendJson(res, 200, { users: eligibleAlertCreators(auth.listUsers()) });
+    return true;
+  }
   if (url === "/api/symbols" && method === "GET") {
     sendJson(res, 200, alerts.symbols());
     return true;
@@ -854,7 +864,17 @@ async function handleAlertsApi(req, res, url, method, user) {
   if (url === "/api/alerts" && method === "POST") {
     if (!permit(res, user, ACTION.CREATE)) return true;
     const body = await readJson(req);
-    body.zoneCreator = (user && user.username) || ""; // authoritative: the signed-in user
+    const creator = resolveAlertCreator(
+      auth.listUsers(),
+      body.creatorUserId,
+      user,
+    );
+    delete body.creatorUserId;
+    if (!creator) {
+      sendJson(res, 400, { error: "select an enabled editor or admin as creator" });
+      return true;
+    }
+    body.zoneCreator = creator.username;
     // Prefer the price the create form captured (once side+entry+time frame were set) so
     // the saved Alert price matches the preview; fall back to the server's latest tick.
     const formCp = num(body.formPrice);
@@ -863,7 +883,7 @@ async function handleAlertsApi(req, res, url, method, user) {
       formCp > 0
         ? formCp
         : store.getPrice(String(body.symbol || "").toUpperCase());
-    const r = alerts.create(body, cp, user);
+    const r = alerts.create(body, cp, creator, user);
     if (r.error) sendJson(res, 400, { error: r.error });
     else
       sendJson(res, 201, { alert: r.alert, syncStatus: alerts.syncStatus() });
@@ -944,9 +964,10 @@ async function handleAlertsApi(req, res, url, method, user) {
         finishAlert(res, { error: "not found" });
         return true;
       }
-      if (!permit(res, user, ACTION.EDIT, alert)) return true;
+      if (!permit(res, user, ACTION.ALERT_EDIT, alert)) return true;
       const body = await readJson(req);
       delete body.zoneCreator; // creator is fixed at create time; edits never reassign it
+      delete body.creatorUserId;
       const formCp = num(body.formPrice);
       delete body.formPrice; // transport-only; never persisted on the alert
       const cp =
@@ -1274,6 +1295,7 @@ const server = http.createServer(async (req, res) => {
       if (
         url === "/api/symbols" ||
         url === "/api/alert-config" ||
+        url === "/api/alert-creators" ||
         url === "/api/price" ||
         url.startsWith("/api/alerts")
       ) {

@@ -138,6 +138,8 @@
               revision,
             );
             if (change.kind === "telegram") void loadTelegramStatus();
+            if (change.kind === "users")
+              window.__reloadAlertCreators && window.__reloadAlertCreators();
             if (
               change.kind === "users" &&
               APP_AUTH.user &&
