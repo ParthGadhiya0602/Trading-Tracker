@@ -1,4 +1,4 @@
-# Secrets & local config (keep config.example.json / .env.sample tracked)
+# Secrets & local configuration (keep .env.sample tracked)
 config.json
 .env
 .env.*

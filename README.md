@@ -1,7 +1,7 @@
 # Trading Tracker
 
-A zero-dependency (Node built-ins only; `mongodb` optional) personal markets app for the
-Indian market (NSE), with five views:
+A no-build Node.js and vanilla-JavaScript personal markets app for the Indian market (NSE),
+with six role-aware views:
 
 - **Dashboard** — a personal overview: live index cards + your P&L, active alerts,
   notifications, and recent trades (each panel shows the first 3 with *See all / Show less*).
@@ -15,6 +15,7 @@ Indian market (NSE), with five views:
   it later, P&L derived).
 - **Reports** — analytics on your trades (equity curve, per-period P&L, win rate, profit
   factor, R-multiples, best/worst, by-strategy) — hand-drawn inline SVG, no chart library.
+- **Users** — admin-only account, role, access, and Telegram connection management.
 
 Responsive: a left sidebar rail on laptop/desktop; a hamburger menu + bottom-sheet modals on
 mobile. Light/dark follow the system theme.
@@ -31,8 +32,8 @@ mobile. Light/dark follow the system theme.
   secret gets committed or uploaded.
 - A network the data source answers on — home/office broadband is fine; VPN/datacentre IPs
   are often blocked (HTTP 401/403).
-- `npm install` **only if** you want MongoDB Atlas storage (the `mongodb` driver). File mode
-  needs no install.
+- `npm install` installs the MongoDB driver declared by the backend. The frontend still has
+  no package build or framework runtime.
 
 ---
 
@@ -61,7 +62,7 @@ mobile. Light/dark follow the system theme.
 | Variable | Purpose |
 |---|---|
 | `AUTH_PASSWORD_PEPPER` | **Required** (>= 32 chars, `openssl rand -hex 32`). Replaces `auth.passwordPepper`. |
-| `MONGO_URI` | MongoDB Atlas connection string (omit for local file storage). Replaces `mongo.uri`. |
+| `MONGO_URI` | MongoDB Atlas connection string (omit for local file storage). |
 | `FEED_JSON` | The whole `feed` block as **one-line JSON** — the data-source endpoints. |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_BOT_USERNAME` | Telegram bot (optional). Replace `telegram.*`. |
 | `LLM_PROVIDER` / `LLM_API_KEY` / `LLM_MODEL` / `LLM_TEMPERATURE` / `LLM_MAX_TOKENS` | LLM analysis (dormant without a key). `LLM_ENABLED=false` forces off. |
@@ -77,6 +78,7 @@ mobile. Light/dark follow the system theme.
 | `ALERTS_NO_TICK=1` | Serve UI + APIs but **don't** evaluate alerts (no fires / no Telegram). Also disables Telegram polling. |
 | `TELEGRAM_DISABLED=1` | Disable Telegram polling on this instance (run secondary instances with this so only one polls the bot). |
 | `MARKET_CAPTURE=1` | Log every `marketStatus` transition + a raw sample to `logs/market-capture-<date>.jsonl`. |
+| `STREAM_CAPTURE=1` | Log a bounded sample of raw WSS frames for stream-schema diagnosis. |
 
 **Deploy with no config file:** set `AUTH_PASSWORD_PEPPER` + `FEED_JSON` (+ `MONGO_URI` / Telegram / LLM as needed), then either load a `.env` natively —
 ```bash
@@ -97,6 +99,7 @@ npm run live           # live WS feed + market capture
 npm run stream         # live WS feed only
 npm run capture        # market-status capture only
 npm run closed         # no alert evaluation (ALERTS_NO_TICK)
+npm run doctor         # MongoDB and durable-outbox diagnostics
 ```
 
 Or call the launcher directly with flags (identical on every OS):
@@ -133,6 +136,8 @@ Live data flows **Mon–Fri, IST**: pre-open **09:00–09:15**, continuous sessi
   modal). The continuous-session feed and the WS stream carry no per-stock depth.
 - `/api/indices` returns each index's level + all constituents (OHLC, LTP, prev close,
   change, volume, turnover, 52-week, advance/decline, market status).
+- A central in-memory market store backs APIs, alert evaluation, derived lists, and SSE.
+  REST refreshes it in the background; live WSS ticks patch that same snapshot.
 
 ---
 
@@ -166,8 +171,8 @@ server** during market hours, so they fire with no tab open.
 - Lifecycle **armed → triggered → active → closed**. **Entry** (touching the entry price) is
   the gate — profit targets (3×/5×) and stop-loss are tracked only after entry. Success/Fail
   auto-close.
-- **Review gate:** every alert starts *raw* and only fires once an editor/admin **approves**
-  it (with a reason); rejected alerts stay silent except terminal outcomes.
+- **Review gate:** every alert starts *pending*. Only an editor/admin-approved alert is
+  evaluated or fires; pending and rejected alerts remain dormant.
 - Fires reach the in-page **notification center** (bell) and, if configured, **Telegram**.
   Filter the list by index / status / side / time frame / review / outcome; closed alerts move
   to an archive.
@@ -196,7 +201,7 @@ one poller per bot.
 ## Roles & security
 
 Roles: **admin** (users + alerts + trades), **editor** (alerts + trades), **viewer**
-(read-only). Passwords use scrypt + a per-user salt + the config pepper; sessions are
+(read-only). Passwords use scrypt + a per-user salt + the environment pepper; sessions are
 in-memory HttpOnly cookies (12h idle). Every `/api/*` needs a session; writes need
 editor/admin; non-GET requires an `X-Requested-With` header (CSRF).
 
@@ -214,12 +219,13 @@ echoed to the console.
 
 ```
 backend/   server.js        HTTP server, data-source proxy, market state, /api/*
-           alerts.js         alert engine + storage + Telegram sender
+           alerts.js         alert engine, events, notifications, archive, storage
            trades.js         manual trade journal engine + storage + P&L
            auth.js           users, sessions, roles (scrypt)
            telegram.js       account linking, polling, durable delivery
            llm.js            provider-agnostic LLM analysis (env-configured)
            stream.js         live WebSocket feed client (STREAM_WS)
+           market-store.js   shared in-memory market snapshot and derivations
            logger.js         daily-rotating logger
            utils.js          IST time helpers
            mongo-retry.js · durable-outbox.js · alert-policy.js
@@ -228,7 +234,8 @@ frontend/  index.html        markup only; loads css/* + js/main.js (ES modules, 
            js/   main · dashboard · overview-ui · market-ui · alerts-ui · trades-ui
                  reports-ui · shell-ui · auth-ui
 store/     (gitignored) alerts.json · users.json · trades.json · telegram.json · *-outbox.json
-root       package.json · run.js · run.cmd · run.sh
+scripts/   mongo-doctor.mjs  Mongo connectivity and outbox diagnostics
+root       package.json · run.js · run.cmd · run.sh · .env.sample
            (gitignored) .env · logs/
 ```
 

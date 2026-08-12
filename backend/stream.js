@@ -21,6 +21,9 @@
 
 const MAX_BACKOFF_MS = 30_000;
 const BASE_BACKOFF_MS = 1000;
+// STREAM_CAPTURE=1: log the first raw frames per socket (to reveal the actual upstream
+// shape) + any frame arriving while the market is closed (post-market detection).
+const STREAM_CAPTURE = require("./utils").envFlag(process.env.STREAM_CAPTURE);
 
 let sockets = []; // [{ key, ws, backoffMs, timer, closedByUs }]
 let running = false;
@@ -119,6 +122,14 @@ function connect(entry) {
   });
   ws.addEventListener("message", (ev) => {
     try {
+      if (STREAM_CAPTURE && opts && opts.log) {
+        const openNow = opts.isOpen && opts.isOpen();
+        if ((entry._cap = (entry._cap || 0) + 1) <= 6) {
+          opts.log(`[stream ${entry.kind}/${entry.index}] ${String(ev.data).slice(0, 600)}`);
+        } else if (!openNow && (entry._capPost = (entry._capPost || 0) + 1) <= 10) {
+          opts.log(`[stream POST-CLOSE ${entry.kind}/${entry.index}] ${String(ev.data).slice(0, 300)}`);
+        }
+      }
       const tick = normalize(ev.data, entry.index, entry.kind);
       if (tick && opts && opts.onTick) opts.onTick(tick);
     } catch (_) {
@@ -154,7 +165,7 @@ function teardown() {
   sockets = [];
 }
 
-// start({ feed, onTick, isOpen, log, userAgent }) - feed is the whole `feed` config block
+// start({ feed, onTick, isOpen, log, userAgent }) - feed is the parsed FEED_JSON object
 // (feed.stream holds wsBase/origin/constituents/levels). Safe to call when feed.stream is
 // missing/incomplete: it simply connects nothing.
 function start(o) {

@@ -1,6 +1,6 @@
 "use strict";
 /**
- * Manual trade journal — engine + storage + P&L (ZERO dependencies).
+ * Manual trade journal — validation, storage, and derived P&L.
  *
  * Post-hoc journal: the user logs each trade by hand. No broker, no live feed, no
  * tick/market-state coupling. A trade is created with an entry (status "open") and
@@ -8,7 +8,7 @@
  * derive. Intraday and swing are a first-class `tradeType` distinction.
  *
  * Storage mirrors auth.js: in-memory `store` is the runtime source of truth; save()
- * writes through to a MongoDB `trades` collection (if `mongo.uri` is set & reachable)
+ * writes through to a MongoDB `trades` collection (if MONGO_URI is set and reachable)
  * AND always to store/trades.json as an offline cache, falling back to the file when
  * Mongo is down. P&L is DERIVED on read (derive()), never hand-stored.
  */
@@ -20,7 +20,7 @@ const { DurableOutbox } = require("./durable-outbox");
 const { istNow } = require("./utils");
 const { logError, logErrorOnce, resetErrorOnce } = require("./logger");
 
-const ROOT = path.join(__dirname, ".."); // repo root (config lives here)
+const ROOT = path.join(__dirname, ".."); // repo root for local stores and logs
 const STORE_DIR = path.join(ROOT, "store"); // alert + user data files live here
 const STORE_FILE = path.join(STORE_DIR, "trades.json");
 const OUTBOX_FILE = path.join(STORE_DIR, "trades-outbox.json");

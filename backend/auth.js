@@ -1,6 +1,6 @@
 "use strict";
 /**
- * Auth + user management for the Trading Tracker portal (ZERO dependencies).
+ * Auth + user management for the Trading Tracker portal (file/Mongo persistence).
  *
  * - Users live in a `users` collection (MongoDB Atlas, if MONGO_URI is set and reachable) or the local `users.json` file (offline cache / fallback).
  *   Mirrors alerts.js: in-memory `store` is the source of truth; save() writes through.
@@ -20,7 +20,7 @@ const { DurableOutbox } = require("./durable-outbox");
 const { istNow, istFromMs, istLogTs } = require("./utils");
 const { logErrorOnce, resetErrorOnce } = require("./logger");
 
-const ROOT = path.join(__dirname, ".."); // repo root (config lives here)
+const ROOT = path.join(__dirname, ".."); // repo root for local stores and logs
 const STORE_DIR = path.join(ROOT, "store"); // alert + user data files live here
 const STORE_FILE = path.join(STORE_DIR, "users.json");
 const OUTBOX_FILE = path.join(STORE_DIR, "auth-outbox.json");

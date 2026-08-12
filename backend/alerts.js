@@ -1,6 +1,6 @@
 "use strict";
 /**
- * Alert engine + storage (zero dependencies).
+ * Alert engine, notifications, archive, and file/Mongo storage.
  *
  * Lifecycle per alert (BUY example, alert=1000 -> trigger=1100):
  *   armed     -> LTP reaches trigger (alert +10%)        => fire TRIGGER,  status=triggered
@@ -21,7 +21,7 @@ const { DurableOutbox } = require("./durable-outbox");
 const { istNow, istFromMs } = require("./utils");
 const { logError, logErrorOnce, resetErrorOnce } = require("./logger"); // daily-rotating logger, shared app-wide
 
-const ROOT = path.join(__dirname, ".."); // repo root (config lives here)
+const ROOT = path.join(__dirname, ".."); // repo root for local stores and logs
 const STORE_DIR = path.join(ROOT, "store"); // alert + user data files live here
 const STORE_FILE = path.join(STORE_DIR, "alerts.json");
 const OUTBOX_FILE = path.join(STORE_DIR, "alert-outbox.json");
@@ -119,7 +119,7 @@ let eventSink = () => {};
 let changeSink = () => {};
 
 // ---------- persistence ----------
-// Backing store: MongoDB Atlas if `mongo.uri` is configured AND reachable, otherwise the
+// Backing store: MongoDB Atlas if MONGO_URI is configured AND reachable, otherwise the
 // local alerts.json file. The in-memory `store` is the runtime source of truth; save()
 // writes through to both (Mongo async fire-and-forget + alerts.json as a local cache/
 // fallback), so a Mongo outage degrades gracefully instead of blanking the app.

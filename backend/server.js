@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Trading Tracker - local data proxy + static server (Node, ZERO dependencies).
+ * Trading Tracker - market proxy, application APIs, and static server.
  *
  * Why this exists: the data source's API can't be called directly from a browser.
  * CORS forbids the required headers, and its anti-bot layer 403s/hangs any request
@@ -10,7 +10,8 @@
  * origin (localhost). No CORS, no public proxy, live data. Endpoints come from
  * the FEED_JSON env var (the `feed` block as one-line JSON).
  *
- * Uses Node's built-in fetch (Node 18+) and a hand-rolled cookie jar - no npm install.
+ * Feed transport uses Node's built-in fetch (Node 18+) and a hand-rolled cookie jar.
+ * Mongo-backed persistence uses the declared `mongodb` package when configured.
  *
  *   Run:   node server.js
  *   Open:  http://localhost:8787/
@@ -1322,7 +1323,7 @@ const server = http.createServer(async (req, res) => {
 
 async function main() {
   console.log(
-    "\n  Trading Tracker - NIFTY 50 / NIFTY NEXT 50 dashboard (Node)",
+    "\n  Trading Tracker - NSE market dashboard and journal (Node)",
   );
   console.log(
     FEED

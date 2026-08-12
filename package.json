@@ -2,7 +2,7 @@
   "name": "trading-tracker",
   "version": "1.0.0",
   "private": true,
-  "description": "NIFTY OHL dashboard + server-side price alerts (local data proxy)",
+  "description": "NSE market dashboard, alerts, manual trade journal, and reports",
   "type": "commonjs",
   "engines": {
     "node": ">=18"
@@ -15,6 +15,7 @@
     "closed": "node --env-file-if-exists=.env run.js --no-tick",
     "prod": "node --env-file=.env backend/server.js",
     "deploy": "cloudflared tunnel --url http://127.0.0.1:8787/",
+    "doctor": "node --env-file-if-exists=.env scripts/mongo-doctor.mjs",
     "test": "node --test backend/*.test.js"
   },
   "dependencies": {

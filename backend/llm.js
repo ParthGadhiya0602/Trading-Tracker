@@ -9,7 +9,7 @@
  * (bullish/bearish/neutral + confidence + reasoning) for the trading day.
  *
  * Zero npm dependencies - uses Node 18+ built-in fetch. Provider is swapped via
- * config (openai | anthropic | gemini); missing/disabled block = feature dormant.
+ * environment settings (openai | anthropic | gemini); missing/disabled = dormant.
  */
 
 const { istNow } = require("./utils");
