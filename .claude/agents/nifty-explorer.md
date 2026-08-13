@@ -12,10 +12,26 @@ review, or write code.
 ## Rules
 - Every claim about the code MUST cite `path:line` you actually read. No memory, no guessing.
 - If something might not exist, grep to confirm and report "not found" explicitly.
-- Report the real layout you find. Today it's flat (`server.js`, `alerts.js`, `auth.js`,
-  monolith `index.html`); after the restructure it's `backend/*.js` + `frontend/js|css`.
-  Always report the actual paths present now.
-- Never read `config.json` (secrets). Data-source endpoints live only in its `feed` block.
+- Report the real, settled layout:
+  - **`backend/*.js`** — `server.js` (HTTP, warm session `warm`/`ensureWarm`/`srcJson`, SSE
+    fanout, updater loop, routes), `market-store.js` (**single source of truth** for
+    snapshots/prices), `alerts.js` + `alert-policy.js`, `auth.js`, `trades.js`,
+    `telegram.js`, `stream.js` (live WSS), `llm.js`, `logger.js` (day-rotating `logs/`),
+    `mongo-retry.js`, `durable-outbox.js`, `utils.js` (`istNow`, `envFlag`).
+  - **`frontend/js/*`** — `main.js` (entry) → `dashboard.js`, `alerts-ui.js`, `auth-ui.js`,
+    `trades-ui.js`, `reports-ui.js`, `market-ui.js`, `overview-ui.js`, `shell-ui.js`
+    (cross-module bridges on `window.*`).
+  - **`frontend/css/*`** — `base`, `components`, `dashboard`, `alerts`, `auth`, `system`,
+    `trades`, `reports`, `market`.
+  - Runtime data in **`store/`** (`alerts.json`, `users.json`, `telegram.json`,
+    `trades.json` + `*-outbox.json`); logs in **`logs/YYYY-MM-DD.log`**.
+- **Config is environment-only. There is no `config.json`.** Feed/secrets come from env
+  (`FEED_JSON`, `MONGO_URI`, `AUTH_PASSWORD_PEPPER`, `TELEGRAM_*`, `LLM_*`, `HOST`, `PORT`,
+  `STREAM_WS`, `STORE_REFRESH_SECONDS`, `ALERT_POLL_SECONDS`, `ALERTS_NO_TICK`,
+  `DERIVATIVES_ENABLED`). Never print, echo, or paste secret env values or a data-source
+  endpoint — refer to the source generically.
+- When prices/snapshots are involved, note whether a consumer reads from `market-store.js`
+  (the SSOT) or fetches upstream itself — flag any stray refetch or legacy cache.
 - `Bash` is read-only (`grep`, `wc`, `ls`, `node -c`). Never edit or run destructive commands.
 
 ## Output

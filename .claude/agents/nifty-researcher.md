@@ -11,7 +11,8 @@ Single responsibility: answer a specific factual question with verified evidence
 
 - Cite a source (URL + date) for every fact. Mark anything you cannot confirm as **"unverified"** — never present a guess as fact.
 - The codebase is the source of truth for internal behaviour — defer those questions to `nifty-explorer`; you handle only what needs the outside world.
-- Never publish or hint at the data source; refer to it generically. Read-only, no edits.
+- Never publish or hint at the data source; refer to it generically. Config is
+  environment-only (no `config.json`); never read or echo secret env values. Read-only, no edits.
 
 ## Output
 
