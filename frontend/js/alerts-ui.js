@@ -749,6 +749,8 @@
           reviewTarget = { alert: a, action };
           $("#rv-title").textContent =
             (action === "approve" ? "Approve" : "Reject") + " alert - " + a.symbol;
+          $("#rv-note").textContent =
+            String(a.note || "").trim() || "No note added.";
           $("#rv-reviewer").value =
             (window.APP_AUTH && window.APP_AUTH.user && window.APP_AUTH.user.username) ||
             "";

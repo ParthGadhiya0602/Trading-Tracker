@@ -377,6 +377,32 @@
       #reviewModal .alert-form {
         padding: 16px 18px;
       }
+      .review-note {
+        min-width: 0;
+        padding: 11px 12px;
+        border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
+        border-radius: var(--radius-sm);
+        background: color-mix(in srgb, var(--accent) 6%, var(--panel2));
+      }
+      .review-note-label {
+        display: block;
+        margin-bottom: 5px;
+        color: var(--accent);
+        font-size: 10.5px;
+        font-weight: 750;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+      }
+      .review-note p {
+        max-height: 132px;
+        margin: 0;
+        overflow-y: auto;
+        color: var(--txt);
+        font-size: 13.5px;
+        line-height: 1.5;
+        overflow-wrap: anywhere;
+        white-space: pre-wrap;
+      }
 
       /* ---------- alert detail (view) modal ---------- */
       #alertViewModal {

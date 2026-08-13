@@ -632,7 +632,13 @@
       <!-- /#alertModal -->
 
       <!-- review (approve/reject) modal - minimal reuse of the #alertModal chrome -->
-      <div id="reviewModal" role="dialog" aria-modal="true" aria-label="Review alert">
+      <div
+        id="reviewModal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rv-title"
+        aria-describedby="rv-note-label rv-note"
+      >
         <div class="am-card">
           <div class="am-head">
             <i data-lucide="shield-check" aria-hidden="true"></i>
@@ -647,6 +653,10 @@
             </button>
           </div>
           <form class="alert-form" id="reviewForm" autocomplete="off">
+            <div class="review-note" role="note" aria-labelledby="rv-note-label">
+              <span class="review-note-label" id="rv-note-label">Creator note</span>
+              <p id="rv-note">No note added.</p>
+            </div>
             <label>
               Reviewer
               <input id="rv-reviewer" type="text" readonly title="Signed-in user" />

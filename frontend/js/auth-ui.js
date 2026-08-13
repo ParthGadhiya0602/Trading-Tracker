@@ -323,13 +323,11 @@
             telegramStep(1, "Create a bot", `Open <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a>, send <code>/newbot</code>, and copy the token and username.`, "active") +
             telegramStep(
               2,
-              "Add local configuration",
-              `Add these values inside <code>config.json</code>.`,
+              "Add environment configuration",
+              `Add these values to your local <code>.env</code> file.`,
               "pending",
-              `<pre class="tg-config-example"><code>&quot;telegram&quot;: {
-  &quot;botToken&quot;: &quot;PASTE_BOT_TOKEN&quot;,
-  &quot;botUsername&quot;: &quot;${TELEGRAM_BOT_USERNAME}&quot;
-}</code></pre>`,
+              `<pre class="tg-config-example"><code>TELEGRAM_BOT_TOKEN=PASTE_BOT_TOKEN
+TELEGRAM_BOT_USERNAME=${TELEGRAM_BOT_USERNAME}</code></pre>`,
             ) +
             telegramStep(3, "Restart the server", `Run <code>npm start</code>, then return here. The connection button will become available automatically.`, "pending") +
             `</ol>` +

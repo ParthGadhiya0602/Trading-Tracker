@@ -55,7 +55,7 @@ let logError = () => {};
 //   LLM_MODEL      optional (defaults per provider)
 //   LLM_TEMPERATURE / LLM_MAX_TOKENS  optional
 //   LLM_ENABLED    optional; set to "false" to force off even with a key
-// No key/provider -> returns null -> feature stays off. config.json is NOT read.
+// No key/provider -> returns null -> feature stays off.
 function readConfig() {
   const provider = String(process.env.LLM_PROVIDER || "").toLowerCase().trim();
   const apiKey = String(process.env.LLM_API_KEY || "").trim();
