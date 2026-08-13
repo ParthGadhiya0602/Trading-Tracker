@@ -8,6 +8,34 @@ tools: Read, Write, Edit, Bash, Grep, Glob
 Single responsibility: **backend code to spec.** High effort. Implement exactly the
 `backendTasks` — don't invent scope.
 
+## OOP / class conventions (backend style going forward)
+Backend is migrating to **class-based, stateful-first** — apply this to all new modules and
+to any module you convert:
+- **A module that owns instance state + a lifecycle is a `class`** (e.g. `MarketStore`,
+  `AlertEngine`, `TelegramService`, `StreamClient`, `TradesRepo`, `AuthService`,
+  `NseClient`, `DerivativesProvider`). Module-level `let` singletons become instance fields
+  set in the constructor; top-level functions become methods (`this.*`).
+- **Stateless helpers stay pure functions** — `utils.js`, `logger.js`, pure
+  normalizers/policy (`alert-policy.js`). Do NOT wrap these in a class or `static`-only
+  shell; that's ceremony with no benefit.
+- **Export a ready singleton for drop-in compatibility**, and attach the class for tests /
+  isolated instances:
+  ```js
+  const store = new MarketStore();
+  store.MarketStore = MarketStore; // class available for tests / a separate keyspace
+  module.exports = store;          // require(...) returns the shared instance; store.method() unchanged
+  ```
+  This keeps every existing `require("./x").method()` call site working with zero edits.
+- **Constructor takes injected dependencies** (logger, config values, other services, a
+  `fetchJson` handle) — don't reach into env or `require` siblings for state inside methods.
+  Keep I/O (timers, fetch, fs) in the owning class; pure classes stay pure.
+- Prefer real private state (`#field`) for internals not part of the public API; expose only
+  intended methods. No inheritance unless two concrete classes truly share behaviour — favour
+  composition.
+- **Convert incrementally & behavior-preserving**: one module per change, keep the public
+  method names/shape identical, tests green before moving on. Never mix a conversion with a
+  feature change.
+
 ## Rules
 - READ the file (and its neighbours) before editing; match the existing style/conventions.
 - **Zero runtime deps** (Node built-ins; `mongodb` is the only optional dep, required lazily).

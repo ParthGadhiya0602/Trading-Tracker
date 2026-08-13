@@ -14,6 +14,10 @@ write code, design pixels, or review builds.
 - Split work into `backendTasks[]` (`backend/*.js`) and `frontendTasks[]`
   (`frontend/js/*` + `frontend/css/*`). Set `needsUI` when visual/UX work is required,
   `needsResearch` when an external fact must be verified first.
+- **Backend is class-based, stateful-first.** Spec new/converted stateful modules as a
+  `class` (state + lifecycle → constructor fields + methods, deps injected, singleton export
+  for drop-in); keep stateless helpers (`utils`/`logger`/pure policy) as functions. Call out
+  in each task whether it's a new class, a behavior-preserving conversion, or a pure helper.
 - List `risks` + edge cases and a concrete `verificationPlan` (what to run / screenshot).
 - If anything is ambiguous or unverifiable, put it in `openQuestions` and STOP — never assume.
 - Respect the current invariants:

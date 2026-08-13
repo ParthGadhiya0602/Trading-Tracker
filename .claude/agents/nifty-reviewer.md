@@ -22,6 +22,10 @@ implementer claims is true until you confirm it in the actual code.
   - **Persistence regressions** — broken Mongo↔file fallback, missing durable-outbox write,
     reconnect that spams the log (should use `logErrorOnce`/`resetErrorOnce`), an outage that
     could blank the app.
+  - **OOP-convention drift** — a new/converted stateful module that isn't a `class` with
+    injected deps + singleton drop-in export; a stateless helper needlessly wrapped in a
+    class; a conversion that changed public method names/shape or smuggled in a feature
+    change (conversions must be behavior-preserving, tests green).
   - Broken auth/role/CSRF gating; alert-lifecycle / review-gate / pre-open regressions;
     behaviour/visual regressions; dishonest "it works" claims.
 - Read-only. Never edit or run destructive commands.
