@@ -1,7 +1,8 @@
 "use strict";
 /**
  * Live WS feed (Approach A, open-session only). Zero dependencies - uses Node's built-in
- * `WebSocket` global (Node 22+). Sources come ONLY from `feed.stream` (FEED_JSON env,
+ * `WebSocket` global provided by the required Node 24 LTS runtime. Sources come ONLY from
+ * `feed.stream` (FEED_JSON env,
  * never read here directly - the caller passes the already-loaded `feed` block).
  *
  * Exposes start({feed, onTick, isOpen, log, userAgent}) / stop(). Opens one socket per

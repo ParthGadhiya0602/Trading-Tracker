@@ -20,13 +20,14 @@ with six role-aware views:
 Responsive: a left sidebar rail on laptop/desktop; a hamburger menu + bottom-sheet modals on
 mobile. Light/dark follow the system theme.
 
-![Node 18+](https://img.shields.io/badge/node-18%2B-brightgreen)
+![Node 24 LTS](https://img.shields.io/badge/node-24%20LTS-brightgreen)
 
 ---
 
 ## Requirements
 
-- **Node.js 18+** (needs built-in `fetch`; **20.6+** to use `--env-file`). Check: `node --version`.
+- **Node.js 24 LTS (24.11+)**. With nvm, run `nvm use`; otherwise check with
+  `node --version` and install a supported 24.x LTS release.
 - **Environment variables** for all config (see `.env.sample`): `AUTH_PASSWORD_PEPPER` + `FEED_JSON`
   are required; `MONGO_URI` / Telegram / LLM are optional. There is **no config file** — nothing
   secret gets committed or uploaded.
@@ -82,7 +83,7 @@ mobile. Light/dark follow the system theme.
 
 **Deploy with no config file:** set `AUTH_PASSWORD_PEPPER` + `FEED_JSON` (+ `MONGO_URI` / Telegram / LLM as needed), then either load a `.env` natively —
 ```bash
-node --env-file=.env run.js      # Node 20.6+
+node --env-file=.env run.js      # Node 24 LTS (24.11+)
 ```
 — or export the vars in your process manager (pm2 env / systemd `Environment=`).
 

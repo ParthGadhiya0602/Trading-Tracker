@@ -10,7 +10,7 @@
  * origin (localhost). No CORS, no public proxy, live data. Endpoints come from
  * the FEED_JSON env var (the `feed` block as one-line JSON).
  *
- * Feed transport uses Node's built-in fetch (Node 18+) and a hand-rolled cookie jar.
+ * Feed transport uses the Node 24 LTS built-in fetch and a hand-rolled cookie jar.
  * Mongo-backed persistence uses the declared `mongodb` package when configured.
  *
  *   Run:   node server.js
@@ -120,7 +120,7 @@ let warmedAt = 0;
 let warming = null; // in-flight warm promise, so concurrent requests share one warmup
 
 function storeCookies(res) {
-  // Node 18.14+ exposes getSetCookie(); fall back to the folded header otherwise.
+  // Node 24 exposes getSetCookie(); retain the folded-header fallback for defensive parsing.
   const list =
     typeof res.headers.getSetCookie === "function"
       ? res.headers.getSetCookie()

@@ -8,7 +8,7 @@
  * batches the pre-open data into LLM prompts and caches per-stock signals
  * (bullish/bearish/neutral + confidence + reasoning) for the trading day.
  *
- * Zero npm dependencies - uses Node 18+ built-in fetch. Provider is swapped via
+ * Zero npm dependencies - uses the Node 24 LTS built-in fetch. Provider is swapped via
  * environment settings (openai | anthropic | gemini); missing/disabled = dormant.
  */
 

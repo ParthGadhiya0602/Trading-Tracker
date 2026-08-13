@@ -5,7 +5,7 @@
   "description": "NSE market dashboard, alerts, manual trade journal, and reports",
   "type": "commonjs",
   "engines": {
-    "node": ">=18"
+    "node": ">=24.11.0 <25"
   },
   "scripts": {
     "start": "node --env-file-if-exists=.env run.js",
