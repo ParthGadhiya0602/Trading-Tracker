@@ -5,8 +5,9 @@
  * `feed.stream` (FEED_JSON env,
  * never read here directly - the caller passes the already-loaded `feed` block).
  *
- * Exposes start({feed, onTick, isOpen, log, userAgent}) / stop(). Opens one socket per
- * configured constituent stream + the NIFTY 50 level stream, with per-socket exponential
+ * Exposes a StreamClient with start({feed, onTick, isOpen, log, userAgent}) / stop(),
+ * exported as a shared singleton (drop-in for the old function-module API). Opens one socket
+ * per configured constituent stream + the NIFTY 50 level stream, with per-socket exponential
  * backoff (1s -> 2s -> 4s -> ... capped at 30s, reset on a successful open). Connects only
  * while isOpen() is true; stop() (or a transition away from "open") tears everything down.
  *
@@ -26,10 +27,7 @@ const BASE_BACKOFF_MS = 1000;
 // shape) + any frame arriving while the market is closed (post-market detection).
 const STREAM_CAPTURE = require("./utils").envFlag(process.env.STREAM_CAPTURE);
 
-let sockets = []; // [{ key, ws, backoffMs, timer, closedByUs }]
-let running = false;
-let opts = null;
-
+// ---- pure helpers (no instance state) ----
 function num(v) {
   if (v == null || v === "") return null;
   const n = Number(String(v).replace(/,/g, ""));
@@ -41,9 +39,6 @@ function buildUrl(feedStream, entry) {
   return `${feedStream.wsBase}/${entry.path}?${q}`;
 }
 
-// Normalize one raw upstream message into { index, kind, symbol?, patch } or null if it
-// doesn't look like a tick we understand (never throw - callers must never crash a socket
-// on a bad/unknown message).
 // Drop null/undefined keys so a partial tick (e.g. price only) never overwrites
 // existing OHLC/volume fields with blanks when merged via Object.assign.
 function prune(patch) {
@@ -52,6 +47,10 @@ function prune(patch) {
   }
   return patch;
 }
+
+// Normalize one raw upstream message into { index, kind, symbol?, patch } or null if it
+// doesn't look like a tick we understand (never throw - callers must never crash a socket
+// on a bad/unknown message).
 function normalize(raw, index, kind) {
   try {
     const j = typeof raw === "string" ? JSON.parse(raw) : raw;
@@ -96,128 +95,140 @@ function normalize(raw, index, kind) {
   }
 }
 
-function scheduleReconnect(entry) {
-  if (!running || entry.closedByUs) return;
-  entry.timer = setTimeout(() => {
-    entry.timer = null;
-    connect(entry);
-  }, entry.backoffMs);
-  entry.backoffMs = Math.min(entry.backoffMs * 2, MAX_BACKOFF_MS);
-}
-
-function connect(entry) {
-  if (!running || !opts.isOpen()) return; // only connect while the session is "open"
-  let ws;
-  try {
-    ws = new WebSocket(entry.url, {
-      headers: { Origin: entry.origin, "User-Agent": opts.userAgent },
-    });
-  } catch (e) {
-    logErr(entry, e);
-    scheduleReconnect(entry);
-    return;
+// Live WS ingest: owns the socket set, reconnect backoff, and lifecycle.
+class StreamClient {
+  constructor() {
+    this.sockets = []; // [{ key, ws, backoffMs, timer, closedByUs }]
+    this.running = false;
+    this.opts = null;
   }
-  entry.ws = ws;
-  ws.addEventListener("open", () => {
-    entry.backoffMs = BASE_BACKOFF_MS; // reset on successful open
-  });
-  ws.addEventListener("message", (ev) => {
+
+  #scheduleReconnect(entry) {
+    if (!this.running || entry.closedByUs) return;
+    entry.timer = setTimeout(() => {
+      entry.timer = null;
+      this.#connect(entry);
+    }, entry.backoffMs);
+    entry.backoffMs = Math.min(entry.backoffMs * 2, MAX_BACKOFF_MS);
+  }
+
+  #connect(entry) {
+    if (!this.running || !this.opts.isOpen()) return; // only connect while the session is "open"
+    let ws;
     try {
-      if (STREAM_CAPTURE && opts && opts.log) {
-        const openNow = opts.isOpen && opts.isOpen();
-        if ((entry._cap = (entry._cap || 0) + 1) <= 6) {
-          opts.log(`[stream ${entry.kind}/${entry.index}] ${String(ev.data).slice(0, 600)}`);
-        } else if (!openNow && (entry._capPost = (entry._capPost || 0) + 1) <= 10) {
-          opts.log(`[stream POST-CLOSE ${entry.kind}/${entry.index}] ${String(ev.data).slice(0, 300)}`);
-        }
-      }
-      const tick = normalize(ev.data, entry.index, entry.kind);
-      if (tick && opts && opts.onTick) opts.onTick(tick);
-    } catch (_) {
-      /* defensive: never let a bad message kill the socket */
+      ws = new WebSocket(entry.url, {
+        headers: { Origin: entry.origin, "User-Agent": this.opts.userAgent },
+      });
+    } catch (e) {
+      this.#logErr(entry, e);
+      this.#scheduleReconnect(entry);
+      return;
     }
-  });
-  ws.addEventListener("error", (ev) => {
-    logErr(entry, (ev && ev.error) || ev);
-  });
-  ws.addEventListener("close", () => {
-    entry.ws = null;
-    scheduleReconnect(entry);
-  });
-}
-
-function logErr(entry, e) {
-  if (opts && typeof opts.log === "function") {
-    opts.log(`stream[${entry.key}] ${(e && e.message) || e}`);
-  }
-}
-
-function teardown() {
-  for (const entry of sockets) {
-    entry.closedByUs = true;
-    if (entry.timer) clearTimeout(entry.timer);
-    if (entry.ws) {
+    entry.ws = ws;
+    ws.addEventListener("open", () => {
+      entry.backoffMs = BASE_BACKOFF_MS; // reset on successful open
+    });
+    ws.addEventListener("message", (ev) => {
       try {
-        entry.ws.close();
-      } catch (_) {}
+        if (STREAM_CAPTURE && this.opts && this.opts.log) {
+          const openNow = this.opts.isOpen && this.opts.isOpen();
+          if ((entry._cap = (entry._cap || 0) + 1) <= 6) {
+            this.opts.log(`[stream ${entry.kind}/${entry.index}] ${String(ev.data).slice(0, 600)}`);
+          } else if (!openNow && (entry._capPost = (entry._capPost || 0) + 1) <= 10) {
+            this.opts.log(`[stream POST-CLOSE ${entry.kind}/${entry.index}] ${String(ev.data).slice(0, 300)}`);
+          }
+        }
+        const tick = normalize(ev.data, entry.index, entry.kind);
+        if (tick && this.opts && this.opts.onTick) this.opts.onTick(tick);
+      } catch (_) {
+        /* defensive: never let a bad message kill the socket */
+      }
+    });
+    ws.addEventListener("error", (ev) => {
+      this.#logErr(entry, (ev && ev.error) || ev);
+    });
+    ws.addEventListener("close", () => {
       entry.ws = null;
-    }
-  }
-  sockets = [];
-}
-
-// start({ feed, onTick, isOpen, log, userAgent }) - feed is the parsed FEED_JSON object
-// (feed.stream holds wsBase/origin/constituents/levels). Safe to call when feed.stream is
-// missing/incomplete: it simply connects nothing.
-function start(o) {
-  if (running) stop();
-  const input = o || {};
-  const stream = input.feed && input.feed.stream;
-  opts = {
-    onTick: input.onTick,
-    isOpen: typeof input.isOpen === "function" ? input.isOpen : () => false,
-    log: input.log,
-    userAgent: input.userAgent,
-  };
-  running = true;
-  if (!stream || !stream.wsBase || !stream.constituents) return;
-  const entries = [];
-  for (const [dashIndex, cfg] of Object.entries(stream.constituents)) {
-    if (!cfg || !cfg.path || !cfg.index) continue;
-    entries.push({
-      key: `${dashIndex}/constituents`,
-      index: dashIndex,
-      kind: "stock",
-      url: buildUrl(stream, cfg),
-      origin: stream.origin,
+      this.#scheduleReconnect(entry);
     });
   }
-  if (stream.levels) {
-    for (const [dashIndex, cfg] of Object.entries(stream.levels)) {
+
+  #logErr(entry, e) {
+    if (this.opts && typeof this.opts.log === "function") {
+      this.opts.log(`stream[${entry.key}] ${(e && e.message) || e}`);
+    }
+  }
+
+  #teardown() {
+    for (const entry of this.sockets) {
+      entry.closedByUs = true;
+      if (entry.timer) clearTimeout(entry.timer);
+      if (entry.ws) {
+        try {
+          entry.ws.close();
+        } catch (_) {}
+        entry.ws = null;
+      }
+    }
+    this.sockets = [];
+  }
+
+  // start({ feed, onTick, isOpen, log, userAgent }) - feed is the parsed FEED_JSON object
+  // (feed.stream holds wsBase/origin/constituents/levels). Safe to call when feed.stream is
+  // missing/incomplete: it simply connects nothing.
+  start(o) {
+    if (this.running) this.stop();
+    const input = o || {};
+    const stream = input.feed && input.feed.stream;
+    this.opts = {
+      onTick: input.onTick,
+      isOpen: typeof input.isOpen === "function" ? input.isOpen : () => false,
+      log: input.log,
+      userAgent: input.userAgent,
+    };
+    this.running = true;
+    if (!stream || !stream.wsBase || !stream.constituents) return;
+    const entries = [];
+    for (const [dashIndex, cfg] of Object.entries(stream.constituents)) {
       if (!cfg || !cfg.path || !cfg.index) continue;
       entries.push({
-        key: `${dashIndex}/level`,
+        key: `${dashIndex}/constituents`,
         index: dashIndex,
-        kind: "level",
+        kind: "stock",
         url: buildUrl(stream, cfg),
         origin: stream.origin,
       });
     }
+    if (stream.levels) {
+      for (const [dashIndex, cfg] of Object.entries(stream.levels)) {
+        if (!cfg || !cfg.path || !cfg.index) continue;
+        entries.push({
+          key: `${dashIndex}/level`,
+          index: dashIndex,
+          kind: "level",
+          url: buildUrl(stream, cfg),
+          origin: stream.origin,
+        });
+      }
+    }
+    this.sockets = entries.map((e) => ({
+      ...e,
+      ws: null,
+      backoffMs: BASE_BACKOFF_MS,
+      timer: null,
+      closedByUs: false,
+    }));
+    for (const entry of this.sockets) this.#connect(entry);
   }
-  sockets = entries.map((e) => ({
-    ...e,
-    ws: null,
-    backoffMs: BASE_BACKOFF_MS,
-    timer: null,
-    closedByUs: false,
-  }));
-  for (const entry of sockets) connect(entry);
+
+  stop() {
+    this.running = false;
+    this.#teardown();
+    this.opts = null;
+  }
 }
 
-function stop() {
-  running = false;
-  teardown();
-  opts = null;
-}
-
-module.exports = { start, stop };
+// Shared singleton (drop-in for the old function-module API) + the class for tests/isolated instances.
+const stream = new StreamClient();
+stream.StreamClient = StreamClient;
+module.exports = stream;
