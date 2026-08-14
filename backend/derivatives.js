@@ -98,6 +98,141 @@ function hasDerivativesScope(store) {
   return Boolean(store && store.derivatives && typeof store.derivatives.ingestSnapshot === "function" && typeof store.derivatives.getSnapshot === "function" && typeof store.derivatives.setStatus === "function");
 }
 
+function nonNegativeNumber(value) {
+  if (value == null || (typeof value !== "number" && typeof value !== "string") || (typeof value === "string" && !value.trim())) return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+function finiteNumber(value) {
+  if (value == null || (typeof value !== "number" && typeof value !== "string") || (typeof value === "string" && !value.trim())) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function highestAtStrike(entries) {
+  if (!entries.length) return null;
+  return entries.reduce((best, entry) => !best || entry.value > best.value || (entry.value === best.value && entry.strike < best.strike) ? entry : best, null);
+}
+
+/**
+ * Read-only facts derived from a normalized option-chain snapshot. It deliberately
+ * has no provider, demand, or timer dependency: an analysis request cannot refresh
+ * or otherwise change the market-data lifecycle.
+ */
+class DerivativesAnalysis {
+  constructor(options = {}) {
+    if (!options.scope || typeof options.scope.getSnapshot !== "function") {
+      throw new DerivativesError("CONFIG_ERROR", "derivatives snapshot scope is required");
+    }
+    this.scope = options.scope;
+  }
+
+  getAnalysis(query) {
+    const identity = queryIdentity(query, true);
+    const key = `index:${identity.symbol}:${identity.expiry}`;
+    const snapshot = this.scope.getSnapshot(key);
+    if (!snapshot || !snapshot.data || !Array.isArray(snapshot.data.rows) || !snapshot.data.rows.length) {
+      throw new DerivativesError("SNAPSHOT_UNAVAILABLE", "option chain snapshot unavailable", { details: { key } });
+    }
+
+    const base = {
+      kind: "derivatives-analysis",
+      ...identity,
+      key,
+      sequence: Number.isFinite(snapshot.sequence) ? snapshot.sequence : null,
+      state: typeof snapshot.state === "string" ? snapshot.state : null,
+      sourceTimestamp: typeof snapshot.sourceTimestamp === "string" ? snapshot.sourceTimestamp : null,
+      receivedAt: typeof snapshot.receivedAt === "string" ? snapshot.receivedAt : null,
+      disclaimer: "Facts derived from the stored option-chain snapshot only; not trading advice.",
+    };
+    const prepared = this.#prepare(snapshot.data.rows);
+    const diagnostics = this.#diagnostics(snapshot, prepared);
+    if (!prepared.rows.length) {
+      return { ...base, facts: null, diagnostics };
+    }
+    return { ...base, facts: this.#facts(prepared.underlying, prepared), diagnostics };
+  }
+
+  #prepare(rows) {
+    const prepared = [];
+    let invalidStrikes = 0;
+    let missingCalls = 0;
+    let missingPuts = 0;
+    let invalidOi = 0;
+    let invalidVolume = 0;
+    for (const row of rows) {
+      const strike = nonNegativeNumber(row && row.strike);
+      if (strike == null) { invalidStrikes += 1; continue; }
+      const call = row && row.call && typeof row.call === "object" ? row.call : null;
+      const put = row && row.put && typeof row.put === "object" ? row.put : null;
+      if (!call) missingCalls += 1;
+      if (!put) missingPuts += 1;
+      const normalizeLeg = (leg) => {
+        if (!leg) return null;
+        const oi = nonNegativeNumber(leg.openInterest);
+        const volume = nonNegativeNumber(leg.volume);
+        if (leg.openInterest != null && oi == null) invalidOi += 1;
+        if (leg.volume != null && volume == null) invalidVolume += 1;
+        return { oi, volume, changeOi: finiteNumber(leg.changeInOpenInterest), iv: nonNegativeNumber(leg.impliedVolatility) };
+      };
+      prepared.push({ strike, call: normalizeLeg(call), put: normalizeLeg(put) });
+    }
+    prepared.sort((a, b) => a.strike - b.strike);
+    return { rows: prepared, underlying: null, invalidStrikes, missingCalls, missingPuts, invalidOi, invalidVolume };
+  }
+
+  #diagnostics(snapshot, prepared) {
+    const underlying = nonNegativeNumber(snapshot.data && snapshot.data.underlyingValue);
+    prepared.underlying = underlying;
+    const legs = prepared.rows.flatMap((row) => [row.call, row.put]).filter(Boolean);
+    return {
+      missingLegs: { calls: prepared.missingCalls, puts: prepared.missingPuts },
+      strikes: { total: Array.isArray(snapshot.data.rows) ? snapshot.data.rows.length : 0, valid: prepared.rows.length, invalid: prepared.invalidStrikes },
+      liquidity: {
+        callLegs: prepared.rows.filter((row) => row.call).length,
+        putLegs: prepared.rows.filter((row) => row.put).length,
+        oiAvailableLegs: legs.filter((leg) => leg.oi != null).length,
+        volumeAvailableLegs: legs.filter((leg) => leg.volume != null).length,
+        invalidOi: prepared.invalidOi,
+        invalidVolume: prepared.invalidVolume,
+      },
+      underlyingAvailable: underlying != null,
+    };
+  }
+
+  #facts(underlying, prepared) {
+    const atm = underlying == null ? null : prepared.rows.reduce((best, row) => !best || Math.abs(row.strike - underlying) < Math.abs(best - underlying) || (Math.abs(row.strike - underlying) === Math.abs(best - underlying) && row.strike < best) ? row.strike : best, null);
+    const totals = (field) => {
+      let callTotal = 0; let putTotal = 0; let calls = 0; let puts = 0;
+      for (const row of prepared.rows) {
+        if (row.call && row.call[field] != null) { callTotal += row.call[field]; calls += 1; }
+        if (row.put && row.put[field] != null) { putTotal += row.put[field]; puts += 1; }
+      }
+      return { value: calls && puts && callTotal > 0 ? putTotal / callTotal : null, callTotal: calls ? callTotal : null, putTotal: puts ? putTotal : null };
+    };
+    const highest = (side, field) => highestAtStrike(prepared.rows.flatMap((row) => row[side] && row[side][field] != null ? [{ strike: row.strike, value: row[side][field] }] : []));
+    const atmRow = atm == null ? null : prepared.rows.find((row) => row.strike === atm);
+    const callIv = atmRow && atmRow.call ? atmRow.call.iv : null;
+    const putIv = atmRow && atmRow.put ? atmRow.put.iv : null;
+    const painInputs = prepared.rows.filter((row) => (row.call && row.call.oi != null) || (row.put && row.put.oi != null));
+    const payouts = prepared.rows.map((candidate) => ({
+      strike: candidate.strike,
+      value: painInputs.reduce((sum, row) => sum + (row.call && row.call.oi != null ? Math.max(0, candidate.strike - row.strike) * row.call.oi : 0) + (row.put && row.put.oi != null ? Math.max(0, row.strike - candidate.strike) * row.put.oi : 0), 0),
+    }));
+    const maxPain = payouts.length && painInputs.length ? payouts.reduce((best, entry) => !best || entry.value < best.value || (entry.value === best.value && entry.strike < best.strike) ? entry : best, null) : null;
+    return {
+      underlying,
+      atm: atm == null ? null : { strike: atm },
+      pcr: { openInterest: totals("oi"), volume: totals("volume") },
+      highestOpenInterest: { call: highest("call", "oi"), put: highest("put", "oi") },
+      highestChangeInOpenInterest: { call: highest("call", "changeOi"), put: highest("put", "changeOi") },
+      maxPain: maxPain && { strike: maxPain.strike, totalPayout: maxPain.value, inputCoverage: { candidateStrikes: payouts.length, inputStrikes: painInputs.length, callInputs: painInputs.filter((row) => row.call && row.call.oi != null).length, putInputs: painInputs.filter((row) => row.put && row.put.oi != null).length } },
+      atmImpliedVolatility: atm == null ? null : { call: callIv, put: putIv, putMinusCall: callIv != null && putIv != null ? putIv - callIv : null },
+    };
+  }
+}
+
 class DerivativesService {
   constructor(options = {}) {
     if (!options.provider || typeof options.provider.getContracts !== "function" || typeof options.provider.getOptionChain !== "function") {
@@ -111,6 +246,8 @@ class DerivativesService {
     const config = options.config || {};
     this.provider = options.provider;
     this.scope = options.store.derivatives;
+    this.analysis = options.analysis || new DerivativesAnalysis({ scope: this.scope });
+    if (!this.analysis || typeof this.analysis.getAnalysis !== "function") throw new DerivativesError("CONFIG_ERROR", "analysis must implement getAnalysis");
     this.isMarketOpen = options.isMarketOpen;
     this.nextOpenDelayMs = options.nextOpenDelayMs;
     this.now = options.now || Date.now;
@@ -193,6 +330,10 @@ class DerivativesService {
       });
     this.contractInflight.set(cacheKey, request);
     return request.then(clone);
+  }
+
+  getAnalysis(query) {
+    return clone(this.analysis.getAnalysis(query));
   }
 
   addDemand(query) {
@@ -507,4 +648,4 @@ class DerivativesService {
   }
 }
 
-module.exports = { DerivativesError, DerivativesService };
+module.exports = { DerivativesAnalysis, DerivativesError, DerivativesService };

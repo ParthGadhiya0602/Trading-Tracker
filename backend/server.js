@@ -970,6 +970,7 @@ function permit(res, user, action, alert) {
 function derivativeErrorResponse(res, error) {
   const code = error instanceof DerivativesError ? error.code : "SOURCE_ERROR";
   const status = code === "INVALID_QUERY" || code === "INVALID_KEY" ? 400
+    : code === "SNAPSHOT_UNAVAILABLE" ? 404
     : code === "REQUEST_BUDGET" || code === "CAPACITY" ? 429
       : code === "UPSTREAM_BLOCK" || code === "SOURCE_BUSY" || code === "CLOSED" ? 503
         : 502;
@@ -1028,11 +1029,12 @@ async function handleDerivativesApi(req, res, url, method) {
     sendJson(res, 503, { error: "derivatives service unavailable" });
     return true;
   }
-  if (url === "/api/derivatives/analysis") {
-    sendJson(res, 404, { error: "not found" });
-    return true;
-  }
   try {
+    if (url === "/api/derivatives/analysis" && method === "GET") {
+      const { symbol, expiry } = derivativeQuery(req, ["symbol", "expiry"]);
+      sendJson(res, 200, derivativesService.getAnalysis({ market: "index", symbol, expiry }));
+      return true;
+    }
     if (url === "/api/derivatives/contracts" && method === "GET") {
       const { symbol } = derivativeQuery(req, ["symbol"]);
       sendJson(res, 200, await derivativesService.getContracts({ market: "index", symbol }));
