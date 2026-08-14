@@ -455,6 +455,7 @@ function createDerivativesRuntime() {
     nextOpenDelayMs: () => nextDerivativeOpenDelayMs(),
     tradingDate: () => istTradingDate(),
     sourceStatus: () => sourceTraffic.status(),
+    onUpdate: (snapshot, type) => scheduleDerivativeFanout(snapshot.key, type),
     config: {
       refreshMs:
         Math.max(3, Number(process.env.DERIVATIVES_POLL_SECONDS) || 5) * 1000,
@@ -738,6 +739,7 @@ function applyTick(t) {
 // SSE fan-out for /api/stream (only ever populated when STREAM_WS is on - the endpoint
 // itself 404s otherwise, so nothing subscribes).
 const sseClients = new Set();
+const derivativeSseClients = new Map(); // key -> Set<{ res, release, heartbeat }>
 const stateSseClients = new Set(); // { res, userId }
 const stateChanges = [];
 let stateRevision = 0;
@@ -771,6 +773,53 @@ function scheduleFanout() {
   const wait = since >= FANOUT_MIN_MS ? 0 : FANOUT_MIN_MS - since;
   fanoutTimer = setTimeout(fanoutNow, wait);
   if (fanoutTimer.unref) fanoutTimer.unref();
+}
+
+let derivativeFanoutTimer = null;
+let derivativeLastFanoutMs = 0;
+const derivativePendingUpdates = new Map();
+function derivativeSseWrite(client, chunk) {
+  try {
+    if (client.res.writableEnded) return false;
+    client.res.write(chunk);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+function removeDerivativeClient(key, client) {
+  const clients = derivativeSseClients.get(key);
+  if (!clients || !clients.delete(client)) return;
+  if (client.heartbeat) clearInterval(client.heartbeat);
+  client.release();
+  if (!clients.size) derivativeSseClients.delete(key);
+}
+function derivativeEvent(snapshot, type) {
+  const event = type === "status" ? "status" : "snapshot";
+  const id = Number.isFinite(snapshot && snapshot.sequence) ? `id: ${snapshot.sequence}\n` : "";
+  return `event: ${event}\n${id}data: ${JSON.stringify(snapshot)}\n\n`;
+}
+function fanoutDerivativeNow() {
+  derivativeFanoutTimer = null;
+  derivativeLastFanoutMs = Date.now();
+  for (const [key, type] of derivativePendingUpdates) {
+    derivativePendingUpdates.delete(key);
+    const clients = derivativeSseClients.get(key);
+    const snapshot = store.derivatives.getSnapshot(key);
+    if (!clients || !snapshot) continue;
+    const chunk = derivativeEvent(snapshot, type);
+    for (const client of [...clients]) {
+      if (!derivativeSseWrite(client, chunk)) removeDerivativeClient(key, client);
+    }
+  }
+}
+function scheduleDerivativeFanout(key, type) {
+  if (!DERIVATIVES_ENABLED || !derivativeSseClients.has(key)) return;
+  derivativePendingUpdates.set(key, type);
+  if (derivativeFanoutTimer) return;
+  const since = Date.now() - derivativeLastFanoutMs;
+  derivativeFanoutTimer = setTimeout(fanoutDerivativeNow, Math.max(0, FANOUT_MIN_MS - since));
+  derivativeFanoutTimer.unref?.();
 }
 function stateSseWrite(client, chunk) {
   try {
@@ -915,6 +964,166 @@ function permit(res, user, action, alert) {
   const denied = authorize(user, action, alert);
   if (!denied) return true;
   sendJson(res, denied.status, { error: denied.error });
+  return false;
+}
+
+function derivativeErrorResponse(res, error) {
+  const code = error instanceof DerivativesError ? error.code : "SOURCE_ERROR";
+  const status = code === "INVALID_QUERY" || code === "INVALID_KEY" ? 400
+    : code === "REQUEST_BUDGET" || code === "CAPACITY" ? 429
+      : code === "UPSTREAM_BLOCK" || code === "SOURCE_BUSY" || code === "CLOSED" ? 503
+        : 502;
+  const retryAfterMs = error && Number.isFinite(Number(error.retryAfterMs))
+    ? Math.max(0, Number(error.retryAfterMs)) : null;
+  sendJson(res, status, {
+    error: error instanceof DerivativesError ? error.message : "derivatives source request failed",
+    code,
+    ...(retryAfterMs == null ? {} : { retryAfterMs }),
+  });
+}
+
+function derivativeQuery(req, fields) {
+  if ((req.url || "").length > 512) throw new DerivativesError("INVALID_QUERY", "query is too long");
+  const query = new URL(req.url, `http://${HOST}`).searchParams;
+  for (const name of query.keys()) {
+    if (!fields.includes(name) || query.getAll(name).length !== 1) {
+      throw new DerivativesError("INVALID_QUERY", "invalid query parameters");
+    }
+  }
+  const result = {};
+  for (const field of fields) {
+    const value = query.get(field);
+    if (typeof value !== "string" || !value || value.length > (field === "symbol" ? 12 : 10)) {
+      throw new DerivativesError("INVALID_QUERY", `invalid ${field}`);
+    }
+    result[field] = value;
+  }
+  if (result.symbol !== "NIFTY" && result.symbol !== "BANKNIFTY") {
+    throw new DerivativesError("INVALID_QUERY", "symbol must be NIFTY or BANKNIFTY");
+  }
+  if (result.expiry && !validDerivativeDate(result.expiry)) {
+    throw new DerivativesError("INVALID_QUERY", "expiry must be an ISO calendar date");
+  }
+  return result;
+}
+
+function validDerivativeDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
+function derivativeExpiryIsValid(contracts, expiry) {
+  return Boolean(contracts && Array.isArray(contracts.expiries) && contracts.expiries.some((entry) => entry && entry.expiry === expiry));
+}
+
+async function handleDerivativesApi(req, res, url, method) {
+  let requestClosed = false;
+  if (!DERIVATIVES_ENABLED) {
+    sendJson(res, 404, { error: "not found" });
+    return true;
+  }
+  if (!derivativesService) {
+    sendJson(res, 503, { error: "derivatives service unavailable" });
+    return true;
+  }
+  if (url === "/api/derivatives/analysis") {
+    sendJson(res, 404, { error: "not found" });
+    return true;
+  }
+  try {
+    if (url === "/api/derivatives/contracts" && method === "GET") {
+      const { symbol } = derivativeQuery(req, ["symbol"]);
+      sendJson(res, 200, await derivativesService.getContracts({ market: "index", symbol }));
+      return true;
+    }
+    if (url === "/api/derivatives/options" && method === "GET") {
+      const { symbol, expiry } = derivativeQuery(req, ["symbol", "expiry"]);
+      const snapshot = store.derivatives.getSnapshot(`index:${symbol}:${expiry}`);
+      if (!snapshot) sendJson(res, 404, { error: "option chain snapshot unavailable" });
+      else sendJson(res, 200, snapshot);
+      return true;
+    }
+    if (url === "/api/derivatives/status" && method === "GET") {
+      if (new URL(req.url, `http://${HOST}`).search) throw new DerivativesError("INVALID_QUERY", "status accepts no query parameters");
+      sendJson(res, 200, derivativesService.getStatus());
+      return true;
+    }
+    if (url === "/api/derivatives/stream" && method === "GET") {
+      const { symbol, expiry } = derivativeQuery(req, ["symbol", "expiry"]);
+      let streamClosed = false;
+      let demand = null;
+      let key = null;
+      let client = null;
+      let clientRegistered = false;
+      let streamStarted = false;
+      const closeStream = () => {
+        requestClosed = true;
+        streamClosed = true;
+        if (clientRegistered && client && key) removeDerivativeClient(key, client);
+        else if (demand) demand.release();
+      };
+      // Register before metadata I/O so an abandoned request can never acquire demand.
+      req.once("close", closeStream);
+      const contracts = await derivativesService.getContracts({ market: "index", symbol });
+      if (streamClosed || req.destroyed || res.destroyed || res.writableEnded) return true;
+      if (!derivativeExpiryIsValid(contracts, expiry)) {
+        throw new DerivativesError("INVALID_QUERY", "expiry is not available for this symbol");
+      }
+      demand = derivativesService.addDemand({ market: "index", symbol, expiry });
+      key = demand.key;
+      if (streamClosed || req.destroyed || res.destroyed || res.writableEnded) {
+        demand.release();
+        return true;
+      }
+      try {
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        });
+        streamStarted = true;
+        res.write("retry: 3000\n\n");
+        client = { res, release: demand.release, heartbeat: null };
+        const clients = derivativeSseClients.get(key) || new Set();
+        clients.add(client);
+        derivativeSseClients.set(key, clients);
+        clientRegistered = true;
+        if (streamClosed || req.destroyed || res.destroyed || res.writableEnded) {
+          removeDerivativeClient(key, client);
+          return true;
+        }
+        // The first application event is always a complete snapshot envelope,
+        // including the normalized loading envelope created by addDemand().
+        const current = store.derivatives.getSnapshot(key);
+        if (!current || !derivativeSseWrite(client, derivativeEvent(current, "snapshot"))) {
+          removeDerivativeClient(key, client);
+          return true;
+        }
+        client.heartbeat = setInterval(() => {
+          if (!derivativeSseWrite(client, ": heartbeat\n\n")) removeDerivativeClient(key, client);
+        }, 15_000);
+        client.heartbeat.unref?.();
+      } catch (error) {
+        if (clientRegistered && client) removeDerivativeClient(key, client);
+        else if (demand) demand.release();
+        if (streamStarted || streamClosed || req.destroyed || res.destroyed || res.writableEnded) {
+          if (streamStarted && !res.destroyed && !res.writableEnded) {
+            try { res.end(); } catch (_) {}
+          }
+          return true;
+        }
+        throw error;
+      }
+      return true;
+    }
+  } catch (error) {
+    if (requestClosed || req.destroyed || res.destroyed || res.writableEnded) return true;
+    derivativeErrorResponse(res, error);
+    return true;
+  }
   return false;
 }
 
@@ -1466,6 +1675,12 @@ const server = http.createServer(async (req, res) => {
       const token = getToken(req);
       // open auth endpoints (status/setup/login/logout/users-public) need no session
       if (await handleAuthApi(req, res, url, method, token)) return;
+      // A disabled feature must be indistinguishable from an unimplemented route,
+      // including to callers without a session.
+      if (!DERIVATIVES_ENABLED && url.startsWith("/api/derivatives")) {
+        sendJson(res, 404, { error: "not found" });
+        return;
+      }
       // everything else requires a valid session
       const user = auth.sessionUser(token);
       if (!user) {
@@ -1489,6 +1704,11 @@ const server = http.createServer(async (req, res) => {
       }
       if (url.startsWith("/api/telegram")) {
         if (await handleTelegramApi(req, res, url, method, user)) return;
+        sendJson(res, 404, { error: "not found" });
+        return;
+      }
+      if (url.startsWith("/api/derivatives")) {
+        if (await handleDerivativesApi(req, res, url, method)) return;
         sendJson(res, 404, { error: "not found" });
         return;
       }
@@ -1595,6 +1815,12 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.on("close", () => {
+  if (derivativeFanoutTimer) clearTimeout(derivativeFanoutTimer);
+  derivativeFanoutTimer = null;
+  derivativePendingUpdates.clear();
+  for (const [key, clients] of derivativeSseClients) {
+    for (const client of [...clients]) removeDerivativeClient(key, client);
+  }
   if (derivativesService) derivativesService.close();
   sourceTraffic.close();
 });

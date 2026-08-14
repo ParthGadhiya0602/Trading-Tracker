@@ -117,6 +117,7 @@ class DerivativesService {
     this.random = options.random || Math.random;
     this.tradingDate = options.tradingDate || (() => new Date(this.now()).toISOString().slice(0, 10));
     this.sourceStatus = typeof options.sourceStatus === "function" ? options.sourceStatus : null;
+    this.onUpdate = typeof options.onUpdate === "function" ? options.onUpdate : null;
     this.timers = options.timers || { setTimeout, clearTimeout };
     if (typeof this.timers.setTimeout !== "function" || typeof this.timers.clearTimeout !== "function") {
       throw new DerivativesError("CONFIG_ERROR", "timers must implement setTimeout and clearTimeout");
@@ -211,6 +212,9 @@ class DerivativesService {
     }
     demand.graceExpired = false;
     demand.graceExpiresAt = null;
+    // Give a newly subscribed stream a complete, normalized envelope immediately;
+    // fetching remains timer-driven and only starts after demand is registered.
+    if (!this.scope.getSnapshot(key)) this.#setStatus(key, { state: "loading", reason: "awaiting-refresh" });
     if (!demand.timer && !demand.inFlight) this.#schedule(key, this.#initialDelay());
 
     let released = false;
@@ -232,7 +236,7 @@ class DerivativesService {
 
     const now = this.now();
     if (!this.isMarketOpen()) {
-      this.scope.setStatus(identity.key, { state: "closed", reason: "market-closed" });
+      this.#setStatus(identity.key, { state: "closed", reason: "market-closed" });
       this.#scheduleNextOpen(identity.key);
       return Promise.resolve(this.scope.getSnapshot(identity.key));
     }
@@ -247,7 +251,7 @@ class DerivativesService {
     if (!this.#takeBudget("chain")) {
       const delay = this.#nextWindowDelay();
       demand.nextAttemptAt = now + delay;
-      this.scope.setStatus(identity.key, {
+      this.#setStatus(identity.key, {
         state: "rate-limited",
         reason: "request-budget",
         retryAfterMs: delay,
@@ -257,7 +261,7 @@ class DerivativesService {
       return Promise.resolve(this.scope.getSnapshot(identity.key));
     }
 
-    this.scope.setStatus(identity.key, { state: "loading", reason: "refreshing" });
+    this.#setStatus(identity.key, { state: "loading", reason: "refreshing" });
     this.activeCalls += 1;
     this.sourceCounters.chainCalls += 1;
     const operation = Promise.resolve()
@@ -391,6 +395,7 @@ class DerivativesService {
     if (this.closed || !demand || demand.count < 1) return this.scope.getSnapshot(key);
     const stored = this.scope.ingestSnapshot(snapshot);
     if (!stored) return this.#handleFailure(key, new DerivativesError("SCHEMA_ERROR", "provider returned an invalid option-chain snapshot"));
+    this.#emitUpdate(stored, "snapshot");
     this.blockFailures = 0;
     this.blockedUntil = 0;
     if (stored.state === "closed") this.#scheduleNextOpen(key);
@@ -437,7 +442,7 @@ class DerivativesService {
 
     demand.nextAttemptAt = now + Math.max(1, delay);
     const normalizedDelay = Math.max(1, delay);
-    this.scope.setStatus(key, {
+    this.#setStatus(key, {
       state,
       reason,
       retryAfterMs: normalizedDelay,
@@ -473,6 +478,17 @@ class DerivativesService {
     const delay = Math.min(300_000, 5_000 * (2 ** (this.blockFailures - 1)));
     this.blockedUntil = Math.max(this.blockedUntil, now + delay);
     return delay;
+  }
+
+  #setStatus(key, status) {
+    const stored = this.scope.setStatus(key, status);
+    if (stored) this.#emitUpdate(stored, "status");
+    return stored;
+  }
+
+  #emitUpdate(snapshot, type) {
+    if (!this.onUpdate) return;
+    try { this.onUpdate(clone(snapshot), type); } catch (_) {}
   }
 
   #budgetStatus(name) {
