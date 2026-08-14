@@ -1,113 +1,86 @@
 # Codex agent workflow
 
-These project-local profiles define the Codex team for Trading Tracker. Profiles do not grant
-extra permissions or override repository safety rules. Never read local `.env`, legacy
-configuration files, `CLAUDE.md`, `CLAUDE.local.md`, or `.claude/**`.
+Use smallest team and shortest handoff that can safely finish work. Never read local `.env`,
+legacy configuration, `CLAUDE.md`, `CLAUDE.local.md`, or `.claude/**`.
 
-Use `gpt-5.6-sol` for Explorer, Architect, Researcher, UI Designer, Reviewer, and Stream
-Diagnostics. Use `gpt-5.6-terra` for Backend and Frontend implementation. The main Codex
-thread is the Integrator: it owns task intake, the manifest, root/tooling/docs changes,
-integration, user communication, final verification, and commits. Do not create Planner,
-Builder, or Integrator sub-agent profiles.
+Sol owns investigation, architecture, research, UI design, diagnostics, and review. Terra owns
+backend/frontend code. Use medium reasoning by default; use high only for hard R&D, security,
+or genuinely ambiguous cross-cutting design. Every subagent uses `fork_turns: "none"` and a
+narrow manifest. Main thread is Integrator and owns root/docs/shared integration, verification,
+staging, and user communication. It never commits or pushes.
 
-## Delivery order
-
-Backend is decided and delivered before UI:
+## Lean delivery flow
 
 ```text
-INTAKE -> DISCOVERY -> BACKEND DESIGN -> BACKEND BUILD -> VERIFY -> REVIEW
-       -> USER REVIEW -> APPROVAL -> BACKEND COMMIT
-       -> UI DESIGN -> FRONTEND BUILD -> VERIFY -> REVIEW
-       -> USER REVIEW -> APPROVAL -> UI COMMIT -> DONE
+INTAKE -> optional INVESTIGATE or ARCHITECT -> BUILD -> VERIFY
+       -> optional REVIEW -> STAGE -> USER REVIEW/COMMIT
 ```
 
-- Skip the backend lane only for a genuinely UI-only change with no API, state, permission,
-  persistence, configuration, or payload impact.
-- UI Designer and Frontend consume the committed backend contract. They must not invent API
-  fields, states, permissions, or error behavior.
-- A later phase cannot start until the current phase has Reviewer `PASS` and, when files
-  changed, a user-approved commit.
-- Reviewer `CHANGES_REQUIRED` returns work to the same-role engineer, followed by verification
-  and mandatory re-review.
+- Do not run Explorer and Architect automatically. Use Explorer only when code location/flow
+  is unclear. Use Architect only when API, state, persistence, security, or lifecycle choices
+  need a contract. Explorer may escalate to Architect only after finding real ambiguity.
+- Backend is staged, reviewed, and committed by the user before dependent UI work starts.
+  UI-only work may skip backend when no API/state/permission/persistence/config change exists.
+- Use UI Designer only for a new or materially changed interaction, not routine CSS fixes.
+- Use Reviewer only for risky or cross-cutting behavior: auth/RBAC, persistence, alerts,
+  market/feed state, concurrency, security, shared contracts, or large responsive UI changes.
+  Integrator self-reviews small docs, copy, and obvious local edits.
+- Maximum two subagents per phase: one working role and one independent reviewer. Parallel
+  investigators are allowed only when search areas do not overlap.
 
-## Task routing and slots
+## Routing
 
-Use the smallest useful team. The platform budget is the main thread plus at most three agent
-threads; reserve one slot for an independent Reviewer.
-
-| Work | Route |
+| Task | Route |
 |---|---|
-| Small, clear, <=2 files | Integrator implements, verifies, then Reviewer when behavior changes |
-| Backend feature | Explorer if unclear -> Architect -> Backend -> Reviewer |
-| UI feature | Confirm backend contract -> UI Designer -> Frontend -> Reviewer |
-| Cross-cutting feature | Explorer -> Architect -> backend lane/commit -> UI lane/commit |
-| External fact | Researcher receives one narrow question from Architect |
-| WSS/SSE/feed incident | Stream Diagnostics -> Architect/Backend only if a fix is approved |
+| Trivial/root/docs/local fix | Integrator |
+| Clear non-trivial backend/frontend | one Terra engineer |
+| Unknown code location | one compressed Sol Explorer |
+| Contract decision | one Sol Architect, no Explorer unless needed |
+| Narrow external fact | one Sol Researcher |
+| WSS/SSE/feed diagnosis | one Sol Stream Diagnostics |
+| Risky completed diff | one compressed Sol Reviewer |
 
-Each thread keeps one role for its lifetime. Never turn an Explorer into an Architect or
-Reviewer. Reuse a thread only for follow-up in the same role, such as a Backend engineer fixing
-its reviewed patch. If an agent gives no useful update for 60 seconds, request status once and
-allow a two-minute grace period, then interrupt it. Spawn at most one fresh same-role
-replacement; repeated failure is escalated to the user.
+Prefer cavecrew investigator/builder/reviewer presets for narrow locate/edit/review work.
+Subagents return facts, not prose. Output limits:
 
-## Task manifest
+- Explorer, Researcher, Diagnostics, Reviewer: 250 tokens.
+- Architect and UI Designer: 400 tokens.
+- Backend and Frontend: 200 tokens.
 
-The Integrator maintains this compact manifest in the working plan:
+If output would exceed its limit, write only blockers, decisions, changed files, and checks.
+Never dump full files, diffs, logs, or repeated acceptance criteria into handoffs.
+
+## Compact manifest
 
 ```text
-Objective:
-Acceptance criteria:
-Current phase:
-In-scope files:
-Protected/unrelated dirty files:
-Owners:
-Required checks:
-Active agent slots:
-Review iteration:
-User approval: pending|confirmed
-Commit: pending|hash
-Known exceptions:
+Goal:
+Acceptance:
+Files owned:
+Protected dirty files:
+Checks:
+Known limits:
 ```
 
-Builders edit only assigned files. The Integrator owns repository-root configuration,
-tooling, documentation, shared-file integration, and any file not assigned to a specialist.
-All agents preserve unrelated dirty changes.
+Builders edit only owned files and never stage. Integrator preserves unrelated changes. A
+thread keeps one role; reuse it only for substantive same-role corrections. Integrator fixes
+small obvious review findings directly. After edits, re-run affected checks and re-review only
+the changed findings. After two failed correction rounds, ask Architect; after three, ask user.
 
-## Backend design rules
+If an agent gives no useful update for 60 seconds, request status once, wait 90 seconds, then
+interrupt. Allow one same-role replacement only.
 
-For new backend domains, prefer class-based design with clear responsibilities:
+## Engineering rules
 
-- constructor dependency injection; no hidden environment, network, clock, or storage access;
-- encapsulated state and explicit lifecycle methods such as `start`, `stop`, and `dispose`;
-- composition over inheritance and one responsibility per provider, service, store, or
-  controller class;
-- typed domain/provider errors and stable public contracts;
-- no mass conversion of stable functional modules merely for consistency.
+New backend domains use focused classes, constructor dependency injection, encapsulated state,
+composition, typed errors, and explicit cleanup. Do not mass-convert stable modules. Extract a
+shared utility only for two consumers or one stable cross-cutting rule; keep one-use helpers
+private and stateless helpers as functions. Follow DRY, KISS, and SOLID.
 
-Extract a common utility when at least two modules use it or it represents a stable shared
-rule such as date parsing, numeric normalization, safe HTTP handling, or SSE writing. Keep a
-single-use helper private. Stateless helpers remain functions; do not create utility classes
-only to appear object-oriented. Follow DRY, KISS, and SOLID without premature abstraction.
+New unit tests are not required unless user requests them. Use proportional syntax, focused
+API/module, existing-test, smoke, screenshot, responsive, or authorized-live checks.
 
-## Verification and review
+## Staging and user review
 
-New unit tests are not required. Do not add unit tests unless the user explicitly requests
-them. Use proportional verification: syntax checks, focused module/API checks, safe server
-smoke checks, existing tests when useful, browser screenshots for visual work, and authorized
-live-feed checks only when necessary. Document anything that could not be verified safely.
-
-Reviewer reads the manifest-scoped diff and necessary surrounding code, distinguishing
-task-introduced defects from unrelated dirty changes and optional improvements. A review ends
-only with `PASS` or `CHANGES_REQUIRED`. After two unsuccessful correction rounds, Architect
-reopens the contract; after a third, stop and ask the user for direction.
-
-## User review and commit gate
-
-Only the Integrator may stage or commit. After Reviewer `PASS`, tell the user the changes are
-ready in their editor without dumping the diff into chat. Wait for explicit approval. Any
-subsequent edit invalidates approval and returns to verification and review.
-
-After approval, stage only manifest files, inspect the staged file list, and create a normal
-local commit using the user's configured Git identity. Never set `--author`, auto-push, stage
-the whole dirty worktree, or include unrelated files. Report the commit hash and exact scoped
-file set.
+After implementation and required review pass, Integrator immediately stages only manifest
+files and verifies staged names. User reviews staged diff and performs commit. Integrator never
+runs `git commit`, sets `--author`, stages whole worktree, or pushes.
