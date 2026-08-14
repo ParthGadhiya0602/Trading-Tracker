@@ -8,11 +8,13 @@ store/*
 license.key
 logs/
 
-# Data-source reference (kept local only, not published)
-NSE_API.md
-AUTH_DESIGN.md
-ALERT_LIFECYCLE_PLAN.md
-REORG_PLAN.md
+# Local planning / design / spec / data-source docs — ignore all root-level *.md
+# EXCEPT the project's kept docs. Agent/skill .md live in subdirs and stay tracked.
+/*.md
+!/README.md
+!/CLAUDE.md
+!/AGENTS.md
+*.test.js
 
 # OS / editor cruft
 .DS_Store
