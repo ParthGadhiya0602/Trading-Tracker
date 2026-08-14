@@ -1483,13 +1483,14 @@
           const tradesOn = view === "trades";
           const reportsOn = view === "reports";
           const marketOn = view === "market";
+          const derivativesOn = view === "derivatives";
           $$(".viewnav .tab").forEach((x) => {
             const on = x.dataset.view === view;
             x.classList.toggle("active", on);
             x.setAttribute("aria-selected", String(on));
             x.tabIndex = on ? 0 : -1;
           });
-          $("#dashView").hidden = alertsOn || usersOn || tradesOn || reportsOn || marketOn;
+          $("#dashView").hidden = alertsOn || usersOn || tradesOn || reportsOn || marketOn || derivativesOn;
           $("#alertsView").hidden = !alertsOn;
           const tradesView = $("#tradesView");
           if (tradesView) tradesView.hidden = !tradesOn;
@@ -1497,6 +1498,8 @@
           if (reportsView) reportsView.hidden = !reportsOn;
           const marketView = $("#marketView");
           if (marketView) marketView.hidden = !marketOn;
+          const derivativesView = $("#derivativesView");
+          if (derivativesView) derivativesView.hidden = !derivativesOn;
           $("#usersView").hidden = !usersOn;
           const dashOn = view === "dash";
           if (dashOn && window.__initOverview) window.__initOverview();
@@ -1508,6 +1511,8 @@
           if (reportsOn && window.__initReports) window.__initReports();
           if (marketOn && window.__initMarket) window.__initMarket();
           if (!marketOn && window.__stopMarket) window.__stopMarket();
+          if (derivativesOn && window.__initDerivatives) window.__initDerivatives();
+          if (!derivativesOn && window.__stopDerivatives) window.__stopDerivatives();
           if (usersOn && window.__openUsersView) window.__openUsersView();
         }
         $$(".viewnav .tab").forEach((b) => {

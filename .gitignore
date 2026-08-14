@@ -29,3 +29,4 @@ Thumbs.db
 # Node (not used today, but safe if deps are ever added)
 node_modules/
 npm-debug.log*
+.nvmrc

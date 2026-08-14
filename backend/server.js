@@ -61,6 +61,7 @@ function loadFeedConfig() {
 const FEED = loadFeedConfig();
 const BASE = FEED ? FEED.base : null;
 const DERIVATIVES_ENABLED = envFlag(process.env.DERIVATIVES_ENABLED);
+const DERIVATIVES_ALLOW_CLOSED_REVIEW = envFlag(process.env.DERIVATIVES_ALLOW_CLOSED_REVIEW);
 function requireFeed() {
   if (!FEED)
     throw new Error(
@@ -469,6 +470,7 @@ function createDerivativesRuntime() {
       metadataBudget: 4,
       maxActiveKeys: 2,
       maxCalls: 2,
+      allowClosedReview: DERIVATIVES_ALLOW_CLOSED_REVIEW,
     },
   });
 }
@@ -1839,7 +1841,7 @@ async function main() {
   derivativesService = createDerivativesRuntime();
   console.log(
     derivativesService
-      ? "  Derivatives: enabled · Phase 2 polling ready (idle until demand)"
+      ? `  Derivatives: enabled · closed-hours review: ${DERIVATIVES_ALLOW_CLOSED_REVIEW ? "on" : "off"} (idle until demand)`
       : "  Derivatives: disabled",
   );
   await auth.load();

@@ -268,6 +268,7 @@ class DerivativesService {
     this.maxCalls = Math.max(1, Number(config.maxCalls == null ? 2 : config.maxCalls) || 2);
     this.chainBudget = Math.max(1, Number(config.chainBudget == null ? 24 : config.chainBudget) || 24);
     this.metadataBudget = Math.max(1, Number(config.metadataBudget == null ? 4 : config.metadataBudget) || 4);
+    this.allowClosedReview = Boolean(config.allowClosedReview);
 
     this.demands = new Map();
     this.contractCache = new Map();
@@ -343,7 +344,7 @@ class DerivativesService {
     let demand = this.demands.get(key);
     if (!demand) {
       if (this.demands.size >= this.maxActiveKeys) throw new DerivativesError("CAPACITY", "at most two option chains may have active demand or grace retention");
-      demand = { ...identity, key, count: 0, timer: null, graceTimer: null, graceExpired: false, inFlight: null, nextAttemptAt: 0 };
+      demand = { ...identity, key, count: 0, timer: null, graceTimer: null, graceExpired: false, inFlight: null, nextAttemptAt: 0, closedReviewUsed: false };
       this.demands.set(key, demand);
     }
     demand.count += 1;
@@ -376,10 +377,20 @@ class DerivativesService {
     if (demand.inFlight) return demand.inFlight.then(clone);
 
     const now = this.now();
-    if (!this.isMarketOpen()) {
-      this.#setStatus(identity.key, { state: "closed", reason: "market-closed" });
-      this.#scheduleNextOpen(identity.key);
-      return Promise.resolve(this.scope.getSnapshot(identity.key));
+    const marketOpen = this.isMarketOpen();
+    const closedReviewEligible = this.allowClosedReview && !marketOpen;
+    if (!marketOpen) {
+      if (!this.allowClosedReview) {
+        this.#setStatus(identity.key, { state: "closed", reason: "market-closed" });
+        this.#scheduleNextOpen(identity.key);
+        return Promise.resolve(this.scope.getSnapshot(identity.key));
+      }
+      if (demand.closedReviewUsed) {
+        this.#scheduleNextOpen(identity.key);
+        return Promise.resolve(this.scope.getSnapshot(identity.key));
+      }
+    } else {
+      demand.closedReviewUsed = false;
     }
     if (now < demand.nextAttemptAt || now < this.blockedUntil) {
       this.#schedule(identity.key, Math.max(demand.nextAttemptAt, this.blockedUntil) - now);
@@ -403,6 +414,7 @@ class DerivativesService {
     }
 
     this.#setStatus(identity.key, { state: "loading", reason: "refreshing" });
+    if (closedReviewEligible) demand.closedReviewUsed = true;
     this.activeCalls += 1;
     this.sourceCounters.chainCalls += 1;
     const operation = Promise.resolve()
@@ -437,6 +449,7 @@ class DerivativesService {
         maxCalls: this.maxCalls,
         chainBudget: this.chainBudget,
         metadataBudget: this.metadataBudget,
+        allowClosedReview: this.allowClosedReview,
       },
       activeKeys: [...this.demands.values()].map((entry) => ({
         key: entry.key,
@@ -534,12 +547,16 @@ class DerivativesService {
     const demand = this.demands.get(key);
     // A completed request is not allowed to resurrect a released chain.
     if (this.closed || !demand || demand.count < 1) return this.scope.getSnapshot(key);
-    const stored = this.scope.ingestSnapshot(snapshot);
+    const completedWhileClosed = !this.isMarketOpen();
+    const normalizedSnapshot = completedWhileClosed && snapshot && typeof snapshot === "object"
+      ? { ...snapshot, state: "closed", reason: "market-closed", stale: true, upstreamState: snapshot.state }
+      : snapshot;
+    const stored = this.scope.ingestSnapshot(normalizedSnapshot);
     if (!stored) return this.#handleFailure(key, new DerivativesError("SCHEMA_ERROR", "provider returned an invalid option-chain snapshot"));
     this.#emitUpdate(stored, "snapshot");
     this.blockFailures = 0;
     this.blockedUntil = 0;
-    if (stored.state === "closed") this.#scheduleNextOpen(key);
+    if (completedWhileClosed || stored.state === "closed") this.#scheduleNextOpen(key);
     else this.#schedule(key, this.#laterDelay());
     return stored;
   }
@@ -590,7 +607,9 @@ class DerivativesService {
       retryAt: new Date(now + normalizedDelay).toISOString(),
       lastErrorCode: code || "UNKNOWN",
     });
-    this.#schedule(key, normalizedDelay);
+    const closedReview = this.allowClosedReview && !this.isMarketOpen() && demand.closedReviewUsed;
+    if (closedReview) this.#scheduleNextOpen(key);
+    else this.#schedule(key, normalizedDelay);
     return this.scope.getSnapshot(key);
   }
 
