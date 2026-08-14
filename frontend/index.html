@@ -1,0 +1,1625 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>NIFTY 50 - Open / High / Low Tracker</title>
+    <link rel="stylesheet" href="css/base.css" />
+    <link rel="stylesheet" href="css/system.css" />
+    <link rel="stylesheet" href="css/components.css" />
+    <link rel="stylesheet" href="css/dashboard.css" />
+    <link rel="stylesheet" href="css/alerts.css" />
+    <link rel="stylesheet" href="css/trades.css" />
+    <link rel="stylesheet" href="css/reports.css" />
+    <link rel="stylesheet" href="css/market.css" />
+    <link rel="stylesheet" href="css/auth.css" />
+  </head>
+  <body>
+    <!--
+      THESIS: User access is a live operational ledger, not detached CRUD in a modal.
+      OWN-WORLD: Cool navy layers, compact system type, one-pixel rules, Signal Blue selection, and semantic access colors extend the Structured Market Console.
+      STORY: An administrator scans every account, filters the directory, selects one user, and safely changes role, credentials, or access without losing list context.
+      FIRST VIEWPORT: The Users tab leads to a title/action band, a 68% access ledger, and a persistent 32% account editor rail.
+      FORM: Access Ledger, grounded structure 3, seed bda40d81.
+      FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+    -->
+    <header class="appbar">
+      <button
+        class="nav-toggle"
+        id="navToggle"
+        type="button"
+        aria-label="Toggle navigation menu"
+        aria-expanded="false"
+      >
+        <i data-lucide="menu" aria-hidden="true"></i>
+      </button>
+      <div class="appbar-primary">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg
+              width="19"
+              height="19"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <polyline points="3 17 9 11 13 15 21 6" />
+              <polyline points="15 6 21 6 21 12" />
+            </svg>
+          </span>
+          <span class="brand-text">
+            <span class="brand-title">Nifty OHL Tracker</span>
+            <span class="brand-sub">Open · High · Low vs day open</span>
+          </span>
+        </div>
+        <div class="spacer"></div>
+        <div class="status" role="status" aria-live="polite">
+          <span id="dot" class="dot"></span><span id="mktText">…</span>
+        </div>
+      </div>
+      <div class="appbar-actions">
+        <button
+          class="notif-btn"
+          id="notifBtn"
+          type="button"
+          aria-label="Notifications"
+          title="Notifications"
+        >
+          <i data-lucide="bell" aria-hidden="true"></i>
+          <span class="notif-badge" id="notifBadge" hidden>0</span>
+        </button>
+        <nav class="viewnav" role="tablist" aria-label="View">
+          <button
+            class="tab active"
+            id="view-tab-dash"
+            data-view="dash"
+            role="tab"
+            aria-controls="dashView"
+            aria-selected="true"
+          >
+            <i data-lucide="layout-grid" aria-hidden="true"></i>Dashboard
+          </button>
+          <button
+            class="tab"
+            id="view-tab-market"
+            data-view="market"
+            role="tab"
+            aria-controls="marketView"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            <i data-lucide="candlestick-chart" aria-hidden="true"></i>Market Watch
+          </button>
+          <button
+            class="tab"
+            id="view-tab-alerts"
+            data-view="alerts"
+            role="tab"
+            aria-controls="alertsView"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            <i data-lucide="bell" aria-hidden="true"></i>Alerts<span
+              class="bell"
+              id="bell"
+              hidden
+            >0</span
+            >
+          </button>
+          <button
+            class="tab"
+            id="view-tab-trades"
+            data-view="trades"
+            role="tab"
+            aria-controls="tradesView"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            <i data-lucide="notebook-pen" aria-hidden="true"></i>Trades
+          </button>
+          <button
+            class="tab"
+            id="view-tab-reports"
+            data-view="reports"
+            role="tab"
+            aria-controls="reportsView"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            <i data-lucide="bar-chart-3" aria-hidden="true"></i>Reports
+          </button>
+          <button
+            class="tab"
+            id="view-tab-users"
+            data-view="users"
+            role="tab"
+            aria-controls="usersView"
+            aria-selected="false"
+            tabindex="-1"
+            hidden
+          >
+            <i data-lucide="users" aria-hidden="true"></i>Users
+          </button>
+        </nav>
+        <div class="usernav" id="userNav" hidden>
+          <span class="who" id="whoami" title="Signed in"></span>
+          <button
+            class="logout-btn telegram-btn"
+            id="telegramBtn"
+            type="button"
+            title="Telegram settings"
+            aria-label="Telegram settings"
+            aria-haspopup="dialog"
+          >
+            <i data-lucide="send" aria-hidden="true"></i>
+            <span class="telegram-dot" id="telegramDot" hidden></span>
+          </button>
+          <button
+            class="logout-btn"
+            id="logoutBtn"
+            type="button"
+            title="Sign out"
+            aria-label="Sign out"
+          >
+            <i data-lucide="log-out" aria-hidden="true"></i>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <div id="dashView" role="tabpanel" aria-labelledby="view-tab-dash">
+      <!-- index KPI cards double as the index selector (click to switch) -->
+      <section class="kpis" id="idxCards" aria-label="Indices">
+        <div class="idxcard skel-card"><div class="skel l1"></div><div class="skel l2"></div><div class="skel l3"></div></div>
+        <div class="idxcard skel-card"><div class="skel l1"></div><div class="skel l2"></div><div class="skel l3"></div></div>
+        <div class="idxcard skel-card"><div class="skel l1"></div><div class="skel l2"></div><div class="skel l3"></div></div>
+      </section>
+
+      <!-- ===== personal overview: your P&L, alerts, notifications, trades ===== -->
+      <div class="kpi-strip" id="dashUserKpis" style="margin-bottom: var(--gap-section)"></div>
+      <div class="dash-overview" id="dashOverview">
+        <div class="report-panel">
+          <div class="section-head">
+            <span class="title"><i data-lucide="bell-ring"></i> Recent alerts</span>
+            <button type="button" class="linklike" data-goto="alerts">View all →</button>
+          </div>
+          <div class="mini-list" id="dashAlerts"></div>
+        </div>
+        <div class="report-panel">
+          <div class="section-head">
+            <span class="title"><i data-lucide="bell"></i> Notifications</span>
+            <button type="button" class="linklike" data-goto="notifications">View all →</button>
+          </div>
+          <div class="mini-list" id="dashNotifs"></div>
+        </div>
+        <div class="report-panel">
+          <div class="section-head">
+            <span class="title"><i data-lucide="notebook-pen"></i> Recent trades</span>
+            <button type="button" class="linklike" data-goto="trades">View all →</button>
+          </div>
+          <div class="mini-list" id="dashTrades"></div>
+        </div>
+      </div>
+
+      <!-- legacy market table: kept in-DOM (hidden) so dashboard.js keeps
+           powering the live #idxCards above; browsing the full table now
+           lives in the dedicated Market Watch view -->
+      <div id="dashMarket" hidden>
+      <!-- toolbar: status filters on the left, data controls on the right -->
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <div class="tabs" id="tabs" role="tablist" aria-label="Filter">
+            <button
+              class="tab active"
+              data-tab="all"
+              role="tab"
+              aria-selected="true"
+            >
+              All <b class="cnt">–</b>
+            </button>
+            <button
+              class="tab"
+              data-tab="high"
+              role="tab"
+              aria-selected="false"
+              data-tip="Today's high equals the open price - the stock never traded above its open."
+            >
+              <span class="dotmark down" aria-hidden="true"></span>Open = High
+              <b class="cnt">–</b>
+            </button>
+            <button
+              class="tab"
+              data-tab="low"
+              role="tab"
+              aria-selected="false"
+              data-tip="Today's low equals the open price - the stock never traded below its open."
+            >
+              <span class="dotmark up" aria-hidden="true"></span>Open = Low
+              <b class="cnt">–</b>
+            </button>
+            <button
+              class="tab"
+              data-tab="neutral"
+              role="tab"
+              aria-selected="false"
+            >
+              Neutral <b class="cnt">–</b>
+            </button>
+          </div>
+          <div class="search">
+            <i data-lucide="search" aria-hidden="true"></i>
+            <input
+              id="search"
+              type="search"
+              placeholder="Search symbol / company…"
+              aria-label="Search stocks in this index"
+            />
+          </div>
+        </div>
+        <div class="tools">
+          <span
+            id="streamStatus"
+            class="stream-pill"
+            data-state="paused"
+            role="status"
+            aria-live="polite"
+            data-tip="Market closed. Updates are paused; use Refresh for the latest close."
+          >
+            <span class="dot" aria-hidden="true"></span>
+            <span class="stream-label">PAUSED</span>
+            <span class="stream-int" hidden></span>
+          </span>
+          <div
+            id="pollField"
+            class="field"
+            data-tip="How often to fetch fresh data while the market is open. Manual refresh always works, even when paused."
+          >
+            <label for="poll">
+              <i data-lucide="timer" aria-hidden="true"></i>
+              <span class="hint">Auto-poll</span>
+            </label>
+            <select id="poll" aria-label="Auto-poll interval in seconds">
+              <option value="1">1s</option>
+              <option value="2">2s</option>
+              <option value="3" selected>3s</option>
+              <option value="4">4s</option>
+              <option value="5">5s</option>
+              <option value="6">6s</option>
+              <option value="7">7s</option>
+              <option value="8">8s</option>
+              <option value="9">9s</option>
+              <option value="10">10s</option>
+            </select>
+          </div>
+          <div
+            class="field"
+            data-tip="Show all clock times in 12-hour or 24-hour IST."
+          >
+            <label for="tf">
+              <i data-lucide="clock" aria-hidden="true"></i>
+              <span class="hint">Time</span>
+            </label>
+            <select id="tf" aria-label="Clock time format">
+              <option value="24">24h IST</option>
+              <option value="12">12h IST</option>
+            </select>
+          </div>
+          <button
+            id="refresh"
+            class="primary"
+            data-tip="Fetch new data right now, ignoring the auto-poll timer."
+            aria-label="Refresh now"
+          >
+            <svg
+              id="refreshIcon"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+              <polyline points="21 3 21 9 15 9" />
+            </svg>
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <!-- table panel -->
+      <section class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">
+            <span id="idxName">NIFTY 50</span> · constituents
+          </h2>
+          <div class="panel-meta">
+            <span id="adv"></span>
+            <span id="updated" class="upd">Not loaded yet.</span>
+            <span id="staleMsg"></span>
+          </div>
+        </div>
+        <div class="legend">
+          <span><span class="sw r"></span>Open = High (never above open)</span>
+          <span><span class="sw g"></span>Open = Low (never below open)</span>
+          <span class="legend-hint"
+            >Click a row for details · click a symbol to copy</span
+          >
+        </div>
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr id="head"></tr>
+            </thead>
+            <tbody id="body">
+              <tr class="loading">
+                <td colspan="8">
+                  <span class="spinner" aria-hidden="true"></span>Loading live
+                  data…
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      </div>
+      <!-- /#dashMarket -->
+    </div>
+    <!-- /#dashView -->
+
+    <div
+      id="marketView"
+      role="tabpanel"
+      aria-labelledby="view-tab-market"
+      hidden
+    >
+      <div class="alerts-bar">
+        <div class="alerts-head">
+          <h2 class="alerts-title">
+            <i data-lucide="candlestick-chart" aria-hidden="true"></i> Market Watch
+          </h2>
+          <p class="alerts-sub">
+            Live constituents by index - movement relative to the day's open.
+          </p>
+        </div>
+        <div class="alerts-bar-right">
+          <span class="meta" id="mwMeta"></span>
+        </div>
+      </div>
+
+      <div class="kpi-strip" id="mwKpis"></div>
+
+      <div class="mw-controls" style="margin-top: var(--gap-section)">
+        <div class="segmented" id="mwIndexSeg" role="tablist" aria-label="Index"></div>
+        <div class="segmented" id="mwFilterSeg" role="tablist" aria-label="Open filter">
+          <button type="button" class="seg active" data-filter="all" role="tab" aria-selected="true">All</button>
+          <button type="button" class="seg" data-filter="high" role="tab" aria-selected="false">
+            <span class="dotmark down" aria-hidden="true"></span>Open=High
+          </button>
+          <button type="button" class="seg" data-filter="low" role="tab" aria-selected="false">
+            <span class="dotmark up" aria-hidden="true"></span>Open=Low
+          </button>
+          <button type="button" class="seg" data-filter="neutral" role="tab" aria-selected="false">Neutral</button>
+        </div>
+        <div class="search">
+          <i data-lucide="search" aria-hidden="true"></i>
+          <input id="mw-search" type="search" placeholder="Search symbol…" autocomplete="off" />
+        </div>
+      </div>
+
+      <div id="mwEmpty" hidden></div>
+
+      <div class="market-layout with-rail" id="mwLayout">
+        <div class="card mw-list-card">
+          <div class="section-head">
+            <span class="title"><i data-lucide="list"></i> <span id="mwIdxName">Constituents</span></span>
+            <span class="meta" id="mwAdv"></span>
+          </div>
+          <div class="tablewrap">
+            <table id="mwTable">
+              <thead><tr id="mwHead"></tr></thead>
+              <tbody id="mwBody">
+                <tr class="loading"><td colspan="8">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="table-foot">
+            <span id="mwFoot"></span>
+            <span class="meta" id="mwUpdated"></span>
+          </div>
+        </div>
+
+        <div class="mw-rail">
+          <div class="report-panel">
+            <div class="section-head"><span class="title"><i data-lucide="trending-up"></i> Top gainers</span></div>
+            <div class="mini-list" id="mwGainers"></div>
+          </div>
+          <div class="report-panel">
+            <div class="section-head"><span class="title"><i data-lucide="trending-down"></i> Top losers</span></div>
+            <div class="mini-list" id="mwLosers"></div>
+          </div>
+          <div class="report-panel">
+            <div class="section-head"><span class="title"><i data-lucide="activity"></i> Most active</span></div>
+            <div class="mini-list" id="mwActive"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- /#marketView -->
+
+    <div
+      id="alertsView"
+      role="tabpanel"
+      aria-labelledby="view-tab-alerts"
+      hidden
+    >
+      <div class="alerts-bar">
+        <div class="alerts-head">
+          <h2 class="alerts-title">
+            <i data-lucide="bell-ring" aria-hidden="true"></i> Price alerts
+          </h2>
+          <p class="alerts-sub">
+            Evaluated server-side during market hours - fire even with no tab
+            open.
+          </p>
+        </div>
+        <div class="alerts-bar-right">
+          <button id="al-new" class="primary needs-editor" type="button">
+            <i data-lucide="plus" aria-hidden="true"></i>New alert
+          </button>
+        </div>
+      </div>
+
+      <!-- create / edit modal -->
+      <div id="alertModal" role="dialog" aria-modal="true" aria-label="Alert">
+        <div class="am-card">
+          <div class="am-head">
+            <i data-lucide="plus-circle" aria-hidden="true"></i>
+            <h2 id="formTitle">Create alert</h2>
+            <button
+              type="button"
+              id="al-modal-close"
+              class="am-close"
+              aria-label="Close alert editor"
+            >
+              <i data-lucide="x" aria-hidden="true"></i>
+            </button>
+          </div>
+          <form class="alert-form" id="alertForm" autocomplete="off">
+            <input type="hidden" id="al-id" />
+            <label>
+              Index
+              <select id="al-index" required></select>
+            </label>
+            <label>
+              Stock
+              <input
+                id="al-symbol"
+                list="symList"
+                placeholder="Type to search…"
+                required
+              />
+              <datalist id="symList"></datalist>
+            </label>
+            <div class="form-grid">
+              <label>
+                Side
+                <select id="al-side" required>
+                  <option value="" selected disabled>Select…</option>
+                  <option value="BUY">Buy</option>
+                  <option value="SELL">Sell</option>
+                </select>
+              </label>
+              <label>
+                Entry price (₹)
+                <input
+                  id="al-price"
+                  type="number"
+                  min="0"
+                  step="0.05"
+                  inputmode="decimal"
+                  required
+                />
+              </label>
+            </div>
+            <label>
+              Time frame
+              <select id="al-tf" required>
+                <option value="" selected disabled>Select…</option>
+                <optgroup label="Seconds">
+                  <option value="1s">1 second</option>
+                  <option value="5s">5 seconds</option>
+                  <option value="10s">10 seconds</option>
+                  <option value="15s">15 seconds</option>
+                  <option value="30s">30 seconds</option>
+                  <option value="45s">45 seconds</option>
+                </optgroup>
+                <optgroup label="Minutes">
+                  <option value="1m">1 minute</option>
+                  <option value="2m">2 minutes</option>
+                  <option value="3m">3 minutes</option>
+                  <option value="5m">5 minutes</option>
+                  <option value="10m">10 minutes</option>
+                  <option value="15m">15 minutes</option>
+                  <option value="30m">30 minutes</option>
+                  <option value="45m">45 minutes</option>
+                </optgroup>
+                <optgroup label="Hours">
+                  <option value="1h">1 hour</option>
+                  <option value="2h">2 hours</option>
+                  <option value="3h">3 hours</option>
+                  <option value="4h">4 hours</option>
+                </optgroup>
+                <optgroup label="Days">
+                  <option value="1d">1 day</option>
+                  <option value="1w">1 week</option>
+                  <option value="1mo">1 month</option>
+                  <option value="3mo">3 months</option>
+                  <option value="6mo">6 months</option>
+                  <option value="12mo">12 months</option>
+                </optgroup>
+              </select>
+            </label>
+            <div class="form-grid">
+              <label>
+                Stop loss (₹)
+                <input
+                  id="al-stop"
+                  type="number"
+                  min="0"
+                  step="0.05"
+                  inputmode="decimal"
+                  required
+                />
+              </label>
+              <label>
+                Alert creator
+                <select
+                  id="al-creator"
+                  required
+                  title="Assign this alert to an enabled editor or admin"
+                ></select>
+              </label>
+            </div>
+            <label>
+              Note
+              <textarea
+                id="al-note"
+                rows="2"
+                maxlength="280"
+                placeholder="Zone rationale / notes"
+                required
+              ></textarea>
+            </label>
+            <div class="form-grid">
+              <label>
+                Candle date <span class="opt">(optional)</span>
+                <input id="al-date" type="date" />
+              </label>
+              <label>
+                Candle time <span class="opt">(IST, optional)</span>
+                <div class="time-row">
+                  <select id="al-hour" aria-label="Hour"></select>
+                  <span>:</span>
+                  <select id="al-min" aria-label="Minute"></select>
+                </div>
+              </label>
+            </div>
+            <div class="trigger-preview" id="al-trigger">Alert: -</div>
+            <div class="trigger-preview" id="al-targets">Targets: -</div>
+            <div class="form-err" id="al-err"></div>
+            <div class="form-actions">
+              <button type="submit" class="primary" id="al-submit">
+                <i data-lucide="check" aria-hidden="true"></i>
+                <span id="al-submit-text">Create alert</span>
+              </button>
+              <button type="button" id="al-cancel">
+                <i data-lucide="x" aria-hidden="true"></i>Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+      <!-- /#alertModal -->
+
+      <!-- review (approve/reject) modal - minimal reuse of the #alertModal chrome -->
+      <div
+        id="reviewModal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rv-title"
+        aria-describedby="rv-note-label rv-note"
+      >
+        <div class="am-card">
+          <div class="am-head">
+            <i data-lucide="shield-check" aria-hidden="true"></i>
+            <h2 id="rv-title">Review alert</h2>
+            <button
+              type="button"
+              id="rv-modal-close"
+              class="am-close"
+              aria-label="Close alert review"
+            >
+              <i data-lucide="x" aria-hidden="true"></i>
+            </button>
+          </div>
+          <form class="alert-form" id="reviewForm" autocomplete="off">
+            <div class="review-note" role="note" aria-labelledby="rv-note-label">
+              <span class="review-note-label" id="rv-note-label">Creator note</span>
+              <p id="rv-note">No note added.</p>
+            </div>
+            <label>
+              Reviewer
+              <input id="rv-reviewer" type="text" readonly title="Signed-in user" />
+            </label>
+            <label>
+              Reason
+              <textarea
+                id="rv-reason"
+                rows="3"
+                maxlength="280"
+                placeholder="Why is this alert being approved/rejected?"
+                required
+              ></textarea>
+            </label>
+            <div class="form-err" id="rv-err"></div>
+            <div class="form-actions">
+              <button type="submit" class="primary" id="rv-submit">
+                <i data-lucide="check" aria-hidden="true"></i>
+                <span id="rv-submit-text">Confirm</span>
+              </button>
+              <button type="button" id="rv-cancel">
+                <i data-lucide="x" aria-hidden="true"></i>Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+      <!-- /#reviewModal -->
+
+      <!-- alert detail (read-only) modal, opened by clicking an alert row -->
+      <div
+        id="alertViewModal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Alert details"
+      >
+        <div class="sm-card">
+          <div class="sm-head">
+            <div>
+              <div class="sm-sym" id="av-sym"></div>
+              <div class="av-badges" id="av-badges"></div>
+            </div>
+            <div class="sm-actions">
+              <button
+                class="sm-close"
+                id="av-close"
+                aria-label="Close alert details"
+                title="Close details"
+              >
+                <i data-lucide="x" aria-hidden="true"></i>
+              </button>
+            </div>
+          </div>
+          <div class="sm-grid" id="av-grid"></div>
+          <div class="av-actions" id="av-actions"></div>
+        </div>
+      </div>
+      <!-- /#alertViewModal -->
+
+      <!-- alert list (full width) -->
+      <div class="card alerts-list-card">
+          <div class="card-head">
+            <i data-lucide="list" aria-hidden="true"></i>
+            <h2>Alerts</h2>
+            <div class="view-toggle" id="alertViewToggle" role="tablist" aria-label="Alert view">
+              <button
+                type="button"
+                class="vt active"
+                id="alert-tab-active"
+                data-view="active"
+                role="tab"
+                aria-controls="alertList"
+                aria-selected="true"
+              >
+                Active <span class="vt-count" id="vtActiveCount"></span>
+              </button>
+              <button
+                type="button"
+                class="vt"
+                id="alert-tab-closed"
+                data-view="closed"
+                role="tab"
+                aria-controls="alertList"
+                aria-selected="false"
+                tabindex="-1"
+              >
+                Closed <span class="vt-count" id="vtClosedCount"></span>
+              </button>
+            </div>
+          </div>
+          <!-- multi-select filter dropdowns (built by JS) -->
+          <div class="alert-filters" id="alertFilters"></div>
+          <!-- chips for the active selections (built by JS) -->
+          <div class="filter-chips" id="filterChips" hidden></div>
+          <div
+            id="alertList"
+            role="tabpanel"
+            aria-labelledby="alert-tab-active"
+          ><div class="empty">Loading…</div></div>
+        </div>
+    </div>
+    <!-- /#alertsView -->
+
+    <div
+      id="tradesView"
+      role="tabpanel"
+      aria-labelledby="view-tab-trades"
+      hidden
+    >
+      <div class="alerts-bar">
+        <div class="alerts-head">
+          <h2 class="alerts-title">
+            <i data-lucide="notebook-pen" aria-hidden="true"></i> Trade journal
+          </h2>
+          <p class="alerts-sub">
+            Manual entry - log trades after the fact; intraday and swing kept
+            separate.
+          </p>
+        </div>
+        <div class="alerts-bar-right">
+          <button
+            id="tr-new"
+            class="primary"
+            type="button"
+            data-requires-edit
+          >
+            <i data-lucide="plus" aria-hidden="true"></i>New trade
+          </button>
+        </div>
+      </div>
+
+      <div class="kpi-strip" id="trKpis">
+        <div class="kpi-card hero">
+          <div class="kpi-head">
+            <span class="kpi-chip"><i data-lucide="trending-up"></i></span>
+            <span class="label">Net P&amp;L (closed)</span>
+          </div>
+          <span class="value" id="trKpiNet">-</span>
+          <span class="sub" id="trKpiNetSub"></span>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-head">
+            <span class="kpi-chip"><i data-lucide="circle-dot"></i></span>
+            <span class="label">Open</span>
+          </div>
+          <span class="value" id="trKpiOpen">-</span>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-head">
+            <span class="kpi-chip"><i data-lucide="check-circle-2"></i></span>
+            <span class="label">Closed</span>
+          </div>
+          <span class="value" id="trKpiClosed">-</span>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-head">
+            <span class="kpi-chip"><i data-lucide="percent"></i></span>
+            <span class="label">Win rate</span>
+          </div>
+          <span class="value" id="trKpiWin">-</span>
+          <span class="sub" id="trKpiWinSub"></span>
+        </div>
+      </div>
+
+      <div class="trades-controls">
+        <div class="segmented" id="trTypeSeg" role="tablist" aria-label="Trade type">
+          <button type="button" class="seg active" data-type="intraday" role="tab" aria-selected="true">
+            Intraday <span class="cnt" id="trCntIntraday"></span>
+          </button>
+          <button type="button" class="seg" data-type="swing" role="tab" aria-selected="false">
+            Swing <span class="cnt" id="trCntSwing"></span>
+          </button>
+        </div>
+        <div class="segmented" id="trStatusSeg" role="tablist" aria-label="Trade status">
+          <button type="button" class="seg active" data-status="open" role="tab" aria-selected="true">Open</button>
+          <button type="button" class="seg" data-status="closed" role="tab" aria-selected="false">Closed</button>
+          <button type="button" class="seg" data-status="journal" role="tab" aria-selected="false">Journal</button>
+        </div>
+      </div>
+
+      <div class="trades-filters">
+        <div class="search">
+          <i data-lucide="search" aria-hidden="true"></i>
+          <input id="tr-search" type="text" placeholder="Search symbol…" autocomplete="off" />
+        </div>
+        <label class="field">
+          Side
+          <select id="tr-side">
+            <option value="">All</option>
+            <option value="BUY">Buy</option>
+            <option value="SELL">Sell</option>
+          </select>
+        </label>
+        <label class="field">
+          From
+          <input id="tr-from" type="date" />
+        </label>
+        <label class="field">
+          To
+          <input id="tr-to" type="date" />
+        </label>
+      </div>
+
+      <div class="card trades-list-card">
+        <div class="section-head">
+          <span class="title"><i data-lucide="list"></i> Trades</span>
+          <span class="meta"><span id="tr-count"></span></span>
+        </div>
+        <div class="tablewrap">
+          <table id="trTable">
+            <thead><tr id="trHead"></tr></thead>
+            <tbody id="trBody">
+              <tr class="loading"><td colspan="10">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-foot">
+          <span id="trFootCount"></span>
+          <span class="pager" id="trPager"></span>
+        </div>
+      </div>
+
+      <!-- create / edit / close modal -->
+      <div id="tradeModal" role="dialog" aria-modal="true" aria-label="Trade">
+        <div class="am-card">
+          <div class="am-head">
+            <i data-lucide="notebook-pen" aria-hidden="true"></i>
+            <h2 id="trFormTitle">New trade</h2>
+            <button type="button" id="tr-modal-close" class="am-close" aria-label="Close trade editor">
+              <i data-lucide="x" aria-hidden="true"></i>
+            </button>
+          </div>
+          <form class="alert-form" id="tradeForm" autocomplete="off">
+            <input type="hidden" id="tr-id" />
+            <div class="form-grid">
+              <label>
+                Type
+                <select id="tr-type" required>
+                  <option value="intraday">Intraday</option>
+                  <option value="swing">Swing</option>
+                </select>
+              </label>
+              <label>
+                Side
+                <select id="tr-f-side" required>
+                  <option value="" selected disabled>Select…</option>
+                  <option value="BUY">Buy</option>
+                  <option value="SELL">Sell</option>
+                </select>
+              </label>
+            </div>
+            <div class="form-grid">
+              <label>
+                Symbol
+                <input id="tr-symbol" type="text" maxlength="24" placeholder="e.g. RELIANCE" required />
+              </label>
+              <label>
+                Exchange
+                <select id="tr-exchange">
+                  <option value="NSE">NSE</option>
+                  <option value="BSE">BSE</option>
+                </select>
+              </label>
+            </div>
+            <div class="form-grid">
+              <label>
+                Quantity
+                <input id="tr-qty" type="number" min="0" step="1" inputmode="numeric" required />
+              </label>
+              <label>
+                Index <span class="opt">(optional)</span>
+                <input id="tr-index" type="text" maxlength="40" placeholder="e.g. NIFTY 50" />
+              </label>
+            </div>
+            <div class="form-grid">
+              <label>
+                Entry price (₹)
+                <input id="tr-entry" type="number" min="0" step="0.05" inputmode="decimal" required />
+              </label>
+              <label>
+                Entry date
+                <input id="tr-entry-date" type="date" required />
+              </label>
+            </div>
+            <label>
+              Entry time (IST) <span class="opt" id="tr-entry-time-opt">(required for intraday)</span>
+              <input id="tr-entry-time" type="time" />
+            </label>
+            <fieldset class="form-grid" id="tr-exit-group">
+              <label>
+                Exit price (₹) <span class="opt">(to close)</span>
+                <input id="tr-exit" type="number" min="0" step="0.05" inputmode="decimal" />
+              </label>
+              <label>
+                Exit date
+                <input id="tr-exit-date" type="date" />
+              </label>
+              <label>
+                Exit time (IST)
+                <input id="tr-exit-time" type="time" />
+              </label>
+              <label>
+                Charges (₹)
+                <input id="tr-charges" type="number" min="0" step="0.01" inputmode="decimal" value="0" />
+              </label>
+            </fieldset>
+            <div class="form-grid">
+              <label>
+                Stop loss (₹) <span class="opt">(optional)</span>
+                <input id="tr-stop" type="number" min="0" step="0.05" inputmode="decimal" />
+              </label>
+              <label>
+                Target (₹) <span class="opt">(optional)</span>
+                <input id="tr-target" type="number" min="0" step="0.05" inputmode="decimal" />
+              </label>
+            </div>
+            <label>
+              Strategy <span class="opt">(optional)</span>
+              <input id="tr-strategy" type="text" maxlength="60" placeholder="e.g. Breakout" />
+            </label>
+            <label>
+              Notes <span class="opt">(optional)</span>
+              <textarea id="tr-notes" rows="2" maxlength="500" placeholder="Trade rationale / review"></textarea>
+            </label>
+            <label>
+              Tags <span class="opt">(comma-separated)</span>
+              <input id="tr-tags" type="text" maxlength="120" placeholder="e.g. momentum, gap-up" />
+            </label>
+            <div class="form-err" id="trade-err"></div>
+            <div class="form-actions">
+              <button type="submit" class="primary" id="tr-submit">
+                <i data-lucide="check" aria-hidden="true"></i>
+                <span id="tr-submit-text">Save trade</span>
+              </button>
+              <button type="button" id="tr-cancel">
+                <i data-lucide="x" aria-hidden="true"></i>Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+      <!-- /#tradeModal -->
+
+      <!-- detail modal -->
+      <div id="tradeViewModal" role="dialog" aria-modal="true" aria-label="Trade detail">
+        <div class="sm-card" tabindex="-1">
+          <div class="sm-head">
+            <div>
+              <div class="sm-sym" id="tv-sym"></div>
+              <div class="sm-name" id="tv-name"></div>
+            </div>
+            <div class="sm-actions">
+              <button class="sm-close" id="tv-close" type="button" aria-label="Close trade detail" title="Close">
+                <i data-lucide="x" aria-hidden="true"></i>
+              </button>
+            </div>
+          </div>
+          <div class="sm-grid" id="tv-grid"></div>
+          <div class="tv-actions" id="tv-actions"></div>
+        </div>
+      </div>
+      <!-- /#tradeViewModal -->
+    </div>
+    <!-- /#tradesView -->
+
+    <div
+      id="reportsView"
+      role="tabpanel"
+      aria-labelledby="view-tab-reports"
+      hidden
+    >
+      <div class="alerts-bar">
+        <div class="alerts-head">
+          <h2 class="alerts-title">
+            <i data-lucide="bar-chart-3" aria-hidden="true"></i> Reports
+          </h2>
+          <p class="alerts-sub">
+            Performance analytics from your logged trades - closed trades only.
+          </p>
+        </div>
+        <div class="alerts-bar-right">
+          <span class="meta" id="rpAsOf"></span>
+        </div>
+      </div>
+
+      <div class="report-controls">
+        <div class="segmented" id="rpTypeSeg" role="tablist" aria-label="Segment">
+          <button type="button" class="seg active" data-type="" role="tab" aria-selected="true">All</button>
+          <button type="button" class="seg" data-type="intraday" role="tab" aria-selected="false">Intraday</button>
+          <button type="button" class="seg" data-type="swing" role="tab" aria-selected="false">Swing</button>
+        </div>
+        <label class="field">
+          From
+          <input id="rp-from" type="date" />
+        </label>
+        <label class="field">
+          To
+          <input id="rp-to" type="date" />
+        </label>
+      </div>
+
+      <div id="rpEmpty" hidden></div>
+
+      <div id="rpContent">
+        <div class="kpi-strip" id="rpKpis"></div>
+
+        <div class="report-grid with-rail" style="margin-top: var(--gap-section)">
+          <div class="report-col">
+            <div class="chart-card">
+              <div class="section-head">
+                <span class="title"><i data-lucide="line-chart"></i> Equity curve</span>
+                <span class="meta" id="rpEquityMeta"></span>
+              </div>
+              <div class="chart-body" id="rpEquity"></div>
+            </div>
+
+            <div class="chart-card" style="margin-top: var(--gap-section)">
+              <div class="section-head">
+                <span class="title"><i data-lucide="bar-chart-3"></i> P&amp;L by period</span>
+                <div class="segmented" id="rpPeriodSeg" role="tablist" aria-label="Period">
+                  <button type="button" class="seg" data-period="day" role="tab" aria-selected="false">Daily</button>
+                  <button type="button" class="seg" data-period="week" role="tab" aria-selected="false">Weekly</button>
+                  <button type="button" class="seg active" data-period="month" role="tab" aria-selected="true">Monthly</button>
+                </div>
+              </div>
+              <div class="chart-body" id="rpBars"></div>
+            </div>
+
+            <div class="report-two" style="margin-top: var(--gap-section)">
+              <div class="report-panel">
+                <div class="section-head"><span class="title"><i data-lucide="trophy"></i> Best trades</span></div>
+                <div class="mini-list" id="rpBest"></div>
+              </div>
+              <div class="report-panel">
+                <div class="section-head"><span class="title"><i data-lucide="trending-down"></i> Worst trades</span></div>
+                <div class="mini-list" id="rpWorst"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="report-col report-rail">
+            <div class="report-panel">
+              <div class="section-head"><span class="title"><i data-lucide="layers"></i> By strategy</span></div>
+              <div class="mini-list" id="rpStrategy"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card trades-list-card" style="margin-top: var(--gap-section)">
+          <div class="section-head">
+            <span class="title"><i data-lucide="history"></i> Closed trade history</span>
+            <span class="meta"><span id="rpHistCount"></span></span>
+          </div>
+          <div class="tablewrap">
+            <table id="rpHistTable">
+              <thead>
+                <tr>
+                  <th class="col-symbol">Symbol</th>
+                  <th class="col-type">Type</th>
+                  <th class="col-side">Side</th>
+                  <th class="col-exit num">Exit date</th>
+                  <th class="col-netpnl num">Net P&amp;L</th>
+                  <th class="col-pnlpct num">P&amp;L %</th>
+                  <th class="col-r num">R</th>
+                </tr>
+              </thead>
+              <tbody id="rpHistBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- /#reportsView -->
+
+    <section
+      id="usersView"
+      role="tabpanel"
+      aria-labelledby="view-tab-users"
+      hidden
+    >
+      <div class="users-bar">
+        <div class="users-heading">
+          <h1>User access</h1>
+          <p>Manage who can monitor markets, maintain alerts, and administer accounts.</p>
+        </div>
+        <button class="primary" id="um-new" type="button">
+          <i data-lucide="user-plus" aria-hidden="true"></i>Add user
+        </button>
+      </div>
+      <div class="um-page-status" id="um-page-status" role="status" aria-live="polite"></div>
+
+      <div class="users-workspace">
+        <section class="um-directory" aria-labelledby="um-directory-title">
+          <div class="um-summary" id="um-summary" role="status" aria-live="polite">
+            <h2 id="um-directory-title">Access ledger</h2>
+            <span>Total <b id="um-total">…</b></span>
+            <span>Enabled <b id="um-enabled">…</b></span>
+            <span>Disabled <b id="um-disabled">…</b></span>
+            <span>Admins <b id="um-admins">…</b></span>
+          </div>
+
+          <div class="um-tools">
+            <label class="um-search" for="um-search">
+              <span class="sr-only">Search users</span>
+              <i data-lucide="search" aria-hidden="true"></i>
+              <input
+                id="um-search"
+                type="search"
+                placeholder="Search username"
+                autocomplete="off"
+              />
+            </label>
+            <label class="um-filter" for="um-filter-status">
+              <span>Status</span>
+              <select id="um-filter-status">
+                <option value="all">All access</option>
+                <option value="enabled">Enabled</option>
+                <option value="disabled">Disabled</option>
+              </select>
+            </label>
+            <label class="um-filter" for="um-filter-role">
+              <span>Role</span>
+              <select id="um-filter-role">
+                <option value="all">All roles</option>
+                <option value="admin">Admin</option>
+                <option value="editor">Editor</option>
+                <option value="viewer">Viewer</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="um-tablewrap">
+            <table class="um-table">
+              <colgroup>
+                <col class="um-col-user" />
+                <col class="um-col-role" />
+                <col class="um-col-access" />
+                <col class="um-col-telegram" />
+                <col class="um-col-login" />
+                <col class="um-col-updated" />
+                <col class="um-col-action" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th scope="col">User</th>
+                  <th scope="col">Role</th>
+                  <th scope="col">Access</th>
+                  <th scope="col">Telegram</th>
+                  <th scope="col">Last login</th>
+                  <th scope="col">Updated</th>
+                  <th scope="col"><span class="sr-only">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody id="um-list" aria-live="polite">
+                <tr class="um-loading"><td colspan="7">Loading accounts…</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="um-empty" id="um-empty" hidden>
+            <i data-lucide="user-search" aria-hidden="true"></i>
+            <strong>No matching users</strong>
+            <span>Change the search or filters to see more accounts.</span>
+          </div>
+        </section>
+      </div>
+    </section>
+    <!-- /#usersView -->
+
+    <div
+      class="um-modal"
+      id="um-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="um-form-title"
+      hidden
+    >
+      <div class="um-modal-backdrop" id="um-modal-backdrop"></div>
+      <section class="um-editor" aria-labelledby="um-form-title">
+          <div class="um-editor-head">
+            <span class="um-editor-icon" aria-hidden="true">
+              <i data-lucide="user-plus"></i>
+            </span>
+            <div>
+              <h2 id="um-form-title">Add user</h2>
+              <p id="um-form-sub">Create an account with the minimum access needed.</p>
+            </div>
+            <span class="um-editor-state" id="um-editor-state">New</span>
+            <button id="um-close" type="button" aria-label="Close user editor">
+              <i data-lucide="x" aria-hidden="true"></i>
+            </button>
+          </div>
+
+          <form class="um-form" id="um-form" novalidate>
+            <label for="um-user">
+              <span>Username</span>
+              <input
+                id="um-user"
+                type="text"
+                minlength="2"
+                maxlength="32"
+                autocomplete="off"
+                required
+                aria-describedby="um-user-help"
+              />
+              <small id="um-user-help">2–32 characters. Letters, numbers, spaces, dot, dash, and underscore.</small>
+            </label>
+
+            <label for="um-pw">
+              <span id="um-pw-label">Password</span>
+              <input
+                id="um-pw"
+                type="password"
+                minlength="6"
+                autocomplete="new-password"
+                required
+                aria-describedby="um-pw-help"
+              />
+              <small id="um-pw-help">Use at least 6 characters.</small>
+            </label>
+
+            <label for="um-role">
+              <span>Role</span>
+              <select id="um-role" aria-describedby="um-role-help">
+                <option value="viewer">Viewer</option>
+                <option value="editor">Editor</option>
+                <option value="admin">Admin</option>
+              </select>
+            </label>
+
+            <div class="um-role-guide" id="um-role-help">
+              <i data-lucide="eye" aria-hidden="true"></i>
+              <div>
+                <strong>Viewer</strong>
+                <span>Read-only access to market data and alerts.</span>
+              </div>
+            </div>
+
+            <section class="um-access" id="um-access" hidden aria-labelledby="um-access-title">
+              <div>
+                <h3 id="um-access-title">Account access</h3>
+                <p id="um-access-copy">This account can sign in.</p>
+              </div>
+              <button
+                class="um-switch"
+                id="um-toggle"
+                type="button"
+                role="switch"
+                aria-checked="true"
+              >
+                <span aria-hidden="true"></span>
+                <b>Enabled</b>
+              </button>
+            </section>
+
+            <section
+              class="um-telegram-setting"
+              id="um-telegram-setting"
+              hidden
+              aria-labelledby="um-telegram-title"
+            >
+              <div class="um-telegram-heading">
+                <span class="um-telegram-icon" aria-hidden="true">
+                  <i data-lucide="send"></i>
+                </span>
+                <div>
+                  <h3 id="um-telegram-title">Telegram alerts</h3>
+                  <p>Connect this account to ZoneTrackerAlertBot.</p>
+                </div>
+              </div>
+              <div class="um-telegram-manage" id="um-telegram-manage" aria-live="polite"></div>
+            </section>
+
+            <dl class="um-meta" id="um-meta" hidden>
+              <div><dt>Last login</dt><dd id="um-meta-login">…</dd></div>
+              <div><dt>Created</dt><dd id="um-meta-created">…</dd></div>
+              <div><dt>Updated</dt><dd id="um-meta-updated">…</dd></div>
+            </dl>
+
+            <div class="um-safety">
+              <i data-lucide="shield-check" aria-hidden="true"></i>
+              <p><strong>Access safety</strong> At least one enabled administrator must remain. The server blocks disabling, demoting, or deleting the final admin.</p>
+            </div>
+
+            <div class="auth-err" id="um-err" role="alert"></div>
+            <div class="um-success" id="um-success" role="status" aria-live="polite"></div>
+
+            <div class="um-form-actions">
+              <button class="primary" id="um-save" type="submit">
+                <i data-lucide="check" aria-hidden="true"></i>
+                <span id="um-save-label">Add user</span>
+              </button>
+              <button id="um-cancel" type="button" hidden>Cancel</button>
+            </div>
+
+            <div class="um-danger" id="um-danger" hidden>
+              <div>
+                <strong>Permanent deletion</strong>
+                <span id="um-delete-hint">This action cannot be undone.</span>
+              </div>
+              <button class="danger" id="um-delete" type="button">Delete user</button>
+            </div>
+          </form>
+      </section>
+    </div>
+
+    <div id="ringHost" aria-live="assertive"></div>
+
+    <!-- notification center: every triggered alert, snooze/close, read/unread.
+         Top-level (outside #alertsView) so it works from any view. -->
+    <div id="notifPanel" role="dialog" aria-label="Notifications">
+      <div class="np-backdrop" id="np-backdrop"></div>
+      <div class="np-card">
+        <div class="np-head">
+          <i data-lucide="bell" aria-hidden="true"></i>
+          <h3>Notifications</h3>
+          <span class="np-count" id="np-count"></span>
+          <span class="np-spacer"></span>
+          <button id="np-readall" type="button">Mark all read</button>
+          <button id="np-close" type="button" aria-label="Close"><i data-lucide="x" aria-hidden="true"></i></button>
+        </div>
+        <div class="np-list" id="np-list"></div>
+      </div>
+    </div>
+    <!-- /#notifPanel -->
+
+    <div id="telegramPanel" role="dialog" aria-modal="true" aria-labelledby="tg-title">
+      <div class="tg-backdrop" id="tg-backdrop"></div>
+      <section class="tg-card">
+        <div class="tg-head">
+          <i data-lucide="send" aria-hidden="true"></i>
+          <div>
+            <h3 id="tg-title">Telegram alerts</h3>
+            <p>Connect once to receive alert events outside the browser.</p>
+          </div>
+          <button id="tg-close" type="button" aria-label="Close Telegram settings">
+            <i data-lucide="x" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="tg-body" id="tg-body" aria-live="polite">
+          <p class="tg-muted">Loading Telegram status…</p>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===== auth gate (covers the app until signed in) ===== -->
+    <div id="authOverlay">
+      <div class="auth-card">
+        <div class="auth-brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 17 9 11 13 15 21 6" />
+              <polyline points="15 6 21 6 21 12" />
+            </svg>
+          </span>
+          <div>
+            <div class="brand-title">Nifty OHL Tracker</div>
+            <div class="brand-sub">Sign in to continue</div>
+          </div>
+        </div>
+
+        <!-- first-run: create admin -->
+        <form id="setupPanel" hidden>
+          <h2>Create admin account</h2>
+          <p class="auth-hint">First run: set up the admin account that will manage users.</p>
+          <label class="auth-field" for="su-user">
+            <span>Admin username</span>
+            <input id="su-user" type="text" autocomplete="username" />
+          </label>
+          <label class="auth-field" for="su-pw">
+            <span>Password</span>
+            <input
+              id="su-pw"
+              type="password"
+              minlength="6"
+              autocomplete="new-password"
+              aria-describedby="su-pw-hint"
+            />
+            <small id="su-pw-hint">Use at least 6 characters.</small>
+          </label>
+          <label class="auth-field" for="su-pw2">
+            <span>Confirm password</span>
+            <input
+              id="su-pw2"
+              type="password"
+              minlength="6"
+              autocomplete="new-password"
+            />
+          </label>
+          <div class="auth-err" id="su-err"></div>
+          <button class="primary auth-submit" id="su-btn" type="submit">Create admin &amp; sign in</button>
+        </form>
+
+        <!-- returning: pick user, then password -->
+        <div id="loginPanel" hidden>
+          <h2>Who's signing in?</h2>
+          <div class="user-picker" id="userPicker"></div>
+          <form id="pwForm" hidden>
+            <div class="picked-user" id="pickedUser"></div>
+            <label class="auth-field" for="li-pw">
+              <span>Password</span>
+              <input
+                id="li-pw"
+                type="password"
+                autocomplete="current-password"
+              />
+            </label>
+            <div class="auth-err" id="li-err"></div>
+            <button class="primary auth-submit" id="li-btn" type="submit">Sign in</button>
+            <button class="auth-back" id="li-back" type="button">← Choose another user</button>
+          </form>
+          <div class="auth-empty" id="loginEmpty" hidden>No users yet.</div>
+        </div>
+      </div>
+    </div>
+    <!-- /#authOverlay -->
+
+    <div
+      id="stockModal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="sm-sym"
+      aria-describedby="sm-name"
+    >
+      <div class="sm-card" tabindex="-1">
+        <div class="sm-top">
+        <div class="sm-grabber" aria-hidden="true"></div>
+        <div class="sm-head">
+          <div>
+            <div class="sm-sym" id="sm-sym"></div>
+            <div class="sm-name" id="sm-name"></div>
+          </div>
+          <div class="sm-actions">
+            <button
+              class="primary sm-addalert needs-editor"
+              id="sm-addalert"
+              type="button"
+              aria-label="Add alert"
+              title="Add alert"
+            >
+              <i data-lucide="bell-plus" aria-hidden="true"></i>
+            </button>
+            <button
+              class="sm-close"
+              id="sm-close"
+              type="button"
+              aria-label="Close stock details"
+              title="Close"
+            >
+              <i data-lucide="x" aria-hidden="true"></i>
+            </button>
+          </div>
+        </div>
+        <div class="sm-price">
+          <span class="sm-ltp num" id="sm-ltp"></span>
+          <span class="delta" id="sm-delta"></span>
+        </div>
+        <div class="sm-tabs" role="tablist" aria-label="Stock detail sections">
+          <button
+            type="button"
+            class="sm-tab active"
+            id="sm-tab-details"
+            data-tab="details"
+            role="tab"
+            aria-controls="sm-panel-details"
+            aria-selected="true"
+          >
+            Details
+          </button>
+          <button
+            type="button"
+            class="sm-tab"
+            id="sm-tab-alerts"
+            data-tab="alerts"
+            role="tab"
+            aria-controls="sm-panel-alerts"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            Alerts
+            <span class="sm-tab-count" id="sm-tab-alerts-count" hidden></span>
+          </button>
+          <button
+            type="button"
+            class="sm-tab"
+            id="sm-tab-analysis"
+            data-tab="analysis"
+            role="tab"
+            aria-controls="sm-panel-analysis"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            AI Analysis
+          </button>
+        </div>
+        </div>
+        <div
+          class="sm-panel"
+          id="sm-panel-details"
+          role="tabpanel"
+          aria-labelledby="sm-tab-details"
+        >
+          <div class="sm-grid" id="sm-grid"></div>
+          <section
+            id="sm-preopen"
+            class="sm-preopen"
+            aria-label="Pre-open order book"
+            hidden
+          ></section>
+        </div>
+        <div
+          class="sm-panel"
+          id="sm-panel-alerts"
+          role="tabpanel"
+          aria-labelledby="sm-tab-alerts"
+          hidden
+        >
+          <section
+            id="sm-alerts"
+            class="sm-alerts"
+            aria-label="Alerts for this stock"
+          ></section>
+        </div>
+        <div
+          class="sm-panel"
+          id="sm-panel-analysis"
+          role="tabpanel"
+          aria-labelledby="sm-tab-analysis"
+          hidden
+        >
+          <section
+            id="sm-analysis"
+            class="sm-analysis"
+            aria-label="AI analysis for this stock"
+          ></section>
+        </div>
+      </div>
+    </div>
+
+    <div id="tt" role="tooltip">
+      <span id="ttText"></span>
+      <span class="tt-arrow" aria-hidden="true"></span>
+    </div>
+
+    <footer class="app-footer">
+      <span class="footer-summary">Local NSE market-data proxy</span>
+      <span class="footer-meta">
+        <span>Mon–Fri · 09:15–15:30 IST</span>
+        <span aria-hidden="true">·</span>
+        <span>Last close shown outside market hours</span>
+        <span aria-hidden="true">·</span>
+        <span>Prices in ₹</span>
+      </span>
+    </footer>
+
+    <!-- Lucide icons (MIT, lightweight) via CDN; degrades gracefully if offline -->
+    <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.min.js"></script>
+
+    <script type="module" src="js/main.js"></script>
+
+    <!-- ---------------- Alerts UI (self-contained) ---------------- -->
+    
+
+    <!-- ---------------- Auth controller (login gate + user admin) ---------------- -->
+    
+  </body>
+</html>

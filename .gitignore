@@ -1,14 +1,18 @@
-# Secrets & local config (keep config.example.json tracked)
-config.json
+# Secrets & local configuration (keep .env.sample tracked)
+.env
+.env.*
+!.env.sample
 
 # Runtime / generated data
-alerts.json
-users.json
+store/*
 license.key
 logs/
 
 # Data-source reference (kept local only, not published)
 NSE_API.md
+AUTH_DESIGN.md
+ALERT_LIFECYCLE_PLAN.md
+REORG_PLAN.md
 
 # OS / editor cruft
 .DS_Store
@@ -17,6 +21,8 @@ Thumbs.db
 
 # Logs
 *.log
+
+.impeccable
 
 # Node (not used today, but safe if deps are ever added)
 node_modules/

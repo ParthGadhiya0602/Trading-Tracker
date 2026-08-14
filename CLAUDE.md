@@ -6,21 +6,29 @@ index's own live points level. Data is a live market feed (unofficial), market h
 
 ## Architecture
 
+Split into **`backend/`** (Node server) and **`frontend/`** (the static app it serves).
 A pure-browser page can't reach the upstream feed (CORS forbids the needed headers; its
-anti-bot layer blocks any request without a warmed session). So there are two files:
+anti-bot layer blocks any request without a warmed session), hence the local proxy.
 
-- **`server.js`** - Node 18+, **zero dependencies** (built-in `fetch` + hand-rolled
+`config.json`, `logs/`, and `package.json`/lockfile live at the **repo root**; alert + user
+data (`alerts.json`, `users.json`) live in **`store/`**; `backend/*.js` reaches them via `..`.
+
+- **`backend/server.js`** - Node 18+, **zero dependencies** (built-in `fetch` + hand-rolled
   cookie jar). Warms an upstream session (cookies + browser headers, rewarm-on-403, 10 min
-  TTL), then serves the page and data same-origin. Startup self-test prints reachability.
-  - `GET /` → `index.html`
+  TTL), serves the app + data same-origin, and gates all `/api/*` behind auth. Startup
+  self-test prints reachability. Serves **`../frontend`** statically (MIME + path-traversal
+  guard; `.js` → `text/javascript` for ES modules).
+  - `GET /` → `frontend/index.html`; `GET /css/*`, `GET /js/*` → static assets.
   - `GET /api/indices` → JSON keyed by index name. Dashboard indices (`DASH_INDICES` =
     `alerts.INDICES`): **NIFTY 50, NIFTY NEXT 50, NIFTY MIDCAP 50, NIFTY MIDCAP 100**
     (full 100).
-- **`index.html`** - vanilla JS + inline CSS dashboard. No build step. Two views
-  (Dashboard / Alerts) via the header toggle. Uses **Lucide** icons from a CDN
-  (`cdn.jsdelivr.net/npm/lucide`) - the only external dependency; `drawIcons()`/
-  `lucide.createIcons()` render them and it degrades gracefully (empty icons) if offline.
-- **`alerts.js`** - alert engine + storage + Telegram sender. `server.js` runs
+- **`frontend/`** - vanilla JS + CSS, **no build step**. `index.html` is markup only +
+  `<link>`s to **`css/{base,components,dashboard,alerts,auth}.css`** + one
+  `<script type="module" src="js/main.js">`. `js/` modules: `main` (entry, imports the
+  rest) → `dashboard.js`, `alerts-ui.js`, `auth-ui.js` (cross-module bridges via `window.*`:
+  `openCreateAlert`, `APP_AUTH`, `__initDash`/`__initAlerts`). Uses **Lucide** from a CDN
+  (`cdn.jsdelivr.net/npm/lucide`) - the only external dep; degrades gracefully if offline.
+- **`backend/alerts.js`** - alert engine + storage + Telegram sender. `server.js` runs
   `alertTick()` on an interval (`ALERT_POLL_SECONDS`, default 5) **only during market
   hours**, calling `alerts.evaluate(payload)` - so alerts fire server-side even with no
   browser tab open.
@@ -40,7 +48,15 @@ anti-bot layer blocks any request without a warmed session). So there are two fi
     `logError(scope, err)` — dated lines `[YYYY-MM-DD HH:MM:SS IST] ERROR [scope] msg` — and
     echoed to the console. Failures never blank the app (in-memory + `alerts.json` stay good).
 
-Run: `node server.js` → open http://localhost:8787/ (`PORT` env var to change port).
+- **`backend/auth.js`** - user accounts (scrypt + per-user salt), in-memory sessions
+  (HttpOnly `sid` cookie, 12h idle), roles **admin/editor/viewer**, login rate-limit; users
+  in Mongo `users` collection or local `users.json`. Server-side gate: every `/api/*`
+  needs a session (login/setup excepted); alert writes need editor/admin; `/api/users*`
+  admin-only; non-GET requires an `X-Requested-With` header (CSRF). First run shows a
+  Create-admin screen. `ALERTS_NO_TICK=1` pauses the eval loop (serve UI/APIs only).
+
+Run: `node backend/server.js` (or `./run.sh`) → open http://localhost:8787/ (`PORT` env
+var to change port).
 
 ## Alerts
 
@@ -54,16 +70,28 @@ each index's stock list is refreshed from the feed on every
 market tick (i.e. daily) via `updateSymbols()` → `GET /api/symbols`.
 
 **Required inputs**: index, stock (searchable), side (Buy/Sell), alert price, **stop loss**,
-**note**, **zone creator**, **time frame** (1s…12mo, drives the offset - see below).
+**note**, **time frame** (1s…12mo, drives the offset - see below). **Zone creator** is set
+automatically to the signed-in user (server-authoritative on create, read-only in the form,
+preserved on edit) — not a manual field.
 **Optional metadata** (stored/shown/sent, does not affect firing): candle date, candle
 time (HH:MM IST, 24h). The form's trigger preview stays blank until side + alert price +
 time frame are all chosen (Side/Time frame default to an empty "Select…").
 
+**UI label mapping (display-only; internal field names unchanged):** the `alertPrice`
+field is shown to users as **"Entry price"**, and the `triggerPrice` field is shown as
+**"Alert price"** (the offset% level that pings you as price approaches). Fire events and
+the `triggered` status display as **"Alert" / "Re-alert" / "Alerted"**. Code, storage, and
+the `/api/alerts` payload still use `alertPrice`/`triggerPrice`/`status:"triggered"`; the
+paragraph below describes those internal fields.
+
 **Model: the alert price is the entry/target; the trigger is offset% away from it, and
 re-alerts step BACK toward the alert price.** BUY trigger = `alertPrice + offset%`
 (above); SELL trigger = `alertPrice − offset%` (below). The offset **scales with the time
-frame** (`OFFSETS` in `alerts.js`; anchor 2h = 10%, e.g. 1m = 0.5%, 15m = 3%, 1h = 7%,
-1d = 20%). The re-alert step is **0.5% for 1m–15m** frames, else offset ÷ 5. Both are
+frame** (`OFFSETS` in `alerts.js`; 1s–15m tuned tight, 30m+ retuned down to match
+realistic price travel, kept monotonic — e.g. 1m = 0.5%, 15m = 3%, 30m = 3.5%, 1h = 4.5%,
+2h = 5.5%, 1d = 9%, 1w = 13%, 1mo = 18%, 12mo = 40%). The re-alert step is **0.5% for
+1m–15m** frames, else offset ÷ 5. Offsets are snapshotted per alert at create/edit/re-arm,
+so retuning the map only affects new/edited/re-armed alerts, not live ones. Both are
 snapshotted onto the alert at create/edit (`offsetPct`, `stepPct`); the offset map is
 served at `GET /api/alert-config` for the form preview.
 
@@ -79,6 +107,10 @@ bool = reached `active`). The engine (`evaluate`) runs one state machine per tic
   it) ⇒ **ENTRY** (🎯, silent, no prompt) and `status = active`. This is the **entry gate**.
 - **The zone machine (`evaluateZone`) runs ONLY when `active`** — so 3×/5×/stop-loss can
   never fire before the price actually reaches the entry.
+- **Never during pre-open**: while `marketStatus === "Pre-open"` the zone machine is
+  skipped in `evaluate()` — SL/3×/5× do **not** resolve against the indicative equilibrium
+  price (IEP), which is a provisional, volatile discovery number, not a real trade. Alerts
+  still arm/trigger/enter in pre-open; outcomes only settle in the continuous session (≥09:15).
 
 **Profit targets & zone outcome** (only evaluated once `active`). R = |alert − stop loss|;
 **3× target** = alert ±3R, **5× target** = alert ±5R (BUY +, SELL −); profits = 3R/5R
@@ -91,19 +123,31 @@ Snooze/Close prompt); only TRIGGER/RE-ALERT ring (`RINGS` in `alerts.js`). At cr
 if the live price is **already past the entry**, the alert is marked `entered`
 (`markEnteredIfPastEntry`); the create form confirms this first.
 
-Every fire goes to **Telegram** (all recipients) **and** the in-page notification center;
-ringing fires also toast + beep. **Snooze** clears the current ring; **Close** deactivates.
-On close (manual, or auto via success/fail) the alert is **moved from `alerts` to
-`archived_alerts`** (Mongo) / `store.archived` (file) — see Storage. Each alert has a
-**`zoneVerified`** review flag and metadata **`createdAt` / `updatedAt` / `lastFiredAt`**
-(shown in the detail modal). The list has **multi-select filter dropdowns** (index /
-status [armed/triggered/active/closed] / side / time frame / zone-verified / outcome) +
-a **Show archived** toggle; active selections show as removable **chips**.
+**Review gate (`reviewState`): fires are gated by an approve/reject workflow.** Each alert
+carries **`reviewState`** (`raw` | `approved` | `rejected`) + **`reviewer`** (set
+server-side from the signed-in user) + **`reviewReason`** (required) + **`reviewedAt`**.
+The FSM always advances (state is tracked for every alert), but **`fire()` is gated**:
+**approved** → full raising (rings + Telegram + in-page, as below); **raw** → **dormant**
+(FSM advances silently, emits nothing — can even auto-close on a terminal outcome with no
+notification); **rejected** → only the **terminal zone outcome** (success/partial/fail)
+fires, **in-page only** (no ring, no Telegram). Set via `POST /api/alerts/:id/{approve,reject}`
+(body `{reason}`, editor/admin) — replaces the old verify/unverify boolean; toggling
+raw↔approved↔rejected is allowed (each needs a fresh reason). `migrate()` maps legacy
+`zoneVerified` true→approved / false→raw.
+
+Every (non-gated) fire goes to **Telegram** (all recipients) **and** the in-page notification
+center; ringing fires also toast + beep. **Snooze** clears the current ring; **Close**
+deactivates. On close (manual, or auto via success/fail) the alert is **moved from `alerts`
+to `archived_alerts`** (Mongo) / `store.archived` (file) — see Storage; the archived record
+keeps its `reviewState`. Metadata **`createdAt` / `updatedAt` / `lastFiredAt`** shows in the
+detail modal. The list has **multi-select filter dropdowns** (index /
+status [armed/triggered/active/closed] / side / time frame / review [raw/approved/rejected] /
+outcome) + a **Show archived** toggle; active selections show as removable **chips**.
 
 Telegram is optional/dormant until configured in `config.json`
 (`{ "telegram": { "botToken": "...", "recipients": [{ "chatId": "...", "label": "..." }] } }`);
 missing config → in-page only. Alert API: `GET/POST /api/alerts`, `PATCH/DELETE
-/api/alerts/:id`, `POST /api/alerts/:id/{snooze,close,verify,unverify}`,
+/api/alerts/:id`, `POST /api/alerts/:id/{snooze,close,approve,reject}`,
 `GET /api/alerts/active`, **`GET /api/alerts/all`** (active + archived, used by the
 notification center), **`GET /api/alerts/archived`**, `GET /api/symbols`,
 `GET /api/alert-config`, `GET /api/price`. **`ALERTS_NO_TICK=1`** env pauses the server's
@@ -134,6 +178,16 @@ Per-index payload shape:
 `{ source, timestamp, marketDataLive, level:{last,variation,pChange,open,high,low,prevClose},
    advance:{advances,declines,unchanged}, data:[{symbol,open,dayHigh,dayLow,lastPrice,prevClose,change,pChange,totalTradedVolume}] }`
 
+**Market state & pre-open** (`marketState()` in `server.js`, mirrored client-side): **pre-open
+09:00–09:15 · open 09:15–15:30 · closed** (IST, Mon–Fri). During **pre-open**, `fetchMarketData()`
+serves `fetchPreopen()` — ONE `key=ALL` call to `feed.preopenEndpoint` filtered per index by the
+cached symbol list, with each stock's **IEP** as `open`=`high`=`low`=`lastPrice` and
+`marketStatus:"Pre-open"` (same payload shape). So `/api/indices` shows a **PRE-OPEN** dashboard
+state and the `alertTick` loop evaluates alerts against IEP before the 09:15 open — but only
+for arm/trigger/**entry**; the SL/target **zone machine is skipped in pre-open** (see the
+lifecycle note above) so a tight stop can't trip on the provisional IEP. The symbol
+cache only refreshes from real `open`-session constituents. Full shape/mapping in `NSE_API.md`.
+
 ## Features / UI
 
 Layout: sticky **app bar** (brand · market status · Dashboard/Alerts switch) → **KPI
@@ -153,7 +207,31 @@ symbol (`window.openCreateAlert(index, symbol)` bridges the dashboard → alerts
 - In-memory cache with stale indicator; light/dark; full-height layout on ≥820px
   (only the table scrolls).
 
-## Agents (`.claude/agents/`)
+## Agents (`.claude/agents/`) & workflow
 
-- **nifty-rnd** - R&D: verify data-source endpoints/fields, market-hours logic, edge cases.
-- **nifty-coder** - implementation (Sonnet 5): builds/edits `server.js` + `index.html`.
+Single-responsibility roster. **Opus** (reason/R&D/design/review, high effort) ·
+**Sonnet** (code generation, high effort):
+
+- **nifty-explorer** (Opus) - map the actual code relevant to a request, `file:line` cited.
+- **nifty-researcher** (Opus) - verify external/behavioural facts (only what code can't answer).
+- **nifty-architect** (Opus) - spec + task breakdown (backend/frontend/needsUI/risks/
+  verification/openQuestions). No code.
+- **nifty-ui-designer** (Opus) - UI/UX design spec grounded in the CSS design system.
+- **nifty-stream-diagnostics** (Opus) - diagnose the WSS/SSE path, live tick schema,
+  reconnects, and market-status propagation. Read-only unless explicitly handed an
+  implementation task.
+- **nifty-reviewer** (Opus) - adversarial verification of finished work vs spec.
+- **nifty-backend** (Sonnet) - implement `server.js`/`alerts.js`/`auth.js` (backend/*) to spec.
+- **nifty-frontend** (Sonnet) - implement `index.html` / `frontend/js|css` to design+spec.
+
+**Workflows** (invoke with `args:{request:"..."}`):
+
+- `.claude/workflows/feature.js` — broad feature delivery: Explore → Plan (openQuestions
+  gate) → Design? → Backend → Frontend → Review → bounded fix loop → report.
+- `.claude/workflows/safe-change.js` — the default for a bug fix, narrow feature, or
+  refactor: evidence-first scoping, only affected layers run, then reviewer-owned targeted
+  repairs (maximum two) rather than re-running unrelated implementation work.
+
+Both workflows are anchored to the explorer's real `file:line` map, use structured phase
+outputs, require read-before-edit and honest verification, have the reviewer re-check claims,
+never use destructive git, and keep endpoints only in `config.json`'s `feed` block.

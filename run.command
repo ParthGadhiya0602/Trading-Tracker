@@ -12,38 +12,43 @@ if [ -s "$HOME/.nvm/nvm.sh" ]; then
   . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1 || true
 fi
 
-NODE_MAJOR_MIN=18
+NODE_REQUIREMENT="Node.js 24 LTS (>=24.11.0 <25)"
 
-# Node missing, or too old for the built-in fetch() the server relies on:
-# install a supported version directly via the OS package manager.
-if ! command -v node >/dev/null 2>&1 || [ "$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null)" -lt "$NODE_MAJOR_MIN" ] 2>/dev/null; then
+node_supported() {
+  command -v node >/dev/null 2>&1 &&
+    node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major === 24 && minor >= 11 ? 0 : 1)' \
+      >/dev/null 2>&1
+}
+
+# Node missing or outside the supported LTS line: install Node 24 via the OS package manager.
+if ! node_supported; then
   if [ "$(command -v node >/dev/null 2>&1 && echo yes || echo no)" = "yes" ]; then
-    echo "Node $(node -v) found, but this needs Node ${NODE_MAJOR_MIN}+. Installing a supported version..."
+    echo "Node $(node -v) found, but ${NODE_REQUIREMENT} is required. Installing Node 24..."
   else
-    echo "Node.js is not installed. Installing Node ${NODE_MAJOR_MIN}+..."
+    echo "Node.js is not installed. Installing Node 24 LTS..."
   fi
 
   case "$(uname -s)" in
     Darwin)
       if command -v brew >/dev/null 2>&1; then
-        brew install node
+        brew install node@24
       else
-        echo "Homebrew not found. Install it from https://brew.sh, then run: brew install node"
+        echo "Homebrew not found. Install it from https://brew.sh, then run: brew install node@24"
         exit 1
       fi
       ;;
     Linux)
       if command -v apt-get >/dev/null 2>&1; then
         echo "Installing via NodeSource (needs sudo)..."
-        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+        curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
         sudo apt-get install -y nodejs
       else
-        echo "No supported package manager found. Install Node.js ${NODE_MAJOR_MIN}+ manually."
+        echo "No supported package manager found. Install ${NODE_REQUIREMENT} manually."
         exit 1
       fi
       ;;
     *)
-      echo "Unsupported OS. Install Node.js ${NODE_MAJOR_MIN}+ manually."
+      echo "Unsupported OS. Install ${NODE_REQUIREMENT} manually."
       exit 1
       ;;
   esac
@@ -53,9 +58,8 @@ if ! command -v node >/dev/null 2>&1; then
   echo "Node install failed - node still not found on PATH."
   exit 1
 fi
-MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
-if [ "$MAJOR" -lt "$NODE_MAJOR_MIN" ]; then
-  echo "Node $(node -v) found, but this needs Node ${NODE_MAJOR_MIN}+. Install did not reach that version."
+if ! node_supported; then
+  echo "Node $(node -v) found, but ${NODE_REQUIREMENT} is required. Installation did not provide a supported runtime."
   exit 1
 fi
 
@@ -88,4 +92,4 @@ else
 fi
 
 echo "Starting Trading Tracker with $(node -v) ..."
-exec node server.js
+exec node backend/server.js

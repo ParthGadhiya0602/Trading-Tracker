@@ -1,0 +1,150 @@
+/* =====================================================================
+   market.css — dedicated Market Watch view (additive; consumes system.css)
+   Feed-backed constituents table + right rail (gainers/losers/most-active).
+   Reuses the existing table chrome + .mini-list/.mini-row + .pill. Tokens only.
+   ===================================================================== */
+
+#marketView[hidden] {
+  display: none !important;
+}
+
+.mw-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: center;
+  margin: 12px 0 14px;
+}
+.mw-controls .search {
+  margin-left: auto;
+}
+
+.market-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--gap-section);
+  align-items: start;
+}
+.mw-list-card {
+  padding: 0;
+  overflow: hidden;
+}
+.mw-list-card .tablewrap {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.mw-rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-section);
+}
+.mw-rail .report-panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+/* responsive constituents columns (staged, mirror dashboard technique) */
+#mwTable .col-open,
+#mwTable .col-high,
+#mwTable .col-low,
+#mwTable .col-prev,
+#mwTable .col-vol {
+  display: none;
+}
+#mwTable {
+  min-width: 0;
+}
+#mwTable th:first-child,
+#mwTable td:first-child {
+  position: static;
+}
+
+@media (min-width: 560px) {
+  #mwTable .col-open,
+  #mwTable .col-high,
+  #mwTable .col-low {
+    display: table-cell;
+  }
+  #mwTable {
+    min-width: 640px;
+  }
+  #mwTable th:first-child,
+  #mwTable td:first-child {
+    position: sticky;
+  }
+}
+
+@media (min-width: 820px) {
+  #mwTable .col-prev,
+  #mwTable .col-vol {
+    display: table-cell;
+  }
+  #mwTable {
+    min-width: 0;
+  }
+}
+
+@media (min-width: 1280px) {
+  .market-layout.with-rail {
+    grid-template-columns: minmax(0, 1fr) 300px;
+  }
+}
+
+/* >=820: lock the view to the viewport so the constituents list scrolls inside
+   its own box and the footer stays pinned at the bottom of the card. Mirrors
+   the dashboard/alerts inner-scroll contract in components.css. */
+@media (min-width: 820px) {
+  #marketView:not([hidden]) {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+  #marketView .alerts-bar,
+  #marketView .kpi-strip,
+  #marketView .mw-controls {
+    flex: none;
+  }
+  #marketView .market-layout {
+    flex: 1 1 auto;
+    min-height: 0;
+    grid-template-rows: minmax(0, 1fr);
+  }
+  #marketView .mw-list-card {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    height: 100%;
+  }
+  #marketView .mw-list-card .section-head,
+  #marketView .mw-list-card .table-foot {
+    flex: none;
+  }
+  #marketView .mw-list-card .tablewrap {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    overflow: auto;
+  }
+  #marketView .mw-rail {
+    min-height: 0;
+    overflow-y: auto;
+    align-self: start;
+    max-height: 100%;
+  }
+}
+
+/* constituents rows open the shared stock detail modal */
+#mwTable tbody tr.mw-row {
+  cursor: pointer;
+}
+#mwTable tbody tr.mw-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}

@@ -1,0 +1,869 @@
+/* =====================================================================
+   system.css — shared design-system layer (revamp foundation)
+   Loaded AFTER base.css (tokens) and BEFORE components.css so primitives
+   can consume tokens and views can still override.
+
+   Additive only: extends the existing token set + adds reusable primitives
+   (app shell, KPI strip/cards, pills, segmented control, section headers,
+   table footer, states). Existing selectors (.idxcard/.appbar/.tabs/.ai-*)
+   keep working; new surfaces adopt the primitives here.
+
+   Colour contract (do not drift): green/red = price direction only;
+   --accent (+--accent-2 gradient) = selection/primary only; --warn = pre-open/
+   pending/stale; --flat/--chip = neutral (incl. the single KPI icon chip).
+   ===================================================================== */
+
+/* ---------- new tokens (dark) ---------- */
+:root {
+  /* single UI/data/display family — system stack today; swap to a self-hosted
+     grotesk (e.g. Geist) later by adding an @font-face and changing this var only */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+  /* weight ladder */
+  --fw-regular: 450;
+  --fw-medium: 550;
+  --fw-semibold: 650;
+  --fw-bold: 750;
+  --fw-heavy: 820;
+
+  /* type scale (structural, per-tier bumps below) */
+  --fs-hero: 30px;
+  --fs-kpi: 22px;
+  --fs-index: 20px;
+  --fs-page: 16px;
+  --fs-title: 14px;
+  --fs-kpi-label: 12px;
+  --fs-th: 10.5px;
+  --fs-td: 13px;
+  --fs-body: 14px;
+  --fs-overline: 10.5px;
+  --fs-caption: 11.5px;
+
+  /* spacing upper steps (extend --s1..--s8 in base.css) */
+  --s10: 40px;
+  --s12: 48px;
+
+  /* surfaces / chrome */
+  --surface-nav: #0d1220;        /* sidebar + right rail: cooler/darker than --panel */
+  --surface-inset: var(--panel2);
+  --icon-chip-bg: var(--chip);   /* KPI icon chip — single neutral fill */
+  --icon-chip-fg: var(--muted-ink);
+  --nav-active-bg: var(--accent-tint);
+  --nav-active-fg: var(--accent);
+
+  /* layout geometry (theme-independent) */
+  --container-max: 1680px;
+  --sidebar-w: 232px;
+  --sidebar-w-rail: 66px;
+  --rail-w: 320px;
+  --topbar-h: 60px;
+  --row-h: 40px;
+  --row-h-touch: 48px;
+  --row-h-compact: 34px;
+  --kpi-min: 200px;
+  --ring: 0 0 0 3px var(--accent-tint);
+  --gap-section: 18px;
+  --gap-kpi: 12px;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --surface-nav: #e9edf6;
+    --icon-chip-fg: var(--muted-ink);
+    --nav-active-bg: var(--accent-tint);
+    --nav-active-fg: var(--accent);
+  }
+}
+
+body {
+  font-family: var(--font-sans);
+}
+
+/* =====================================================================
+   App shell — responsive sidebar <-> top bar / drawer
+   ===================================================================== */
+.app-shell {
+  display: grid;
+  min-height: 100vh;
+  grid-template-columns: 1fr; /* mobile/tablet: single column, sidebar is off-canvas */
+}
+.app-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- sidebar ---- */
+.sidenav {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 260;
+  width: min(84vw, 300px);
+  transform: translateX(-100%);
+  transition: transform 0.24s var(--ease);
+  background: var(--surface-nav);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s4) var(--s3);
+  overflow-y: auto;
+}
+.app-shell.drawer-open .sidenav {
+  transform: translateX(0);
+}
+.nav-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 255;
+  background: rgba(5, 7, 12, 0.55);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s var(--ease);
+}
+.app-shell.drawer-open .nav-scrim {
+  opacity: 1;
+  pointer-events: auto;
+}
+.sidenav .nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  color: var(--muted-ink);
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-td);
+  text-decoration: none;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background-color 0.14s var(--ease),
+    color 0.14s var(--ease);
+}
+.nav-item svg.lucide {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+.nav-item:hover {
+  background: var(--chip);
+  color: var(--txt);
+}
+.nav-item.active {
+  background: var(--nav-active-bg);
+  color: var(--nav-active-fg);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.nav-item.active svg.lucide {
+  color: var(--accent);
+}
+.nav-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.nav-spacer {
+  flex: 1 1 auto;
+}
+
+/* ---- top bar (supersedes .appbar layout inside the shell) ---- */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  min-height: var(--topbar-h);
+  padding: var(--s2) var(--s4);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+.topbar .spacer {
+  flex: 1 1 auto;
+}
+.nav-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--chip);
+  color: var(--txt);
+  cursor: pointer;
+}
+.nav-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---- index ticker strip ---- */
+.ticker {
+  display: flex;
+  gap: var(--s5);
+  align-items: center;
+  padding: var(--s2) var(--s4);
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.ticker::-webkit-scrollbar {
+  display: none;
+}
+.ticker-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--s2);
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.ticker-item .tk-name {
+  font-size: var(--fs-overline);
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.ticker-item .tk-val {
+  font-weight: var(--fw-semibold);
+}
+
+/* ---- content region + right rail ---- */
+.content {
+  padding: var(--s4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-section);
+}
+.railcol {
+  background: var(--surface-nav);
+  border-left: 1px solid var(--line);
+  padding: var(--s4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-section);
+}
+
+/* =====================================================================
+   KPI strip + cards (standard + hero) — fixes same-size-card walls
+   ===================================================================== */
+.kpi-strip {
+  display: grid;
+  gap: var(--gap-kpi);
+  grid-template-columns: repeat(auto-fit, minmax(var(--kpi-min), 1fr));
+}
+.kpi-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.kpi-card .kpi-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+.kpi-chip {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  background: var(--icon-chip-bg);
+  color: var(--icon-chip-fg);
+}
+.kpi-chip svg.lucide {
+  width: 17px;
+  height: 17px;
+}
+.kpi-card .label {
+  font-size: var(--fs-kpi-label);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.1px;
+  color: var(--muted-ink);
+}
+.kpi-card .value {
+  font-size: var(--fs-kpi);
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.kpi-card .sub {
+  font-size: var(--fs-caption);
+  color: var(--muted-ink);
+  font-variant-numeric: tabular-nums;
+}
+.kpi-card.hero {
+  grid-column: span 2;
+  padding: 18px 20px;
+}
+.kpi-card.hero .value {
+  font-size: var(--fs-hero);
+  letter-spacing: -0.02em;
+}
+/* only interactive cards afford hover/press; static P&L cards must not */
+.kpi-card.is-interactive {
+  cursor: pointer;
+  transition:
+    transform 0.14s var(--ease),
+    box-shadow 0.14s var(--ease),
+    border-color 0.14s var(--ease);
+}
+.kpi-card.is-interactive:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow);
+  border-color: var(--line-strong);
+}
+.kpi-card.is-interactive:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.kpi-card.is-empty .value {
+  color: var(--muted);
+}
+.kpi-card.is-error .value {
+  color: var(--down);
+  font-size: var(--fs-td);
+  font-weight: var(--fw-semibold);
+}
+
+/* =====================================================================
+   Pills / badges — one recipe, token-bound, never colour-only
+   (the .ai-* variants already live in components.css; here are the
+   base recipe + the variants that were missing)
+   ===================================================================== */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-th);
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--chip);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.pill svg.lucide {
+  width: 12px;
+  height: 12px;
+}
+.pill .dotmark {
+  width: 7px;
+  height: 7px;
+}
+.pill.up {
+  background: var(--rowup);
+  color: var(--up);
+}
+.pill.down {
+  background: var(--rowdown);
+  color: var(--down);
+}
+.pill.flat {
+  background: var(--chip);
+  color: var(--flat);
+}
+.pill.accent {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+.pill.warn {
+  background: var(--warn-tint);
+  color: var(--warn);
+}
+.pill.outline {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+/* NEUTRAL signal must be flat-grey, NOT accent-blue (comp bug) */
+.pill.signal.neutral {
+  background: var(--chip);
+  color: var(--flat);
+}
+/* missing alert-status variant */
+.ai-status.active {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+
+/* =====================================================================
+   Segmented control (neutral + primary) + section header + table footer
+   ===================================================================== */
+.segmented {
+  display: inline-flex;
+  gap: 3px;
+  padding: 4px;
+  background: var(--chip);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  align-items: center;
+}
+.seg {
+  height: 34px;
+  padding: 0 13px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+  box-shadow: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition:
+    background-color 0.14s var(--ease),
+    color 0.14s var(--ease);
+}
+.seg .cnt {
+  opacity: 0.6;
+  font-weight: 700;
+  font-size: 11px;
+}
+.seg:hover:not(.active):not(:disabled) {
+  background: var(--panel-raised);
+  color: var(--txt);
+}
+.seg.active {
+  background: var(--panel-raised);
+  color: var(--txt);
+  box-shadow: var(--shadow-sm);
+}
+.seg:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.seg:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+/* primary/nav intent — active seg uses the accent gradient */
+.segmented.is-primary .seg.active {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2) var(--s4);
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.section-head .title {
+  font-size: var(--fs-title);
+  font-weight: var(--fw-bold);
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.section-head .title svg.lucide {
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
+  flex: none;
+}
+.section-head .meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2) 10px;
+  font-size: var(--fs-caption);
+  color: var(--muted-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.page-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+}
+.page-head .kpi-chip {
+  width: 40px;
+  height: 40px;
+}
+.page-head .title {
+  font-size: var(--fs-page);
+  font-weight: var(--fw-bold);
+}
+.page-head .subtitle {
+  font-size: var(--fs-caption);
+  color: var(--muted-ink);
+}
+
+.table-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-caption);
+  color: var(--muted-ink);
+  font-variant-numeric: tabular-nums;
+}
+.pager {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+}
+.pager .pg {
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--chip);
+  color: var(--muted-ink);
+  font: inherit;
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+}
+.pager .pg.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.pager .pg:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* =====================================================================
+   State helpers (reuse .skel / .state-block / .empty from other files)
+   ===================================================================== */
+.skel-cell {
+  height: 12px;
+  border-radius: var(--radius-xs);
+  background: linear-gradient(90deg, var(--skel1), var(--skel2), var(--skel1));
+  background-size: 200% 100%;
+  animation: sysskel 1.2s ease-in-out infinite;
+}
+.state-inline {
+  font-size: var(--fs-caption);
+  color: var(--muted-ink);
+}
+.state-inline.err {
+  color: var(--down);
+}
+@keyframes sysskel {
+  to {
+    background-position: -200% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skel-cell {
+    animation: none;
+  }
+}
+
+/* =====================================================================
+   Role gating — viewers keep read surfaces, lose write affordances
+   ===================================================================== */
+body.role-viewer [data-requires-edit] {
+  display: none !important;
+}
+body.role-viewer .kpi-card.is-interactive {
+  cursor: default;
+}
+
+/* =====================================================================
+   Breakpoints — mobile-first; each tier per the design-system scale
+   mobile <560 (base) · tablet >=560 · laptop >=820 · wide >=1280
+   ===================================================================== */
+
+/* mobile type/density (base defaults already set; tighten hero/kpi) */
+:root {
+  --gap-section: 12px;
+  --gap-kpi: 10px;
+}
+.content {
+  padding: 12px;
+}
+.kpi-card.hero {
+  grid-column: 1 / -1;
+}
+.kpi-card.hero .value {
+  font-size: 24px;
+}
+.kpi-card .value {
+  font-size: 19px;
+}
+
+@media (min-width: 560px) {
+  :root {
+    --gap-section: 16px;
+    --gap-kpi: 12px;
+  }
+  .content {
+    padding: 16px;
+  }
+  .kpi-strip {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .kpi-card .value {
+    font-size: var(--fs-kpi);
+  }
+  .kpi-card.hero .value {
+    font-size: var(--fs-hero);
+  }
+}
+
+@media (min-width: 820px) {
+  :root {
+    --gap-section: 18px;
+  }
+  .app-shell {
+    grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+    height: 100vh;
+    overflow: hidden;
+  }
+  .app-main {
+    overflow: hidden;
+    height: 100vh;
+  }
+  /* laptop: sidebar is persistent, not a drawer */
+  .sidenav {
+    position: static;
+    transform: none;
+    width: auto;
+    inset: auto;
+  }
+  .nav-scrim {
+    display: none;
+  }
+  .nav-toggle {
+    display: none;
+  }
+  /* only inner regions scroll; shell/topbar stay fixed */
+  .content {
+    flex: 1 1 auto;
+    overflow: auto;
+    padding: 20px;
+  }
+  .kpi-strip {
+    grid-template-columns: repeat(auto-fit, minmax(var(--kpi-min), 1fr));
+  }
+  .kpi-card.hero {
+    grid-column: span 2;
+  }
+  /* collapsed icon rail */
+  .app-shell.rail-collapsed {
+    grid-template-columns: var(--sidebar-w-rail) minmax(0, 1fr);
+  }
+  .app-shell.rail-collapsed .nav-item span,
+  .app-shell.rail-collapsed .brand span {
+    display: none;
+  }
+}
+
+@media (min-width: 1280px) {
+  :root {
+    --gap-section: 20px;
+  }
+  .content {
+    padding: 24px;
+  }
+  .app-shell.has-rail {
+    grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--rail-w);
+  }
+  .app-shell.rail-collapsed.has-rail {
+    grid-template-columns: var(--sidebar-w-rail) minmax(0, 1fr) var(--rail-w);
+  }
+  .kpi-card.hero .value {
+    font-size: 34px;
+  }
+}
+
+/* =====================================================================
+   Sidebar shell — laptop+ turns the existing top .appbar into a fixed left
+   navigation rail (no DOM/JS change: all IDs, the .viewnav switch, notif,
+   usernav and market-status keep working). Below 820px the .appbar stays
+   the current horizontal top bar. This is the app's real shell; the
+   .app-shell/.sidenav/.topbar primitives above remain available for
+   future/other surfaces.
+   ===================================================================== */
+@media (min-width: 820px) {
+  /* content clears the fixed rail; keeps top/right/bottom gutters */
+  body {
+    padding: 16px 24px 44px calc(var(--sidebar-w) + 24px);
+    max-width: none;
+  }
+  .appbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: var(--sidebar-w);
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 12px;
+    padding: 16px 12px;
+    margin: 0;
+    overflow-y: auto;
+    background: var(--surface-nav);
+    border-right: 1px solid var(--line);
+    border-bottom: 0;
+    box-shadow: none;
+    z-index: 60;
+  }
+  .appbar-primary {
+    flex: 0 0 auto;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    width: 100%;
+  }
+  .appbar-primary .spacer {
+    display: none;
+  }
+  .appbar .status {
+    align-self: stretch;
+    justify-content: flex-start;
+  }
+  .appbar-actions {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    width: 100%;
+  }
+  /* order inside the rail: nav under brand, notif + user pinned to bottom */
+  .appbar-actions .viewnav {
+    order: 0;
+  }
+  .appbar-actions .notif-btn {
+    order: 2;
+    margin-top: auto;
+    align-self: flex-start;
+  }
+  .appbar-actions .usernav {
+    order: 3;
+  }
+  /* the view switch becomes a vertical nav list */
+  .appbar .viewnav {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+    width: 100%;
+    background: none;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    border-radius: 0;
+  }
+  .appbar .viewnav .tab {
+    width: 100%;
+    justify-content: flex-start;
+    gap: 10px;
+    padding: 10px 12px !important;
+    border-radius: var(--radius-sm) !important;
+    color: var(--muted-ink);
+    background: transparent;
+    box-shadow: none !important;
+    font-weight: var(--fw-semibold);
+  }
+  .appbar .viewnav .tab:hover {
+    background: var(--chip);
+    color: var(--txt);
+  }
+  .appbar .viewnav .tab.active {
+    background: var(--nav-active-bg);
+    color: var(--nav-active-fg);
+    box-shadow: inset 3px 0 0 var(--accent) !important;
+  }
+  .appbar .viewnav .tab svg.lucide {
+    width: 18px;
+    height: 18px;
+    flex: none;
+  }
+  .appbar .viewnav .tab .bell {
+    margin-left: auto;
+  }
+  .appbar .usernav {
+    flex-wrap: wrap;
+  }
+}
+
+/* wide: a touch more breathing room around content */
+@media (min-width: 1280px) {
+  body {
+    padding-right: 32px;
+    padding-left: calc(var(--sidebar-w) + 32px);
+  }
+}
+
+/* =====================================================================
+   Mobile hamburger nav (<820px). The .viewnav collapses behind the
+   #navToggle button and drops down as a panel. On >=820 the nav is the
+   sidebar rail and the toggle is hidden (see the app-shell block above).
+   ===================================================================== */
+@media (max-width: 819px) {
+  .appbar .nav-toggle {
+    display: inline-flex;
+    order: -1; /* leftmost in the top bar */
+  }
+  .appbar .viewnav {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+    margin: 0;
+    padding: 8px;
+    background: var(--panel-raised);
+    border: 1px solid var(--line);
+    border-top: 0;
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+    box-shadow: var(--shadow);
+    z-index: 55;
+  }
+  body.nav-open .appbar .viewnav {
+    display: flex;
+  }
+  .appbar .viewnav .tab {
+    width: 100%;
+    justify-content: flex-start;
+    gap: 10px;
+    border-radius: var(--radius-sm) !important;
+  }
+  .appbar .viewnav .tab .bell {
+    margin-left: auto;
+  }
+  .appbar .viewnav .tab.active {
+    background: var(--nav-active-bg);
+    color: var(--nav-active-fg);
+  }
+}
