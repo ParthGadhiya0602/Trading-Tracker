@@ -11,18 +11,18 @@ asks you to implement a specified fix.
 
 ## Scope
 
-- Trace the full path: `feed.stream` (from the `FEED_JSON` env block) → `backend/stream.js`
-  (WSS ingest + normalize) → `backend/market-store.js` (`applyTick`/`ingestSnapshot`, the
-  single source of truth) → `backend/server.js` SSE fan-out (`scheduleFanout`, 150 ms
-  coalesce) → `frontend/js/dashboard.js` (`EventSource`, cache, `__livePrice`/`__onLive`) →
-  `alerts-ui.js` live cells and the server-side `alertTick`.
+- Trace the full path: `feed.stream` (from the `FEED_JSON` env block) → `backend/market/stream.js`
+  (WSS ingest + normalize) → `backend/core/market-store.js` (`applyTick`/`ingestSnapshot`, the
+  single source of truth) → `backend/http/sse.js` fan-out (`scheduleFanout`, 150 ms coalesce,
+  wired by `backend/market/live.js`) → `frontend/js/dashboard.js` (`EventSource`, cache,
+  `__livePrice`/`__onLive`) → `alerts-ui.js` live cells and the server-side `alertTick`.
 - Verify actual WebSocket handshakes and raw tick shapes only when the task explicitly
   provides the endpoint or authorizes a connection. Never reveal secrets, print a
   data-source endpoint, or read env secret values.
 - Focus on connection state, subscription URL construction, required headers/cookies,
   reconnects/backoff, tick fields, timestamp semantics, and market-status fields
   (`marketStatus`, `status`, or equivalent).
-- If derivatives are in scope: the same shape applies via `backend/nse-derivatives.js` →
+- If derivatives are in scope: the same shape applies via `backend/derivatives/nse-derivatives.js` →
   the `market-store.js` derivatives keyspace → `/api/derivatives/stream` (snapshot/status +
   per-key `sequence`). Treat REST-poll snapshots and any WSS deltas as separate contracts.
 

@@ -10,14 +10,24 @@ Split into **`backend/`** (Node server) and **`frontend/`** (the static app it s
 A pure-browser page can't reach the upstream feed (CORS forbids the needed headers; its
 anti-bot layer blocks any request without a warmed session), hence the local proxy.
 
-`config.json`, `logs/`, and `package.json`/lockfile live at the **repo root**; alert + user
-data (`alerts.json`, `users.json`) live in **`store/`**; `backend/*.js` reaches them via `..`.
+`.env`, `logs/`, and `package.json`/lockfile live at the **repo root**; alert + user
+data (`alerts.json`, `users.json`) live in **`store/`**; backend modules reach them via `..`.
+**Config is environment-only — there is no `config.json`** (feed/secrets come from `FEED_JSON`,
+`MONGO_URI`, `AUTH_PASSWORD_PEPPER`, `TELEGRAM_*`, `LLM_*`, flags; see `.env.sample`).
 
-- **`backend/server.js`** - Node 18+, **zero dependencies** (built-in `fetch` + hand-rolled
-  cookie jar). Warms an upstream session (cookies + browser headers, rewarm-on-403, 10 min
-  TTL), serves the app + data same-origin, and gates all `/api/*` behind auth. Startup
-  self-test prints reachability. Serves **`../frontend`** statically (MIME + path-traversal
-  guard; `.js` → `text/javascript` for ES modules).
+**`backend/` is foldered** (Node, **zero runtime deps** — built-in `fetch`; `mongodb` optional,
+lazy): `server.js` (thin bootstrap: builds a shared `ctx`, then `http.createServer(router(ctx))`
++ startup loops) · **`config/`** (`env`, `feed`) · **`core/`** (`market-store` SSOT, `logger`,
+`utils`, `mongo-retry`, `durable-outbox`) · **`services/`** (`alerts`+`alert-policy`, `auth`,
+`trades`, `telegram`, `llm`) · **`net/`** (`nse-session` — warm session/cookie jar/rewarm-on-403)
+· **`market/`** (`market-state`, `feed`, `live`, `capture`, `stream` live cash WSS) ·
+**`derivatives/`** (`derivatives` service, `nse-derivatives` provider, `derivatives-stream`) ·
+**`http/`** (`respond`, `sse`, `router`, `routes/*` one factory per API family).
+
+- **The HTTP layer** (`backend/http/`) warms an upstream session (via `net/nse-session`),
+  serves the app + data same-origin, and gates all `/api/*` behind auth. Startup self-test
+  prints reachability. Serves **`../frontend`** statically (MIME + path-traversal guard;
+  `.js` → `text/javascript` for ES modules).
   - `GET /` → `frontend/index.html`; `GET /css/*`, `GET /js/*` → static assets.
   - `GET /api/indices` → JSON keyed by index name. Dashboard indices (`DASH_INDICES` =
     `alerts.INDICES`): **NIFTY 50, NIFTY NEXT 50, NIFTY MIDCAP 50, NIFTY MIDCAP 100**
@@ -28,13 +38,13 @@ data (`alerts.json`, `users.json`) live in **`store/`**; `backend/*.js` reaches 
   rest) → `dashboard.js`, `alerts-ui.js`, `auth-ui.js` (cross-module bridges via `window.*`:
   `openCreateAlert`, `APP_AUTH`, `__initDash`/`__initAlerts`). Uses **Lucide** from a CDN
   (`cdn.jsdelivr.net/npm/lucide`) - the only external dep; degrades gracefully if offline.
-- **`backend/alerts.js`** - alert engine + storage + Telegram sender. `server.js` runs
-  `alertTick()` on an interval (`ALERT_POLL_SECONDS`, default 5) **only during market
-  hours**, calling `alerts.evaluate(payload)` - so alerts fire server-side even with no
-  browser tab open.
+- **`backend/services/alerts.js`** (`AlertEngine`) - alert engine + storage + Telegram sender.
+  The `market/live.js` alert loop runs `alertTick()` on an interval (`ALERT_POLL_SECONDS`,
+  default 5) **only during market hours**, calling `alerts.evaluate(payload)` - so alerts fire
+  server-side even with no browser tab open.
   - **Storage**: in-memory `store` (`{ alerts, archived, symbols }`) is the runtime source
     of truth; `save()` writes through to a backend. Backend = **MongoDB Atlas** if
-    `mongo.uri` is set in `config.json` (read in `loadConfig()`) and reachable — a
+    the `MONGO_URI` env var is set (read in `loadConfig()`) and reachable — a
     **per-record schema**: collection **`alerts`** (one doc per active alert, `_id = id`),
     **`archived_alerts`** (one doc per closed alert, moved on close so the active list
     stays small), **`meta`** (`{_id:"symbols"}` cache) — else the local **`alerts.json`**
@@ -48,15 +58,15 @@ data (`alerts.json`, `users.json`) live in **`store/`**; `backend/*.js` reaches 
     `logError(scope, err)` — dated lines `[YYYY-MM-DD HH:MM:SS IST] ERROR [scope] msg` — and
     echoed to the console. Failures never blank the app (in-memory + `alerts.json` stay good).
 
-- **`backend/auth.js`** - user accounts (scrypt + per-user salt), in-memory sessions
+- **`backend/services/auth.js`** (`AuthService`) - user accounts (scrypt + per-user salt), in-memory sessions
   (HttpOnly `sid` cookie, 12h idle), roles **admin/editor/viewer**, login rate-limit; users
   in Mongo `users` collection or local `users.json`. Server-side gate: every `/api/*`
   needs a session (login/setup excepted); alert writes need editor/admin; `/api/users*`
   admin-only; non-GET requires an `X-Requested-With` header (CSRF). First run shows a
   Create-admin screen. `ALERTS_NO_TICK=1` pauses the eval loop (serve UI/APIs only).
 
-Run: `node backend/server.js` (or `./run.sh`) → open http://localhost:8787/ (`PORT` env
-var to change port).
+Run: `npm start` (or `node --env-file=.env backend/server.js`, or `npm run prod`) → open
+http://localhost:8787/ (`PORT` env var to change port). `npm test` runs the suite.
 
 ## Alerts
 
@@ -144,8 +154,8 @@ detail modal. The list has **multi-select filter dropdowns** (index /
 status [armed/triggered/active/closed] / side / time frame / review [raw/approved/rejected] /
 outcome) + a **Show archived** toggle; active selections show as removable **chips**.
 
-Telegram is optional/dormant until configured in `config.json`
-(`{ "telegram": { "botToken": "...", "recipients": [{ "chatId": "...", "label": "..." }] } }`);
+Telegram is optional/dormant until configured via env
+(`TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`; recipients are users who linked their chat);
 missing config → in-page only. Alert API: `GET/POST /api/alerts`, `PATCH/DELETE
 /api/alerts/:id`, `POST /api/alerts/:id/{snooze,close,approve,reject}`,
 `GET /api/alerts/active`, **`GET /api/alerts/all`** (active + archived, used by the
@@ -156,8 +166,8 @@ alert evaluation (serves UI + APIs only) — for local testing without firing/wr
 ## Data source (`fetchAllIndices()` → `fetchIndexNext()`)
 
 Endpoints are **not hardcoded or in the repo** — the base host, index endpoint, referer,
-and warmup paths are read from `config.json`'s **`feed`** block (`loadFeedConfig()`; see
-`config.example.json`; `config.json` is gitignored). `server.js` errors clearly if it's
+and warmup paths are read from the **`FEED_JSON`** env var's **`feed`** shape (`config/feed.js`
+→ `loadFeedConfig()`; see `.env.sample`; `.env` is gitignored). Startup errors clearly if it's
 missing.
 
 One call per index, in parallel - no fallback, no merging, no derived fields. The response
@@ -178,7 +188,7 @@ Per-index payload shape:
 `{ source, timestamp, marketDataLive, level:{last,variation,pChange,open,high,low,prevClose},
    advance:{advances,declines,unchanged}, data:[{symbol,open,dayHigh,dayLow,lastPrice,prevClose,change,pChange,totalTradedVolume}] }`
 
-**Market state & pre-open** (`marketState()` in `server.js`, mirrored client-side): **pre-open
+**Market state & pre-open** (`marketState()` in `market/market-state.js`, mirrored client-side): **pre-open
 09:00–09:15 · open 09:15–15:30 · closed** (IST, Mon–Fri). During **pre-open**, `fetchMarketData()`
 serves `fetchPreopen()` — ONE `key=ALL` call to `feed.preopenEndpoint` filtered per index by the
 cached symbol list, with each stock's **IEP** as `open`=`high`=`low`=`lastPrice` and
@@ -221,7 +231,8 @@ Single-responsibility roster. **Opus** (reason/R&D/design/review, high effort) �
   reconnects, and market-status propagation. Read-only unless explicitly handed an
   implementation task.
 - **nifty-reviewer** (Opus) - adversarial verification of finished work vs spec.
-- **nifty-backend** (Sonnet) - implement `server.js`/`alerts.js`/`auth.js` (backend/*) to spec.
+- **nifty-backend** (Sonnet) - implement the foldered `backend/` (config/core/services/net/
+  market/derivatives/http) to spec.
 - **nifty-frontend** (Sonnet) - implement `index.html` / `frontend/js|css` to design+spec.
 
 **Workflows** (invoke with `args:{request:"..."}`):
@@ -234,4 +245,4 @@ Single-responsibility roster. **Opus** (reason/R&D/design/review, high effort) �
 
 Both workflows are anchored to the explorer's real `file:line` map, use structured phase
 outputs, require read-before-edit and honest verification, have the reviewer re-check claims,
-never use destructive git, and keep endpoints only in `config.json`'s `feed` block.
+never use destructive git, and keep endpoints only in the `FEED_JSON` env `feed` block.
