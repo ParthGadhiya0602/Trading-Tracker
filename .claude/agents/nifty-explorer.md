@@ -12,12 +12,24 @@ review, or write code.
 ## Rules
 - Every claim about the code MUST cite `path:line` you actually read. No memory, no guessing.
 - If something might not exist, grep to confirm and report "not found" explicitly.
-- Report the real, settled layout:
-  - **`backend/*.js`** — `server.js` (HTTP, warm session `warm`/`ensureWarm`/`srcJson`, SSE
-    fanout, updater loop, routes), `market-store.js` (**single source of truth** for
-    snapshots/prices), `alerts.js` + `alert-policy.js`, `auth.js`, `trades.js`,
-    `telegram.js`, `stream.js` (live WSS), `llm.js`, `logger.js` (day-rotating `logs/`),
-    `mongo-retry.js`, `durable-outbox.js`, `utils.js` (`istNow`, `envFlag`).
+- Report the real, settled layout — **backend is foldered** (no flat `backend/*.js`):
+  - **`backend/server.js`** — thin bootstrap: builds config, `nse-session`, the derivatives
+    runtime, a shared `ctx`, then `http.createServer(router(ctx))` + startup loops.
+  - **`backend/config/`** — `env.js` (flags/constants + `envFlag`), `feed.js` (`loadFeedConfig`,
+    `FEED`/`BASE`, `requireFeed`/`requireStream`, `INDEX_URL`).
+  - **`backend/core/`** — `market-store.js` (**single source of truth** for snapshots/prices),
+    `logger.js` (day-rotating `logs/`), `utils.js` (`istNow`, `envFlag`), `mongo-retry.js`,
+    `durable-outbox.js`.
+  - **`backend/services/`** — `alerts.js` (AlertEngine) + `alert-policy.js`, `auth.js`
+    (AuthService), `trades.js` (TradesRepo), `telegram.js` (TelegramService), `llm.js`.
+  - **`backend/net/`** — `nse-session.js` (warm session `warm`/`ensureWarm`/`srcJson`, cookie
+    jar, rewarm-on-403).
+  - **`backend/market/`** — `market-state.js`, `feed.js` (fetch/build index payloads),
+    `live.js` (store updater + reseed), `capture.js`, `stream.js` (live cash WSS).
+  - **`backend/derivatives/`** — `derivatives.js` (service), `nse-derivatives.js` (provider +
+    stream normalizer), `derivatives-stream.js` (option WSS).
+  - **`backend/http/`** — `respond.js` (send/json/cookies/errors), `sse.js` (fan-out), `router.js`
+    (dispatch), `routes/*.js` (one factory per API family, taking `ctx`).
   - **`frontend/js/*`** — `main.js` (entry) → `dashboard.js`, `alerts-ui.js`, `auth-ui.js`,
     `trades-ui.js`, `reports-ui.js`, `market-ui.js`, `overview-ui.js`, `shell-ui.js`
     (cross-module bridges on `window.*`).

@@ -167,7 +167,7 @@ function createRespond({ alerts, authorize, DerivativesError, host }) {
     const result = {};
     for (const field of fields) {
       const value = query.get(field);
-      const maxLength = field === "symbol" ? (market === "equity" ? 30 : 12) : 10;
+      const maxLength = field === "symbol" ? (market === "equity" || market === "stock" || market === "commodity" ? 30 : 12) : 10;
       if (typeof value !== "string" || !value || value.length > maxLength) {
         throw new DerivativesError("INVALID_QUERY", `invalid ${field}`);
       }
@@ -190,7 +190,7 @@ function createRespond({ alerts, authorize, DerivativesError, host }) {
       );
     }
     if (
-      market === "equity" &&
+      (market === "equity" || market === "stock" || market === "commodity") &&
       !/^[A-Z0-9][A-Z0-9&._-]{0,29}$/.test(result.symbol)
     ) {
       throw new DerivativesError("INVALID_QUERY", "invalid equity symbol");

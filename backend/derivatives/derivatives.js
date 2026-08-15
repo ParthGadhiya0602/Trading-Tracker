@@ -6,7 +6,10 @@ const SUPPORTED_SYMBOLS = new Set(["NIFTY", "NIFTYNXT50", "FINNIFTY", "BANKNIFTY
 const OPTION_KEY_PATTERN = /^index:(NIFTY|NIFTYNXT50|FINNIFTY|BANKNIFTY|MIDCPNIFTY|NIFTYFPI):(\d{4}-\d{2}-\d{2})$/;
 const EQUITY_KEY_PATTERN = /^equity:([A-Z0-9][A-Z0-9&._-]{0,29}):(\d{4}-\d{2}-\d{2})$/;
 const FUTURE_KEY_PATTERN = /^future:index:(NIFTY|NIFTYNXT50|FINNIFTY|BANKNIFTY|MIDCPNIFTY|NIFTYFPI)$/;
-const STOCK_FUTURE_KEY = "future:stock:watch";
+const STOCK_FUTURE_KEY_PATTERN = /^future:stock:([A-Z0-9][A-Z0-9&._-]{0,29})$/;
+const COMMODITY_FUTURE_KEY_PATTERN = /^commodity:fut:([A-Z0-9]{1,20})$/;
+const COMMODITY_OPTION_KEY_PATTERN = /^commodity:([A-Z0-9]{1,20}):(\d{4}-\d{2}-\d{2})$/;
+const COMMODITY_SYMBOL_PATTERN = /^[A-Z0-9]{1,20}$/;
 const EQUITY_SYMBOL_PATTERN = /^[A-Z0-9][A-Z0-9&._-]{0,29}$/;
 
 class DerivativesError extends Error {
@@ -34,12 +37,14 @@ function validDate(value) {
 }
 
 function queryIdentity(query, requireExpiry) {
-  if (!query || typeof query !== "object" || !["index", "equity"].includes(query.market)) {
-    throw new DerivativesError("INVALID_QUERY", "market must be index or equity", { details: { field: "market" } });
+  if (!query || typeof query !== "object" || !["index", "equity", "commodity"].includes(query.market)) {
+    throw new DerivativesError("INVALID_QUERY", "market must be index, equity, or commodity", { details: { field: "market" } });
   }
   const validSymbol = query.market === "index"
     ? typeof query.symbol === "string" && SUPPORTED_SYMBOLS.has(query.symbol)
-    : typeof query.symbol === "string" && EQUITY_SYMBOL_PATTERN.test(query.symbol);
+    : query.market === "commodity"
+      ? typeof query.symbol === "string" && COMMODITY_SYMBOL_PATTERN.test(query.symbol)
+      : typeof query.symbol === "string" && EQUITY_SYMBOL_PATTERN.test(query.symbol);
   if (!validSymbol) {
     throw new DerivativesError("INVALID_QUERY", "symbol is not a supported derivative", { details: { field: "symbol" } });
   }
@@ -57,7 +62,12 @@ function keyIdentity(key) {
   if (equity && validDate(equity[2])) return { key, kind: "option-chain", market: "equity", symbol: equity[1], expiry: equity[2] };
   const future = FUTURE_KEY_PATTERN.exec(key);
   if (future) return { key, kind: "index-futures", market: "index", symbol: future[1] };
-  if (key === STOCK_FUTURE_KEY) return { key, kind: "stock-futures", market: "stock", symbol: "WATCH" };
+  const stockFuture = STOCK_FUTURE_KEY_PATTERN.exec(key);
+  if (stockFuture) return { key, kind: "stock-futures", market: "stock", symbol: stockFuture[1] };
+  const commodityFuture = COMMODITY_FUTURE_KEY_PATTERN.exec(key);
+  if (commodityFuture) return { key, kind: "commodity-futures", market: "commodity", symbol: commodityFuture[1] };
+  const commodityOption = COMMODITY_OPTION_KEY_PATTERN.exec(key);
+  if (commodityOption && validDate(commodityOption[2])) return { key, kind: "option-chain", market: "commodity", symbol: commodityOption[1], expiry: commodityOption[2] };
   throw new DerivativesError("INVALID_KEY", "key must identify a supported derivative snapshot");
 }
 
@@ -286,6 +296,10 @@ class DerivativesService {
     this.allowClosedReview = Boolean(config.allowClosedReview);
     this.futuresEnabled = Boolean(config.futuresEnabled);
     this.stockOptionsEnabled = Boolean(config.stockOptionsEnabled);
+    this.commodityEnabled = Boolean(config.commodityEnabled);
+    if (this.commodityEnabled && ["getCommoditySymbols", "getCommodityFutures", "getCommodityContracts", "getCommodityOptionChain"].some((name) => typeof this.provider[name] !== "function")) {
+      throw new DerivativesError("CONFIG_ERROR", "provider must implement getCommoditySymbols, getCommodityFutures, getCommodityContracts and getCommodityOptionChain when commodities are enabled");
+    }
     if (this.futuresEnabled && (typeof this.provider.getIndexFutures !== "function" || typeof this.provider.getStockFutures !== "function")) {
       throw new DerivativesError("CONFIG_ERROR", "provider must implement getIndexFutures and getStockFutures when futures are enabled");
     }
@@ -329,6 +343,9 @@ class DerivativesService {
         return this.#getContracts(identity);
       });
     }
+    if (identity.market === "commodity" && !this.commodityEnabled) {
+      return Promise.reject(new DerivativesError("NOT_FOUND", "commodities are disabled"));
+    }
     return this.#getContracts(identity);
   }
 
@@ -351,7 +368,9 @@ class DerivativesService {
     this.activeCalls += 1;
     this.sourceCounters.metadataCalls += 1;
     const request = Promise.resolve()
-      .then(() => this.provider.getContracts(identity))
+      .then(() => identity.market === "commodity"
+        ? this.provider.getCommodityContracts(identity)
+        : this.provider.getContracts(identity))
       .then((result) => {
         const saved = clone(result);
         if (!this.closed && this.metadataDate === date) {
@@ -442,9 +461,27 @@ class DerivativesService {
     return this.#addDemand(queryIdentity(query, false), "index-futures");
   }
 
-  addStockFuturesDemand() {
+  addStockFuturesDemand(query) {
     if (!this.futuresEnabled) throw new DerivativesError("NOT_FOUND", "stock futures are disabled");
-    return this.#addDemand({ market: "stock", symbol: "WATCH" }, "stock-futures");
+    const symbol = query && typeof query.symbol === "string" ? query.symbol.trim().toUpperCase() : "";
+    if (!EQUITY_SYMBOL_PATTERN.test(symbol)) throw new DerivativesError("INVALID_QUERY", "invalid stock symbol", { details: { field: "symbol" } });
+    return this.#addDemand({ market: "stock", symbol }, "stock-futures");
+  }
+
+  addCommodityFuturesDemand(query) {
+    if (!this.commodityEnabled) throw new DerivativesError("NOT_FOUND", "commodities are disabled");
+    const symbol = query && typeof query.symbol === "string" ? query.symbol.trim().toUpperCase() : "";
+    if (!COMMODITY_SYMBOL_PATTERN.test(symbol)) throw new DerivativesError("INVALID_QUERY", "invalid commodity symbol", { details: { field: "symbol" } });
+    return this.#addDemand({ market: "commodity", symbol }, "commodity-futures");
+  }
+
+  getCommoditySymbols() {
+    if (this.closed) return Promise.reject(new DerivativesError("CLOSED", "derivatives service is closed"));
+    if (!this.commodityEnabled) return Promise.reject(new DerivativesError("NOT_FOUND", "commodities are disabled"));
+    return Promise.resolve()
+      .then(() => this.provider.getCommoditySymbols())
+      .then(clone)
+      .catch((error) => { throw this.#asPublicError(error); });
   }
 
   #addDemand(identity, kind) {
@@ -452,8 +489,10 @@ class DerivativesService {
     const key = kind === "index-futures"
       ? `future:index:${identity.symbol}`
       : kind === "stock-futures"
-        ? STOCK_FUTURE_KEY
-        : `${identity.market}:${identity.symbol}:${identity.expiry}`;
+        ? `future:stock:${identity.symbol}`
+        : kind === "commodity-futures"
+          ? `commodity:fut:${identity.symbol}`
+          : `${identity.market}:${identity.symbol}:${identity.expiry}`;
     let demand = this.demands.get(key);
     if (!demand) {
       if (this.demands.size >= this.maxActiveKeys) throw new DerivativesError("CAPACITY", "derivative demand capacity reached");
@@ -535,8 +574,12 @@ class DerivativesService {
       .then(() => identity.kind === "index-futures"
         ? this.provider.getIndexFutures(identity)
         : identity.kind === "stock-futures"
-          ? this.provider.getStockFutures()
-          : this.provider.getOptionChain(identity))
+          ? this.provider.getStockFutures(identity)
+          : identity.kind === "commodity-futures"
+            ? this.provider.getCommodityFutures(identity)
+            : identity.market === "commodity"
+              ? this.provider.getCommodityOptionChain(identity)
+              : this.provider.getOptionChain(identity))
       .then((snapshot) => this.#handleSuccess(identity.key, snapshot))
       .catch((error) => this.#handleFailure(identity.key, error))
       .finally(() => {
@@ -570,6 +613,7 @@ class DerivativesService {
         allowClosedReview: this.allowClosedReview,
         futuresEnabled: this.futuresEnabled,
         stockOptionsEnabled: this.stockOptionsEnabled,
+        commodityEnabled: this.commodityEnabled,
       },
       activeKeys: [...this.demands.values()].map((entry) => ({
         key: entry.key,
@@ -682,7 +726,7 @@ class DerivativesService {
     this.blockFailures = 0;
     this.blockedUntil = 0;
     // The chain is now REST-seeded — safe to open the live WSS delta layer on top of it.
-    if (this.streamEnabled && this.isMarketOpen() && demand.kind === "option-chain" && !this.optionStream.has(key)) this.#openStream(demand);
+    if (this.streamEnabled && this.isMarketOpen() && demand.kind === "option-chain" && demand.market !== "commodity" && !this.optionStream.has(key)) this.#openStream(demand); // commodity options have no WSS
     if (completedWhileClosed || stored.state === "closed") this.#scheduleNextOpen(key);
     else this.#schedule(key, this.#laterDelay());
     return stored;

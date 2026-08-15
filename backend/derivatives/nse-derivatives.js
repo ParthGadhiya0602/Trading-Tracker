@@ -181,7 +181,13 @@ function validateFactoryOptions(options) {
   const optionChainEndpoint = rootRelativeEndpoint(baseUrl, config.optionChainEndpoint, "optionChainEndpoint");
   const masterQuoteEndpoint = config.masterQuoteEndpoint == null ? null : rootRelativeEndpoint(baseUrl, config.masterQuoteEndpoint, "masterQuoteEndpoint");
   const futuresEndpoint = config.futuresEndpoint == null ? null : rootRelativeEndpoint(baseUrl, config.futuresEndpoint, "futuresEndpoint");
+  const stockQuoteEndpoint = config.stockQuoteEndpoint == null ? null : rootRelativeEndpoint(baseUrl, config.stockQuoteEndpoint, "stockQuoteEndpoint");
+  const commodityFuturesEndpoint = config.commodityFuturesEndpoint == null ? null : rootRelativeEndpoint(baseUrl, config.commodityFuturesEndpoint, "commodityFuturesEndpoint");
+  const commodityOptionEndpoint = config.commodityOptionEndpoint == null ? null : rootRelativeEndpoint(baseUrl, config.commodityOptionEndpoint, "commodityOptionEndpoint");
+  const commodityFilterEndpoint = config.commodityFilterEndpoint == null ? null : rootRelativeEndpoint(baseUrl, config.commodityFilterEndpoint, "commodityFilterEndpoint");
+  const commodityDetailEndpoint = config.commodityDetailEndpoint == null ? null : rootRelativeEndpoint(baseUrl, config.commodityDetailEndpoint, "commodityDetailEndpoint");
   const referer = rootRelativeEndpoint(baseUrl, config.referer, "referer");
+  const commodityReferer = config.commodityReferer == null ? referer : rootRelativeEndpoint(baseUrl, config.commodityReferer, "commodityReferer");
   const futuresReferer = config.futuresReferer == null ? referer : rootRelativeEndpoint(baseUrl, config.futuresReferer, "futuresReferer");
   if (!Array.isArray(config.enabledSymbols) || config.enabledSymbols.some((symbol) => !SUPPORTED_SYMBOLS.has(symbol))) {
     throw configError("enabledSymbols must contain only supported symbols", { field: "enabledSymbols" });
@@ -190,7 +196,7 @@ function validateFactoryOptions(options) {
   if (typeof options.now !== "undefined" && typeof options.now !== "function") {
     throw configError("now must be a function", { field: "now" });
   }
-  return { baseUrl, contractInfoEndpoint, optionChainEndpoint, masterQuoteEndpoint, futuresEndpoint, referer, futuresReferer, enabledSymbols: new Set(config.enabledSymbols) };
+  return { baseUrl, contractInfoEndpoint, optionChainEndpoint, masterQuoteEndpoint, futuresEndpoint, stockQuoteEndpoint, commodityFuturesEndpoint, commodityOptionEndpoint, commodityFilterEndpoint, commodityDetailEndpoint, referer, futuresReferer, commodityReferer, enabledSymbols: new Set(config.enabledSymbols) };
 }
 
 function validateQuery(query, requireExpiry, enabledSymbols) {
@@ -602,78 +608,300 @@ function createNseDerivatives(options) {
     };
   }
 
-  // Stock-futures WATCH (index=stock_fut): FUTSTK contracts across MANY underlyings — not a
-  // single-symbol chain. One snapshot, keyed `future:stock:watch`, each row tagged with its
-  // stock symbol. REST-poll only (no WSS for futures).
-  async function getStockFutures() {
-    if (!validated.futuresEndpoint) throw configError("futuresEndpoint is required for stock futures", { field: "futuresEndpoint" });
-    const url = new URL(validated.futuresEndpoint, validated.baseUrl);
-    url.searchParams.set("index", "stock_fut");
-    const payload = await readJson(options.fetchResponse, { url: url.toString(), referer: validated.futuresReferer });
-    const records = dataRoot(payload);
-    const rawRows = Array.isArray(records.data) ? records.data : Array.isArray(payload.data) ? payload.data : null;
-    if (!rawRows) throw schemaError("NSE stock-futures response has no data rows");
+  function requireEquitySymbol(query) {
+    const symbol = query && typeof query.symbol === "string" ? query.symbol.trim().toUpperCase() : "";
+    if (!EQUITY_SYMBOL_PATTERN.test(symbol)) throw new ProviderError("INVALID_QUERY", "invalid stock symbol", { details: { field: "symbol" } });
+    return symbol;
+  }
 
-    const rows = [];
-    let discardedRows = 0;
-    for (const raw of rawRows) {
-      if (!raw || typeof raw !== "object" || Array.isArray(raw) || String(raw.instrumentType || "").toUpperCase() !== "FUTSTK") {
-        discardedRows += 1;
-        continue;
-      }
-      const symbol = stringOrNull(raw.underlying) && String(raw.underlying).trim().toUpperCase();
-      const expiry = canonicalExpiry(String(raw.expiryDate || ""));
-      // The stock_fut watch omits `identifier` — fall back to `contract`, then symbol:expiry.
-      const providerContractId = stringOrNull(raw.identifier) || stringOrNull(raw.contract) || (symbol && expiry ? `${symbol}:${expiry}` : null);
-      if (!symbol || !expiry) {
-        discardedRows += 1;
-        continue;
-      }
-      rows.push({
-        symbol,
-        underlying: symbol,
-        providerContractId,
-        contract: stringOrNull(raw.contract),
-        expiry,
-        lastPrice: numberOrNull(raw.lastPrice),
-        change: numberOrNull(raw.change),
-        percentChange: numberOrNull(raw.pChange == null ? raw.PChange : raw.pChange),
-        openPrice: numberOrNull(raw.openPrice),
-        highPrice: numberOrNull(raw.highPrice),
-        lowPrice: numberOrNull(raw.lowPrice),
-        previousClose: numberOrNull(raw.closePrice),
-        volume: numberOrNull(raw.volume),
-        turnover: numberOrNull(raw.totalTurnover == null ? raw.value : raw.totalTurnover),
-        openInterest: numberOrNull(raw.openInterest),
-        trades: numberOrNull(raw.noOfTrades),
-        underlyingValue: numberOrNull(raw.underlyingValue),
-      });
+  function stockQuoteUrl(functionName, params) {
+    if (!validated.stockQuoteEndpoint) throw configError("stockQuoteEndpoint is required for stock futures", { field: "stockQuoteEndpoint" });
+    const url = new URL(validated.stockQuoteEndpoint, validated.baseUrl);
+    url.searchParams.set("functionName", functionName);
+    for (const [name, value] of Object.entries(params)) url.searchParams.set(name, value);
+    return url;
+  }
+
+  // Expiry dates available for a stock's futures (getSymbolDerivativesFilter -> { expiryDate: [...] }).
+  async function getStockFuturesExpiries(query) {
+    const symbol = requireEquitySymbol(query);
+    const url = stockQuoteUrl("getSymbolDerivativesFilter", { isSymbolIndex: "S", symbol });
+    const payload = await readJson(options.fetchResponse, { url: url.toString(), referer: validated.futuresReferer });
+    const rawList = Array.isArray(payload.expiryDate)
+      ? payload.expiryDate
+      : payload.data && Array.isArray(payload.data.expiryDate) ? payload.data.expiryDate : null;
+    if (!rawList) throw schemaError("NSE stock-futures filter response has no expiryDate list");
+    const seen = new Set();
+    const expiries = [];
+    for (const value of rawList) {
+      const expiry = canonicalExpiry(String(value || ""));
+      if (!expiry || seen.has(expiry)) continue;
+      seen.add(expiry);
+      expiries.push({ expiry, providerValue: String(value).trim() });
     }
-    // Group by symbol, then nearest expiry first within each symbol.
-    rows.sort((a, b) => (a.symbol === b.symbol ? a.expiry.localeCompare(b.expiry) : a.symbol.localeCompare(b.symbol)));
-    if (!rows.length) throw schemaError("NSE stock-futures response has no valid FUTSTK rows", { totalRows: rawRows.length, discardedRows });
-    const marketStatus = payload.marketStatus && typeof payload.marketStatus === "object" ? payload.marketStatus : records.marketStatus;
-    const marketStatusText = marketStatus && typeof marketStatus === "object"
-      ? `${marketStatus.marketOpenOrClose || ""} ${marketStatus.marketStatusMessage || ""}`
-      : String(marketStatus || "");
-    const closed = /closed?/i.test(marketStatusText);
+    expiries.sort((a, b) => a.expiry.localeCompare(b.expiry));
+    if (!expiries.length) throw schemaError("NSE stock-futures filter response has no valid expiries");
+    return { kind: "stock-future-contracts", market: "stock", symbol, expiries, receivedAt: istIso(now()) };
+  }
+
+  // One FUTSTK quote row (getSymbolDerivativesData) -> a normalized futures row. Field names
+  // per the GetQuoteApi FUT response (identifier, pchange, changeinOpenInterest, prevClose, ...).
+  function normalizeStockFutureRow(raw, symbol) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    if (String(raw.instrumentType || "").toUpperCase() !== "FUTSTK") return null;
+    const rowSymbol = (stringOrNull(raw.underlying) || symbol || "").trim().toUpperCase();
+    const expiry = canonicalExpiry(String(raw.expiryDate || ""));
+    if (!rowSymbol || !expiry) return null;
+    return {
+      symbol: rowSymbol,
+      underlying: rowSymbol,
+      providerContractId: stringOrNull(raw.identifier) || `${rowSymbol}:${expiry}`,
+      expiry,
+      lastPrice: numberOrNull(raw.lastPrice),
+      change: numberOrNull(raw.change),
+      percentChange: numberOrNull(legValue(raw, ["pchange", "pChange", "PChange"])),
+      openPrice: numberOrNull(raw.openPrice),
+      highPrice: numberOrNull(raw.highPrice),
+      lowPrice: numberOrNull(raw.lowPrice),
+      previousClose: numberOrNull(legValue(raw, ["prevClose", "closePrice"])),
+      volume: numberOrNull(legValue(raw, ["totalTradedVolume", "volume"])),
+      turnover: numberOrNull(legValue(raw, ["totalTurnover", "value"])),
+      openInterest: numberOrNull(raw.openInterest),
+      changeInOpenInterest: numberOrNull(legValue(raw, ["changeinOpenInterest", "changeInOpenInterest"])),
+      percentChangeInOpenInterest: numberOrNull(legValue(raw, ["pchangeinOpenInterest", "pChangeinOpenInterest"])),
+      underlyingValue: numberOrNull(raw.underlyingValue),
+    };
+  }
+
+  // A single stock's full futures strip: expiries via the filter call, then one data call per
+  // expiry (in parallel), assembled into one snapshot keyed `future:stock:<SYMBOL>`. REST-only.
+  async function getStockFutures(query) {
+    const symbol = requireEquitySymbol(query);
+    const { expiries } = await getStockFuturesExpiries({ symbol });
+    let latestTs = null;
+    const settled = await Promise.all(expiries.map(async ({ expiry, providerValue }) => {
+      const url = stockQuoteUrl("getSymbolDerivativesData", { symbol, instrumentType: "FUT", expiryDt: providerValue });
+      try {
+        const payload = await readJson(options.fetchResponse, { url: url.toString(), referer: validated.futuresReferer });
+        const list = Array.isArray(payload.data) ? payload.data : [];
+        const ts = sourceTimestamp(payload.timestamp);
+        if (ts && (!latestTs || ts > latestTs)) latestTs = ts;
+        for (const raw of list) {
+          const row = normalizeStockFutureRow(raw, symbol);
+          if (row && row.expiry === expiry) return row;
+        }
+        return null;
+      } catch (_) {
+        return null; // one bad expiry never sinks the whole strip
+      }
+    }));
+    const rows = settled.filter(Boolean).sort((a, b) => a.expiry.localeCompare(b.expiry));
+    if (!rows.length) throw schemaError("NSE stock-futures returned no valid FUTSTK rows", { symbol, expiries: expiries.length });
     return {
       kind: "stock-futures",
-      key: "future:stock:watch",
+      key: `future:stock:${symbol}`,
       market: "stock",
-      symbol: "WATCH",
+      symbol,
+      transport: "rest",
+      stale: false,
+      state: "live",
+      reason: null,
+      data: { rows },
+      sourceTimestamp: latestTs,
+      receivedAt: istIso(now()),
+      diagnostics: { expiries: expiries.length, validRows: rows.length },
+    };
+  }
+
+  // ---- MCX commodity futures (watch-based: one call carries every symbol × expiry) ----
+  function requireCommoditySymbol(query) {
+    const symbol = query && typeof query.symbol === "string" ? query.symbol.trim().toUpperCase() : "";
+    if (!/^[A-Z0-9]{1,20}$/.test(symbol)) throw new ProviderError("INVALID_QUERY", "invalid commodity symbol", { details: { field: "symbol" } });
+    return symbol;
+  }
+
+  function commodityCategory(instrument) {
+    return (stringOrNull(instrument) || "").replace(/\s*futures?\s*$/i, "").trim() || null;
+  }
+
+  async function commodityFuturesWatch() {
+    if (!validated.commodityFuturesEndpoint) throw configError("commodityFuturesEndpoint is required for commodity futures", { field: "commodityFuturesEndpoint" });
+    const url = new URL(validated.commodityFuturesEndpoint, validated.baseUrl);
+    const payload = await readJson(options.fetchResponse, { url: url.toString(), referer: validated.commodityReferer });
+    const records = dataRoot(payload);
+    const rawRows = Array.isArray(records.data) ? records.data : Array.isArray(payload.data) ? payload.data : null;
+    if (!rawRows) throw schemaError("NSE commodity futures response has no data rows");
+    const marketStatus = payload.marketStatus && typeof payload.marketStatus === "object" ? payload.marketStatus : records.marketStatus;
+    const closed = /close/i.test(String((marketStatus && (marketStatus.marketStatus || marketStatus.marketStatusMessage)) || ""));
+    return { rawRows, closed, sourceTimestamp: sourceTimestamp(payload.timestamp || records.timestamp) };
+  }
+
+  function normalizeCommodityFutureRow(raw) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    if (!/^FUT/i.test(String(raw.instrumentType || ""))) return null; // futures only
+    const symbol = (stringOrNull(raw.contract) || "").trim().toUpperCase();
+    const expiry = canonicalExpiry(String(raw.expiryDate || ""));
+    if (!symbol || !expiry) return null;
+    return {
+      symbol,
+      underlying: symbol,
+      providerContractId: stringOrNull(raw.identifier) || `${symbol}:${expiry}`,
+      instrumentType: stringOrNull(raw.instrumentType),
+      category: commodityCategory(raw.instrument),
+      unit: stringOrNull(raw.unit),
+      expiry,
+      lastPrice: numberOrNull(raw.lastPrice),
+      change: numberOrNull(raw.change),
+      percentChange: numberOrNull(legValue(raw, ["pChange", "pchange", "PChange"])),
+      openPrice: numberOrNull(raw.openPrice),
+      highPrice: numberOrNull(raw.highPrice),
+      lowPrice: numberOrNull(raw.lowPrice),
+      previousClose: numberOrNull(raw.prevClose),
+      volume: numberOrNull(legValue(raw, ["numberOfContractsTraded", "volume"])),
+      turnover: numberOrNull(raw.totalTurnover),
+      openInterest: numberOrNull(raw.openInterest),
+      underlyingValue: numberOrNull(raw.spotPrice),
+    };
+  }
+
+  // Distinct commodity symbols (+ their category) from the futures watch — feeds the picker.
+  async function getCommoditySymbols() {
+    const { rawRows } = await commodityFuturesWatch();
+    const bySymbol = new Map();
+    for (const raw of rawRows) {
+      const row = normalizeCommodityFutureRow(raw);
+      if (row && !bySymbol.has(row.symbol)) bySymbol.set(row.symbol, row.category);
+    }
+    if (!bySymbol.size) throw schemaError("NSE commodity futures watch has no valid symbols");
+    const symbols = [...bySymbol.entries()].map(([symbol, category]) => ({ symbol, category })).sort((a, b) => a.symbol.localeCompare(b.symbol));
+    return { kind: "commodity-symbols", market: "commodity", symbols, receivedAt: istIso(now()) };
+  }
+
+  // One commodity's futures strip: the watch rows for that symbol, nearest expiry first.
+  async function getCommodityFutures(query) {
+    const symbol = requireCommoditySymbol(query);
+    const { rawRows, closed, sourceTimestamp: ts } = await commodityFuturesWatch();
+    const rows = rawRows
+      .map(normalizeCommodityFutureRow)
+      .filter((row) => row && row.symbol === symbol)
+      .sort((a, b) => a.expiry.localeCompare(b.expiry));
+    if (!rows.length) throw new ProviderError("NOT_FOUND", "no commodity futures for this symbol", { details: { symbol } });
+    return {
+      kind: "commodity-futures",
+      key: `commodity:fut:${symbol}`,
+      market: "commodity",
+      symbol,
       transport: "rest",
       stale: closed,
       state: closed ? "closed" : "live",
       reason: closed ? "market-closed" : null,
-      data: { rows },
-      sourceTimestamp: sourceTimestamp(payload.timestamp || records.timestamp),
+      data: { rows, category: rows[0].category, unit: rows[0].unit },
+      sourceTimestamp: ts,
       receivedAt: istIso(now()),
-      diagnostics: { totalRows: rawRows.length, validRows: rows.length, discardedRows, symbols: new Set(rows.map((r) => r.symbol)).size },
+      diagnostics: { expiries: rows.length },
     };
   }
 
-  return { getEquitySymbols, getContracts, getOptionChain, getIndexFutures, getStockFutures, normalizeStreamFrame };
+  // ---- MCX commodity options (master-filter expiries + option watch filtered by symbol+expiry) ----
+  // Expiry list for a commodity's options (master-filter -> data.OPTFUT.expiryDates, DD-MM-YYYY).
+  async function getCommodityContracts(query) {
+    const symbol = requireCommoditySymbol(query);
+    if (!validated.commodityFilterEndpoint) throw configError("commodityFilterEndpoint is required for commodity options", { field: "commodityFilterEndpoint" });
+    const url = new URL(validated.commodityFilterEndpoint, validated.baseUrl);
+    url.searchParams.set("symbol", symbol);
+    const payload = await readJson(options.fetchResponse, { url: url.toString(), referer: validated.commodityReferer });
+    const opt = payload.data && payload.data.OPTFUT;
+    const rawExpiries = opt && Array.isArray(opt.expiryDates) ? opt.expiryDates : null;
+    if (!rawExpiries) throw schemaError("NSE commodity master-filter has no OPTFUT expiryDates");
+    const seen = new Set();
+    const expiries = [];
+    for (const value of rawExpiries) {
+      const expiry = canonicalExpiry(String(value || ""));
+      if (!expiry || seen.has(expiry)) continue;
+      seen.add(expiry);
+      expiries.push({ expiry, providerValue: String(value).trim() });
+    }
+    expiries.sort((a, b) => a.expiry.localeCompare(b.expiry));
+    if (!expiries.length) throw schemaError("NSE commodity master-filter has no valid OPTFUT expiries");
+    return { kind: "option-contracts", market: "commodity", symbol, expiries, receivedAt: istIso(now()) };
+  }
+
+  // One OPTFUT watch row -> a normalized option leg (matches the equity leg shape so the
+  // existing analysis works). The watch carries OI/volume/LTP only — no IV or bid/ask.
+  function normalizeCommodityOptionLeg(raw, side, symbol, expiry, strike) {
+    return {
+      providerContractId: stringOrNull(raw.identifier),
+      side,
+      underlying: symbol,
+      expiry,
+      strike,
+      underlyingValue: numberOrNull(raw.spotPrice),
+      openInterest: numberOrNull(raw.openInterest),
+      changeInOpenInterest: null,
+      percentChangeInOpenInterest: null,
+      volume: numberOrNull(legValue(raw, ["numberOfContractsTraded", "volume"])),
+      impliedVolatility: null,
+      lastPrice: numberOrNull(raw.lastPrice),
+      change: numberOrNull(raw.change),
+      percentChange: numberOrNull(legValue(raw, ["pChange", "pchange", "PChange"])),
+      bidQuantity: null,
+      bidPrice: null,
+      askPrice: null,
+      askQuantity: null,
+    };
+  }
+
+  // A commodity's option chain for one expiry: the option watch filtered to this symbol+expiry,
+  // grouped by strike into CE/PE legs. Keyed `commodity:<SYMBOL>:<ISO-EXPIRY>` (option-chain shape).
+  async function getCommodityOptionChain(query) {
+    const symbol = requireCommoditySymbol(query);
+    const expiry = canonicalExpiry(String(query && query.expiry || ""));
+    if (!expiry) throw new ProviderError("INVALID_QUERY", "expiry must be a valid date", { details: { field: "expiry" } });
+    if (!validated.commodityOptionEndpoint) throw configError("commodityOptionEndpoint is required for commodity options", { field: "commodityOptionEndpoint" });
+    const url = new URL(validated.commodityOptionEndpoint, validated.baseUrl);
+    const payload = await readJson(options.fetchResponse, { url: url.toString(), referer: validated.commodityReferer });
+    const records = dataRoot(payload);
+    const rawRows = Array.isArray(records.data) ? records.data : Array.isArray(payload.data) ? payload.data : null;
+    if (!rawRows) throw schemaError("NSE commodity option response has no data rows");
+    const marketStatus = payload.marketStatus && typeof payload.marketStatus === "object" ? payload.marketStatus : records.marketStatus;
+    const closed = /close/i.test(String((marketStatus && (marketStatus.marketStatus || marketStatus.marketStatusMessage)) || ""));
+    const rowsByStrike = new Map();
+    let underlyingValue = null;
+    let discardedRows = 0;
+    for (const raw of rawRows) {
+      if (!raw || typeof raw !== "object" || String(raw.instrumentType || "").toUpperCase() !== "OPTFUT") { discardedRows += 1; continue; }
+      if ((stringOrNull(raw.contract) || "").trim().toUpperCase() !== symbol) { discardedRows += 1; continue; }
+      if (canonicalExpiry(String(raw.expiryDate || "")) !== expiry) { discardedRows += 1; continue; }
+      const strike = numberOrNull(raw.strikePrice);
+      const side = /^c/i.test(String(raw.optionType || "")) ? "CE" : /^p/i.test(String(raw.optionType || "")) ? "PE" : null;
+      if (strike == null || !side) { discardedRows += 1; continue; }
+      if (underlyingValue == null) underlyingValue = numberOrNull(raw.spotPrice);
+      let row = rowsByStrike.get(strike);
+      if (!row) { row = { strike, call: null, put: null }; rowsByStrike.set(strike, row); }
+      const key = side === "CE" ? "call" : "put";
+      if (!row[key]) row[key] = normalizeCommodityOptionLeg(raw, side, symbol, expiry, strike);
+    }
+    const rows = [...rowsByStrike.values()].sort((a, b) => a.strike - b.strike);
+    if (!rows.length) throw schemaError("NSE commodity option response has no rows for this symbol/expiry", { symbol, expiry, discardedRows });
+    const partial = rows.some((row) => !row.call || !row.put);
+    return {
+      kind: "option-chain",
+      key: `commodity:${symbol}:${expiry}`,
+      market: "commodity",
+      symbol,
+      expiry,
+      transport: "rest",
+      stale: closed,
+      state: closed ? "closed" : partial ? "partial" : "live",
+      reason: closed ? "market-closed" : partial ? "missing-leg" : null,
+      data: { underlyingValue, rows },
+      sourceTimestamp: sourceTimestamp(payload.timestamp || records.timestamp),
+      receivedAt: istIso(now()),
+      diagnostics: { totalRows: rawRows.length, validRows: rows.length, discardedRows },
+    };
+  }
+
+  return { getEquitySymbols, getContracts, getOptionChain, getIndexFutures, getStockFutures, getStockFuturesExpiries, getCommoditySymbols, getCommodityFutures, getCommodityContracts, getCommodityOptionChain, normalizeStreamFrame };
 }
 
 module.exports = { createNseDerivatives, ProviderError, normalizeStreamFrame, providerExpiry };

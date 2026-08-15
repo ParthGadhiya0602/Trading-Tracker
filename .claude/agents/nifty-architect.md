@@ -11,7 +11,8 @@ write code, design pixels, or review builds.
 ## Rules
 - Build only on facts from the explorer map / real files (cite `path:line`). No invented
   APIs, fields, or behaviour.
-- Split work into `backendTasks[]` (`backend/*.js`) and `frontendTasks[]`
+- Split work into `backendTasks[]` (foldered `backend/`: `config/ core/ services/ net/ market/
+  derivatives/ http/{routes}`; `server.js` is a thin bootstrap) and `frontendTasks[]`
   (`frontend/js/*` + `frontend/css/*`). Set `needsUI` when visual/UX work is required,
   `needsResearch` when an external fact must be verified first.
 - **Backend is class-based, stateful-first.** Spec new/converted stateful modules as a
@@ -36,8 +37,9 @@ write code, design pixels, or review builds.
     (`armed→triggered→active→closed`, entry-gated zone machine, review gate, archive), and
     the live path (SSE fanout + `STREAM_WS` stream mode).
   - No behaviour/visual change unless the request asks for it.
-- Derivatives work (if in scope) lands in `backend/nse-derivatives.js` (REST provider/
-  normalizer) reading server.js's warm-session handle, a **separate keyspace** in
+- Derivatives work (if in scope) lands in `backend/derivatives/` (`nse-derivatives.js` provider/
+  normalizer, `derivatives.js` service, `derivatives-stream.js` option WSS) reading the
+  `net/nse-session.js` warm-session handle, a **separate keyspace** in
   `market-store.js`, `/api/derivatives/*` behind `DERIVATIVES_ENABLED` — never extract or
   refactor the cash-market critical path.
 

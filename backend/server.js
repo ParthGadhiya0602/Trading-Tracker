@@ -98,6 +98,7 @@ function createDerivativesRuntime({ nseSession, sse }) {
       allowClosedReview: config.DERIVATIVES_ALLOW_CLOSED_REVIEW,
       futuresEnabled: config.DERIVATIVES_FUTURES_ENABLED,
       stockOptionsEnabled: config.DERIVATIVES_STOCK_OPTIONS_ENABLED,
+      commodityEnabled: config.DERIVATIVES_COMMODITY_ENABLED,
     },
   });
 }
@@ -174,7 +175,7 @@ async function main() {
   const derivativesService = createDerivativesRuntime({ nseSession, sse });
   console.log(
     derivativesService
-      ? `  Derivatives: enabled · futures: ${config.DERIVATIVES_FUTURES_ENABLED ? "on" : "off"} · stock options: ${config.DERIVATIVES_STOCK_OPTIONS_ENABLED ? "on" : "off"} · closed-hours review: ${config.DERIVATIVES_ALLOW_CLOSED_REVIEW ? "on" : "off"} (idle until demand)`
+      ? `  Derivatives: enabled · futures: ${config.DERIVATIVES_FUTURES_ENABLED ? "on" : "off"} · stock options: ${config.DERIVATIVES_STOCK_OPTIONS_ENABLED ? "on" : "off"} · commodity: ${config.DERIVATIVES_COMMODITY_ENABLED ? "on" : "off"} · closed-hours review: ${config.DERIVATIVES_ALLOW_CLOSED_REVIEW ? "on" : "off"} (idle until demand)`
       : "  Derivatives: disabled",
   );
 

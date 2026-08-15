@@ -29,7 +29,9 @@ function copy(value) {
 const OPTION_KEY = /^index:(NIFTY|NIFTYNXT50|FINNIFTY|BANKNIFTY|MIDCPNIFTY|NIFTYFPI):(\d{4}-\d{2}-\d{2})$/;
 const EQUITY_OPTION_KEY = /^equity:([A-Z0-9][A-Z0-9&._-]{0,29}):(\d{4}-\d{2}-\d{2})$/;
 const FUTURE_KEY = /^future:index:(NIFTY|NIFTYNXT50|FINNIFTY|BANKNIFTY|MIDCPNIFTY|NIFTYFPI)$/;
-const STOCK_FUTURE_KEY = /^future:stock:watch$/;
+const STOCK_FUTURE_KEY = /^future:stock:([A-Z0-9][A-Z0-9&._-]{0,29})$/;
+const COMMODITY_FUTURE_KEY = /^commodity:fut:([A-Z0-9]{1,20})$/;
+const COMMODITY_OPTION_KEY = /^commodity:([A-Z0-9]{1,20}):(\d{4}-\d{2}-\d{2})$/;
 const DERIVATIVE_STATES = new Set(["loading", "live", "partial", "closed", "stale", "blocked", "rate-limited", "error"]);
 const STALE_DERIVATIVE_STATES = new Set(["closed", "stale", "blocked", "rate-limited", "error"]);
 
@@ -41,7 +43,12 @@ function derivativeIdentity(key) {
   if (equity) return { key, kind: "option-chain", market: "equity", symbol: equity[1], expiry: equity[2] };
   const future = FUTURE_KEY.exec(key);
   if (future) return { key, kind: "index-futures", market: "index", symbol: future[1] };
-  return STOCK_FUTURE_KEY.test(key) ? { key, kind: "stock-futures", market: "stock", symbol: "WATCH" } : null;
+  const stock = STOCK_FUTURE_KEY.exec(key);
+  if (stock) return { key, kind: "stock-futures", market: "stock", symbol: stock[1] };
+  const commodity = COMMODITY_FUTURE_KEY.exec(key);
+  if (commodity) return { key, kind: "commodity-futures", market: "commodity", symbol: commodity[1] };
+  const commodityOption = COMMODITY_OPTION_KEY.exec(key);
+  return commodityOption ? { key, kind: "option-chain", market: "commodity", symbol: commodityOption[1], expiry: commodityOption[2] } : null;
 }
 
 function sourceMs(value) {

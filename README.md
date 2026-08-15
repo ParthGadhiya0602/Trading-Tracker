@@ -1,7 +1,7 @@
 # Trading Tracker
 
 A no-build Node.js and vanilla-JavaScript personal markets app for the Indian market (NSE),
-with six role-aware views:
+with seven role-aware views:
 
 - **Dashboard** — a personal overview: live index cards + your P&L, active alerts,
   notifications, and recent trades (each panel shows the first 3 with *See all / Show less*).
@@ -9,6 +9,8 @@ with six role-aware views:
   with the Open=High (red) / Open=Low (green) row model, filters, search, sortable columns,
   a Top Gainers / Losers / Most Active rail, and a click-a-row **stock detail modal**
   (details + pre-open order book + Alerts + AI Analysis tabs).
+- **Futures & Options** — read-only index and stock option chains, index and stock futures,
+  observed facts, REST reconciliation, and optional live option-chain updates.
 - **Alerts** — server-evaluated price alerts (fire even with no tab open), with an
   approve/reject review gate and Telegram delivery.
 - **Trades** — a manual trade journal (intraday vs swing kept separate; log an entry, close
@@ -51,8 +53,8 @@ mobile. Light/dark follow the system theme.
    ```
    Back it up; don't rotate it without resetting every user's password.
 3. Set **`FEED_JSON`** in `.env` — the data-source `feed` block as **one-line JSON**
-   (`base`, `indicesEndpoint`, `preopenEndpoint`, `referer`, `warmupPaths`, optional `stream`).
-   The endpoints aren't shipped in the repo.
+   (`base`, `indicesEndpoint`, `preopenEndpoint`, `referer`, `warmupPaths`, optional cash
+   `stream`, and optional `derivatives`). The endpoints aren't shipped in the repo.
 4. (Optional) Set `MONGO_URI` (Atlas), `TELEGRAM_BOT_TOKEN`, `LLM_*`.
 5. Start the app (see **Running**) and open it; the first run shows a **Create admin** screen.
 
@@ -75,6 +77,11 @@ mobile. Light/dark follow the system theme.
 | `PORT` | HTTP port (default `8787`). |
 | `HOST` | Bind address (default `127.0.0.1`). Set `0.0.0.0` to accept external connections directly (e.g. an EC2 security group). |
 | `STREAM_WS=1` | Enable the live WebSocket feed (needs `feed.stream`); serves SSE at `/api/stream`. Off = REST polling. |
+| `DERIVATIVES_ENABLED=1` | Enable authenticated Futures & Options APIs and workspace. |
+| `DERIVATIVES_FUTURES_ENABLED=1` | Enable index and stock futures polling. |
+| `DERIVATIVES_STOCK_OPTIONS_ENABLED=1` | Enable the stock-symbol master and equity option chains. |
+| `DERIVATIVES_ALLOW_CLOSED_REVIEW=1` | Allow one on-demand derivatives snapshot outside market hours. |
+| `DERIVATIVES_POLL_SECONDS` | REST reconciliation cadence while a derivatives view has demand (minimum `3`, default `5`). |
 | `STORE_REFRESH_SECONDS` | Market-hours background refresh cadence for the store (default `3`). |
 | `ALERTS_NO_TICK=1` | Serve UI + APIs but **don't** evaluate alerts (no fires / no Telegram). Also disables Telegram polling. |
 | `TELEGRAM_DISABLED=1` | Disable Telegram polling on this instance (run secondary instances with this so only one polls the bot). |
@@ -140,11 +147,23 @@ Live data flows **Mon–Fri, IST**: pre-open **09:00–09:15**, continuous sessi
 - A central in-memory market store backs APIs, alert evaluation, derived lists, and SSE.
   REST refreshes it in the background; live WSS ticks patch that same snapshot.
 
+### Futures & Options data
+
+The derivatives workspace is demand-driven: opening a chain or futures view starts backend
+collection, normalized snapshots are stored under `store.derivatives`, and SSE delivers them
+to the browser. Option chains use REST as the baseline and reconciliation source. When both
+`STREAM_WS=1` and `FEED_JSON.derivatives.stream` are configured, option-chain WSS ticks patch
+the same snapshot. Index and stock futures use the configured derivatives REST endpoint.
+
+Stock-option symbols come from `FEED_JSON.derivatives.masterQuoteEndpoint`; expiries come from
+the contract-info endpoint. Feature flags can expose index options, futures, and stock options
+independently.
+
 ---
 
 ## Storage (local file or MongoDB Atlas)
 
-By default everything persists to local files in **`store/`** (no setup). To share data
+By default everything persists to local files in **`backend/store/`** (no setup). To share data
 **across devices**, set `MONGO_URI` and run `npm install`. It always also
 writes the local cache files and replays offline changes idempotently when Atlas returns, so
 the app never blanks. Startup logs show `store: mongo` or `store: file`.
@@ -210,35 +229,38 @@ editor/admin; non-GET requires an `X-Requested-With` header (CSRF).
 
 ## Logging
 
-Errors/warnings/info are written to a **daily-rotating** file `logs/<YYYY-MM-DD>.log`
-(IST), pruned after 14 days. Persistence/connection/Telegram failures are logged there and
-echoed to the console.
+Errors/warnings/info are written to a **daily-rotating** file
+`backend/logs/<YYYY-MM-DD>.log` (IST), pruned after 14 days. Market-status captures remain in
+root `logs/market-capture-<date>.jsonl`. Persistence, connection, and Telegram failures are
+also echoed to the console.
 
 ---
 
 ## Project layout
 
 ```
-backend/   server.js        HTTP server, data-source proxy, market state, /api/*
-           alerts.js         alert engine, events, notifications, archive, storage
-           trades.js         manual trade journal engine + storage + P&L
-           auth.js           users, sessions, roles (scrypt)
-           telegram.js       account linking, polling, durable delivery
-           llm.js            provider-agnostic LLM analysis (env-configured)
-           stream.js         live WebSocket feed client (STREAM_WS)
-           market-store.js   shared in-memory market snapshot and derivations
-           logger.js         daily-rotating logger
-           utils.js          IST time helpers
-           mongo-retry.js · durable-outbox.js · alert-policy.js
-frontend/  index.html        markup only; loads css/* + js/main.js (ES modules, no build)
-           css/  base · system · components · dashboard · alerts · trades · reports · market · auth
-           js/   main · dashboard · overview-ui · market-ui · alerts-ui · trades-ui
-                 reports-ui · shell-ui · auth-ui
-store/     (gitignored) alerts.json · users.json · trades.json · telegram.json · *-outbox.json
-scripts/   mongo-doctor.mjs  Mongo connectivity and outbox diagnostics
-root       package.json · run.js · run.cmd · run.sh · .env.sample
-           (gitignored) .env · logs/
+backend/
+  server.js              composition root and process lifecycle
+  config/                environment parsing and FEED_JSON access
+  core/                  market store, outbox, Mongo retry, logging, utilities
+  derivatives/           option/futures providers, demand service, option WSS
+  http/                  router, response/SSE helpers, domain route handlers
+  market/                cash feed, WSS, capture, market state, live orchestration
+  net/                   shared warmed NSE session and traffic coordination
+  services/              alerts, auth, trades, Telegram, LLM, alert policy
+  store/                 local JSON persistence and durable outboxes
+  logs/                  rotating application logs
+frontend/
+  index.html             application shell and view markup
+  css/                   shared tokens/components and view-specific styles
+  js/                    vanilla-JS view and state modules
+scripts/
+  mongo-doctor.mjs       Mongo connectivity and outbox diagnostics
+root                     package.json, run launchers, .env.sample, capture logs
 ```
+
+Backend tests are colocated with their modules as `*.test.js`; run all of them with
+`npm test`.
 
 ---
 

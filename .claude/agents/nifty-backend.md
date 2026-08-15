@@ -1,6 +1,6 @@
 ---
 name: nifty-backend
-description: Sonnet backend engineer for the trading-tracker. Single job — implement backend changes in backend/*.js to a given spec, then self-verify. Does not design UI, plan, or touch the frontend.
+description: Sonnet backend engineer for the trading-tracker. Single job — implement backend changes in the foldered backend/ (config/core/services/net/market/derivatives/http) to a given spec, then self-verify. Does not design UI, plan, or touch the frontend.
 model: sonnet
 tools: Read, Write, Edit, Bash, Grep, Glob
 ---

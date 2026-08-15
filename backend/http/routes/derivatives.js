@@ -26,7 +26,11 @@ module.exports = function createDerivativesHandler(ctx) {
       sendJson(res, 503, { error: "derivatives service unavailable" });
       return true;
     }
-    if (url.includes("futures") && !config.DERIVATIVES_FUTURES_ENABLED) {
+    if (
+      url.includes("futures") &&
+      !url.includes("commodit") && // commodity-futures gates on its own flag below
+      !config.DERIVATIVES_FUTURES_ENABLED
+    ) {
       sendJson(res, 404, { error: "not found" });
       return true;
     }
@@ -34,6 +38,10 @@ module.exports = function createDerivativesHandler(ctx) {
       url.includes("/equities") &&
       !config.DERIVATIVES_STOCK_OPTIONS_ENABLED
     ) {
+      sendJson(res, 404, { error: "not found" });
+      return true;
+    }
+    if (url.includes("commodit") && !config.DERIVATIVES_COMMODITY_ENABLED) {
       sendJson(res, 404, { error: "not found" });
       return true;
     }
@@ -49,10 +57,11 @@ module.exports = function createDerivativesHandler(ctx) {
       }
       if (
         (url === "/api/derivatives/analysis" ||
-          url === "/api/derivatives/equities/analysis") &&
+          url === "/api/derivatives/equities/analysis" ||
+          url === "/api/derivatives/commodities/analysis") &&
         method === "GET"
       ) {
-        const market = url.includes("/equities/") ? "equity" : "index";
+        const market = url.includes("/equities/") ? "equity" : url.includes("/commodities/") ? "commodity" : "index";
         const { symbol, expiry } = derivativeQuery(
           req,
           ["symbol", "expiry"],
@@ -67,10 +76,11 @@ module.exports = function createDerivativesHandler(ctx) {
       }
       if (
         (url === "/api/derivatives/contracts" ||
-          url === "/api/derivatives/equities/contracts") &&
+          url === "/api/derivatives/equities/contracts" ||
+          url === "/api/derivatives/commodities/contracts") &&
         method === "GET"
       ) {
-        const market = url.includes("/equities/") ? "equity" : "index";
+        const market = url.includes("/equities/") ? "equity" : url.includes("/commodities/") ? "commodity" : "index";
         const { symbol } = derivativeQuery(req, ["symbol"], market);
         sendJson(
           res,
@@ -81,10 +91,11 @@ module.exports = function createDerivativesHandler(ctx) {
       }
       if (
         (url === "/api/derivatives/options" ||
-          url === "/api/derivatives/equities/options") &&
+          url === "/api/derivatives/equities/options" ||
+          url === "/api/derivatives/commodities/options") &&
         method === "GET"
       ) {
-        const market = url.includes("/equities/") ? "equity" : "index";
+        const market = url.includes("/equities/") ? "equity" : url.includes("/commodities/") ? "commodity" : "index";
         const { symbol, expiry } = derivativeQuery(
           req,
           ["symbol", "expiry"],
@@ -111,15 +122,30 @@ module.exports = function createDerivativesHandler(ctx) {
         return true;
       }
       if (url === "/api/derivatives/stock-futures" && method === "GET") {
-        if (new URL(req.url, `http://${config.HOST}`).search)
-          throw new DerivativesError(
-            "INVALID_QUERY",
-            "stock-futures accepts no query parameters",
-          );
-        const snapshot = store.derivatives.getSnapshot("future:stock:watch");
+        const { symbol } = derivativeQuery(req, ["symbol"], "stock");
+        const snapshot = store.derivatives.getSnapshot(`future:stock:${symbol}`);
         if (!snapshot)
           sendJson(res, 404, {
             error: "stock futures snapshot unavailable",
+          });
+        else sendJson(res, 200, snapshot);
+        return true;
+      }
+      if (url === "/api/derivatives/commodities" && method === "GET") {
+        if (new URL(req.url, `http://${config.HOST}`).search)
+          throw new DerivativesError(
+            "INVALID_QUERY",
+            "commodities accepts no query parameters",
+          );
+        sendJson(res, 200, await derivativesService.getCommoditySymbols());
+        return true;
+      }
+      if (url === "/api/derivatives/commodity-futures" && method === "GET") {
+        const { symbol } = derivativeQuery(req, ["symbol"], "commodity");
+        const snapshot = store.derivatives.getSnapshot(`commodity:fut:${symbol}`);
+        if (!snapshot)
+          sendJson(res, 404, {
+            error: "commodity futures snapshot unavailable",
           });
         else sendJson(res, 200, snapshot);
         return true;
@@ -137,24 +163,28 @@ module.exports = function createDerivativesHandler(ctx) {
         (url === "/api/derivatives/stream" ||
           url === "/api/derivatives/equities/stream" ||
           url === "/api/derivatives/futures/stream" ||
-          url === "/api/derivatives/stock-futures/stream") &&
+          url === "/api/derivatives/stock-futures/stream" ||
+          url === "/api/derivatives/commodity-futures/stream" ||
+          url === "/api/derivatives/commodities/stream") &&
         method === "GET"
       ) {
+        const isCommodityFutures =
+          url === "/api/derivatives/commodity-futures/stream";
         const isStockFutures =
           url === "/api/derivatives/stock-futures/stream";
         const isFutures = url === "/api/derivatives/futures/stream";
-        const market = isStockFutures
-          ? "stock"
-          : url === "/api/derivatives/equities/stream"
-            ? "equity"
-            : "index";
+        const market = isCommodityFutures
+          ? "commodity"
+          : isStockFutures
+            ? "stock"
+            : url === "/api/derivatives/equities/stream"
+              ? "equity"
+              : url === "/api/derivatives/commodities/stream"
+                ? "commodity"
+                : "index";
         const { symbol, expiry } = derivativeQuery(
           req,
-          isStockFutures
-            ? []
-            : isFutures
-              ? ["symbol"]
-              : ["symbol", "expiry"],
+          isStockFutures || isFutures || isCommodityFutures ? ["symbol"] : ["symbol", "expiry"],
           market,
         );
         let streamClosed = false;
@@ -171,7 +201,7 @@ module.exports = function createDerivativesHandler(ctx) {
           else if (demand) demand.release();
         };
         req.once("close", closeStream);
-        if (!isFutures && !isStockFutures) {
+        if (!isFutures && !isStockFutures && !isCommodityFutures) {
           const contracts = await derivativesService.getContracts({
             market,
             symbol,
@@ -190,14 +220,13 @@ module.exports = function createDerivativesHandler(ctx) {
             );
           }
         }
-        demand = isStockFutures
-          ? derivativesService.addStockFuturesDemand()
-          : isFutures
-            ? derivativesService.addFuturesDemand({
-                market: "index",
-                symbol,
-              })
-            : derivativesService.addDemand({ market, symbol, expiry });
+        demand = isCommodityFutures
+          ? derivativesService.addCommodityFuturesDemand({ market: "commodity", symbol })
+          : isStockFutures
+            ? derivativesService.addStockFuturesDemand({ market: "stock", symbol })
+            : isFutures
+              ? derivativesService.addFuturesDemand({ market: "index", symbol })
+              : derivativesService.addDemand({ market, symbol, expiry });
         key = demand.key;
         if (
           streamClosed ||

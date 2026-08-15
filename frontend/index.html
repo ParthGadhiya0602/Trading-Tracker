@@ -484,10 +484,12 @@
         <div class="segmented" id="foOptionMarketSeg" role="tablist" aria-label="Option market">
           <button type="button" class="seg active" data-option-market="index" role="tab" aria-selected="true">Index</button>
           <button type="button" class="seg" data-option-market="equity" role="tab" aria-selected="false">Stocks</button>
+          <button type="button" class="seg" data-option-market="commodity" role="tab" aria-selected="false">Commodity</button>
         </div>
         <div class="segmented" id="foFutureMarketSeg" role="tablist" aria-label="Futures market" hidden>
           <button type="button" class="seg active" data-future-market="index" role="tab" aria-selected="true">Index</button>
           <button type="button" class="seg" data-future-market="stock" role="tab" aria-selected="false">Stock</button>
+          <button type="button" class="seg" data-future-market="commodity" role="tab" aria-selected="false">Commodity</button>
         </div>
         <label class="fo-index-label" id="foIndexControl" for="foSymbol">Index
           <select id="foSymbol">
@@ -503,8 +505,17 @@
           <input id="foEquity" type="text" list="foEquitySymbols" maxlength="30" autocomplete="off" placeholder="Search symbol" disabled>
           <datalist id="foEquitySymbols"></datalist>
         </label>
-        <label class="fo-index-label" id="foFutureStockControl" for="foFutureStock" hidden>Stock
-          <select id="foFutureStock" disabled><option>Loading stocks…</option></select>
+        <label class="fo-equity-label" id="foFutureStockControl" for="foFutureStock" hidden>Stock
+          <input id="foFutureStock" type="text" list="foFutureStockSymbols" maxlength="30" autocomplete="off" placeholder="Search symbol" disabled>
+          <datalist id="foFutureStockSymbols"></datalist>
+        </label>
+        <label class="fo-equity-label" id="foFutureCommodityControl" for="foFutureCommodity" hidden>Commodity
+          <input id="foFutureCommodity" type="text" list="foFutureCommoditySymbols" maxlength="20" autocomplete="off" placeholder="Search commodity" disabled>
+          <datalist id="foFutureCommoditySymbols"></datalist>
+        </label>
+        <label class="fo-equity-label" id="foCommodityControl" for="foCommodity" hidden>Commodity
+          <input id="foCommodity" type="text" list="foCommoditySymbols" maxlength="20" autocomplete="off" placeholder="Search commodity" disabled>
+          <datalist id="foCommoditySymbols"></datalist>
         </label>
         <label class="fo-expiry-label" id="foExpiryControl" for="foExpiry">Expiry
           <select id="foExpiry" disabled><option>Loading expiries…</option></select>
