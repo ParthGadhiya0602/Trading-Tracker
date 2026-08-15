@@ -21,7 +21,7 @@
 .derivatives-source, .fo-state { font-size: var(--fs-caption); color: var(--muted-ink); }
 .fo-controls { justify-content: flex-start; margin: var(--s3) 0; }
 .fo-index-label, .fo-equity-label, .fo-expiry-label { display: flex; gap: var(--s2); align-items: center; color: var(--muted-ink); font-size: var(--fs-caption); }
-.fo-index-label[hidden], .fo-equity-label[hidden], #foOptionMarketSeg[hidden] { display: none; }
+.fo-index-label[hidden], .fo-equity-label[hidden], #foOptionMarketSeg[hidden], #foFutureMarketSeg[hidden] { display: none; }
 .fo-index-label select, .fo-equity-label input, .fo-expiry-label select, .fo-center { min-height: 36px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--panel2); color: var(--txt); padding: 0 var(--s3); }
 .fo-equity-label input { width: 180px; text-transform: uppercase; }
 .fo-center:focus-visible, .fo-index-label select:focus-visible, .fo-equity-label input:focus-visible, .fo-expiry-label select:focus-visible { outline: none; box-shadow: var(--ring); }

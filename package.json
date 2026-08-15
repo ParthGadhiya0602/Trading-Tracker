@@ -16,7 +16,7 @@
     "prod": "node --env-file=.env backend/server.js",
     "deploy": "cloudflared tunnel --url http://127.0.0.1:8787/",
     "doctor": "node --env-file-if-exists=.env scripts/mongo-doctor.mjs",
-    "test": "node --test backend/*.test.js"
+    "test": "node --test"
   },
   "dependencies": {
     "mongodb": "^6.9.0"

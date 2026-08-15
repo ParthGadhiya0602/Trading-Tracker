@@ -2,10 +2,10 @@
 
 const fs = require("fs");
 const path = require("path");
-const { connectMongoWithRetry } = require("./mongo-retry");
-const { DurableOutbox } = require("./durable-outbox");
-const { istNow, istFromMs, envFlag } = require("./utils");
-const { logErrorOnce, resetErrorOnce } = require("./logger");
+const { connectMongoWithRetry } = require("../core/mongo-retry");
+const { DurableOutbox } = require("../core/durable-outbox");
+const { istNow, istFromMs, envFlag } = require("../core/utils");
+const { logErrorOnce, resetErrorOnce } = require("../core/logger");
 
 const ROOT = path.join(__dirname, "..");
 const STORE_DIR = path.join(ROOT, "store");

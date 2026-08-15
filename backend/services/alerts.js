@@ -16,10 +16,10 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
-const { connectMongoWithRetry } = require("./mongo-retry");
-const { DurableOutbox } = require("./durable-outbox");
-const { istNow, istFromMs } = require("./utils");
-const { logError, logErrorOnce, resetErrorOnce } = require("./logger"); // daily-rotating logger, shared app-wide
+const { connectMongoWithRetry } = require("../core/mongo-retry");
+const { DurableOutbox } = require("../core/durable-outbox");
+const { istNow, istFromMs } = require("../core/utils");
+const { logError, logErrorOnce, resetErrorOnce } = require("../core/logger"); // daily-rotating logger, shared app-wide
 
 const ROOT = path.join(__dirname, ".."); // repo root for local stores and logs
 const STORE_DIR = path.join(ROOT, "store"); // alert + user data files live here

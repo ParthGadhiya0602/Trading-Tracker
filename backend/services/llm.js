@@ -12,7 +12,7 @@
  * environment settings (openai | anthropic | gemini); missing/disabled = dormant.
  */
 
-const { istNow } = require("./utils");
+const { istNow } = require("../core/utils");
 
 const BATCH_SIZE = 25; // stocks per LLM call
 const CALL_TIMEOUT_MS = 30_000;
