@@ -29,6 +29,7 @@ function copy(value) {
 const OPTION_KEY = /^index:(NIFTY|NIFTYNXT50|FINNIFTY|BANKNIFTY|MIDCPNIFTY|NIFTYFPI):(\d{4}-\d{2}-\d{2})$/;
 const EQUITY_OPTION_KEY = /^equity:([A-Z0-9][A-Z0-9&._-]{0,29}):(\d{4}-\d{2}-\d{2})$/;
 const FUTURE_KEY = /^future:index:(NIFTY|NIFTYNXT50|FINNIFTY|BANKNIFTY|MIDCPNIFTY|NIFTYFPI)$/;
+const STOCK_FUTURE_KEY = /^future:stock:watch$/;
 const DERIVATIVE_STATES = new Set(["loading", "live", "partial", "closed", "stale", "blocked", "rate-limited", "error"]);
 const STALE_DERIVATIVE_STATES = new Set(["closed", "stale", "blocked", "rate-limited", "error"]);
 
@@ -39,7 +40,8 @@ function derivativeIdentity(key) {
   const equity = EQUITY_OPTION_KEY.exec(key);
   if (equity) return { key, kind: "option-chain", market: "equity", symbol: equity[1], expiry: equity[2] };
   const future = FUTURE_KEY.exec(key);
-  return future ? { key, kind: "index-futures", market: "index", symbol: future[1] } : null;
+  if (future) return { key, kind: "index-futures", market: "index", symbol: future[1] };
+  return STOCK_FUTURE_KEY.test(key) ? { key, kind: "stock-futures", market: "stock", symbol: "WATCH" } : null;
 }
 
 function sourceMs(value) {
@@ -94,6 +96,45 @@ class DerivativeScope {
     if (STALE_DERIVATIVE_STATES.has(next.state)) next.stale = true;
     this.entries.set(identity.key, next);
     return copy(next);
+  }
+
+  // Merge one live WSS delta into an already-REST-seeded option chain. A frame carries one
+  // strike's CE/PE price/bid/ask/ltp only; OI/volume/IV stay whatever REST last provided.
+  // Returns the updated snapshot (sequence bumped) or null when it can't apply (no REST seed,
+  // unknown strike/leg, or key/identity mismatch) — WSS never creates strikes or legs.
+  // delta shape: { key, market, symbol, expiry, strike, call?:{...patch}, put?:{...patch} }
+  applyTick(delta) {
+    const identity = derivativeIdentity(delta && delta.key);
+    if (!identity || identity.kind !== "option-chain") return null; // deltas apply to option chains only
+    if (!delta || typeof delta !== "object" || Array.isArray(delta)) return null;
+    if (delta.market !== identity.market || delta.symbol !== identity.symbol) return null;
+    if (identity.expiry && delta.expiry !== identity.expiry) return null;
+    const entry = this.entries.get(identity.key);
+    if (!entry || !entry.data || !Array.isArray(entry.data.rows) || !entry.data.rows.length) return null; // REST must seed first
+    const strike = Number(delta.strike);
+    if (!Number.isFinite(strike)) return null;
+    const row = entry.data.rows.find((r) => Number(r.strike) === strike);
+    if (!row) return null; // the strike universe is REST-owned; WSS never adds strikes
+    let changed = false;
+    for (const legKey of ["call", "put"]) {
+      const patch = delta[legKey];
+      if (!patch || typeof patch !== "object" || Array.isArray(patch)) continue;
+      if (!row[legKey]) continue; // only merge onto an existing REST leg (keeps OI/vol/IV provenance)
+      for (const [name, value] of Object.entries(patch)) {
+        if (value == null) continue; // prune: a blank never overwrites a good REST field
+        row[legKey][name] = value;
+        changed = true;
+      }
+    }
+    if (!changed) return null;
+    entry.sequence += 1;
+    entry.storedAt = this.now();
+    entry.transport = "wss";
+    entry.stale = false;
+    // NOTE: sourceTimestamp is left to REST — it drives the ingest ordering guard, and a
+    // WSS-advanced value could reject a later REST reconcile. WSS advances sequence/storedAt only.
+    if (typeof delta.streamedAt === "string") entry.streamedAt = delta.streamedAt;
+    return copy(entry);
   }
 
   setStatus(key, status) {

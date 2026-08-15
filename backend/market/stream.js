@@ -25,7 +25,7 @@ const MAX_BACKOFF_MS = 30_000;
 const BASE_BACKOFF_MS = 1000;
 // STREAM_CAPTURE=1: log the first raw frames per socket (to reveal the actual upstream
 // shape) + any frame arriving while the market is closed (post-market detection).
-const STREAM_CAPTURE = require("./utils").envFlag(process.env.STREAM_CAPTURE);
+const STREAM_CAPTURE = require("../core/utils").envFlag(process.env.STREAM_CAPTURE);
 
 // ---- pure helpers (no instance state) ----
 function num(v) {

@@ -485,6 +485,10 @@
           <button type="button" class="seg active" data-option-market="index" role="tab" aria-selected="true">Index</button>
           <button type="button" class="seg" data-option-market="equity" role="tab" aria-selected="false">Stocks</button>
         </div>
+        <div class="segmented" id="foFutureMarketSeg" role="tablist" aria-label="Futures market" hidden>
+          <button type="button" class="seg active" data-future-market="index" role="tab" aria-selected="true">Index</button>
+          <button type="button" class="seg" data-future-market="stock" role="tab" aria-selected="false">Stock</button>
+        </div>
         <label class="fo-index-label" id="foIndexControl" for="foSymbol">Index
           <select id="foSymbol">
             <option value="NIFTY" selected>NIFTY</option>
@@ -498,6 +502,9 @@
         <label class="fo-equity-label" id="foEquityControl" for="foEquity" hidden>Stock
           <input id="foEquity" type="text" list="foEquitySymbols" maxlength="30" autocomplete="off" placeholder="Search symbol" disabled>
           <datalist id="foEquitySymbols"></datalist>
+        </label>
+        <label class="fo-index-label" id="foFutureStockControl" for="foFutureStock" hidden>Stock
+          <select id="foFutureStock" disabled><option>Loading stocks…</option></select>
         </label>
         <label class="fo-expiry-label" id="foExpiryControl" for="foExpiry">Expiry
           <select id="foExpiry" disabled><option>Loading expiries…</option></select>
@@ -535,6 +542,15 @@
               <tr><th scope="col">Expiry</th><th scope="col" class="num">LTP</th><th scope="col" class="num">Change</th><th scope="col" class="num">Change %</th><th scope="col" class="num fo-future-ohl">Open</th><th scope="col" class="num fo-future-ohl">High</th><th scope="col" class="num fo-future-ohl">Low</th><th scope="col" class="num">Underlying</th><th scope="col" class="num">Basis</th><th scope="col" class="num fo-future-activity">OI</th><th scope="col" class="num fo-future-activity">Volume</th></tr>
             </thead>
             <tbody id="foFutureBody"><tr><td colspan="11" class="fo-empty">Loading index futures…</td></tr></tbody>
+          </table>
+        </div>
+        <div class="fo-tablewrap" id="foStockFuturesTableWrap" hidden>
+          <table id="foStockFuturesTable">
+            <caption>Stock futures market watch (FUTSTK contracts across underlyings).</caption>
+            <thead>
+              <tr><th scope="col">Symbol</th><th scope="col">Expiry</th><th scope="col" class="num">LTP</th><th scope="col" class="num">Change</th><th scope="col" class="num">Change %</th><th scope="col" class="num fo-future-activity">OI</th><th scope="col" class="num fo-future-activity">Volume</th></tr>
+            </thead>
+            <tbody id="foStockFutureBody"><tr><td colspan="7" class="fo-empty">Loading stock futures…</td></tr></tbody>
           </table>
         </div>
       </section>

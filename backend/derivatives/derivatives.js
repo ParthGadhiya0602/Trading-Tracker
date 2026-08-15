@@ -1,9 +1,12 @@
 "use strict";
 
+const { providerExpiry } = require("./nse-derivatives");
+
 const SUPPORTED_SYMBOLS = new Set(["NIFTY", "NIFTYNXT50", "FINNIFTY", "BANKNIFTY", "MIDCPNIFTY", "NIFTYFPI"]);
 const OPTION_KEY_PATTERN = /^index:(NIFTY|NIFTYNXT50|FINNIFTY|BANKNIFTY|MIDCPNIFTY|NIFTYFPI):(\d{4}-\d{2}-\d{2})$/;
 const EQUITY_KEY_PATTERN = /^equity:([A-Z0-9][A-Z0-9&._-]{0,29}):(\d{4}-\d{2}-\d{2})$/;
 const FUTURE_KEY_PATTERN = /^future:index:(NIFTY|NIFTYNXT50|FINNIFTY|BANKNIFTY|MIDCPNIFTY|NIFTYFPI)$/;
+const STOCK_FUTURE_KEY = "future:stock:watch";
 const EQUITY_SYMBOL_PATTERN = /^[A-Z0-9][A-Z0-9&._-]{0,29}$/;
 
 class DerivativesError extends Error {
@@ -54,6 +57,7 @@ function keyIdentity(key) {
   if (equity && validDate(equity[2])) return { key, kind: "option-chain", market: "equity", symbol: equity[1], expiry: equity[2] };
   const future = FUTURE_KEY_PATTERN.exec(key);
   if (future) return { key, kind: "index-futures", market: "index", symbol: future[1] };
+  if (key === STOCK_FUTURE_KEY) return { key, kind: "stock-futures", market: "stock", symbol: "WATCH" };
   throw new DerivativesError("INVALID_KEY", "key must identify a supported derivative snapshot");
 }
 
@@ -282,12 +286,25 @@ class DerivativesService {
     this.allowClosedReview = Boolean(config.allowClosedReview);
     this.futuresEnabled = Boolean(config.futuresEnabled);
     this.stockOptionsEnabled = Boolean(config.stockOptionsEnabled);
-    if (this.futuresEnabled && typeof this.provider.getIndexFutures !== "function") {
-      throw new DerivativesError("CONFIG_ERROR", "provider must implement getIndexFutures when futures are enabled");
+    if (this.futuresEnabled && (typeof this.provider.getIndexFutures !== "function" || typeof this.provider.getStockFutures !== "function")) {
+      throw new DerivativesError("CONFIG_ERROR", "provider must implement getIndexFutures and getStockFutures when futures are enabled");
     }
     if (this.stockOptionsEnabled && typeof this.provider.getEquitySymbols !== "function") {
       throw new DerivativesError("CONFIG_ERROR", "provider must implement getEquitySymbols when stock options are enabled");
     }
+
+    // Live option-chain WSS (opt-in). Layers price/bid/ask/ltp deltas onto the REST-seeded
+    // chain; REST stays the seed + periodic reconcile. Disabled unless a stream client is
+    // injected, configured, and the provider can normalize frames.
+    this.optionStream = options.optionStream || null;
+    this.streamEnabled = Boolean(options.streamEnabled)
+      && !!this.optionStream
+      && typeof this.optionStream.open === "function"
+      && typeof this.optionStream.configured === "function"
+      && this.optionStream.configured()
+      && typeof this.provider.normalizeStreamFrame === "function";
+    this.streamEmitMs = Math.max(50, Number(options.streamEmitMs == null ? 250 : options.streamEmitMs) || 250);
+    this.streamEmitTimers = new Map();
 
     this.demands = new Map();
     this.contractCache = new Map();
@@ -425,9 +442,18 @@ class DerivativesService {
     return this.#addDemand(queryIdentity(query, false), "index-futures");
   }
 
+  addStockFuturesDemand() {
+    if (!this.futuresEnabled) throw new DerivativesError("NOT_FOUND", "stock futures are disabled");
+    return this.#addDemand({ market: "stock", symbol: "WATCH" }, "stock-futures");
+  }
+
   #addDemand(identity, kind) {
     if (this.closed) throw new DerivativesError("CLOSED", "derivatives service is closed");
-    const key = kind === "index-futures" ? `future:index:${identity.symbol}` : `${identity.market}:${identity.symbol}:${identity.expiry}`;
+    const key = kind === "index-futures"
+      ? `future:index:${identity.symbol}`
+      : kind === "stock-futures"
+        ? STOCK_FUTURE_KEY
+        : `${identity.market}:${identity.symbol}:${identity.expiry}`;
     let demand = this.demands.get(key);
     if (!demand) {
       if (this.demands.size >= this.maxActiveKeys) throw new DerivativesError("CAPACITY", "derivative demand capacity reached");
@@ -467,6 +493,7 @@ class DerivativesService {
     const marketOpen = this.isMarketOpen();
     const closedReviewEligible = this.allowClosedReview && !marketOpen;
     if (!marketOpen) {
+      this.#closeStream(identity.key); // no live WSS outside the continuous session
       if (!this.allowClosedReview) {
         this.#setStatus(identity.key, { state: "closed", reason: "market-closed" });
         this.#scheduleNextOpen(identity.key);
@@ -505,7 +532,11 @@ class DerivativesService {
     this.activeCalls += 1;
     this.sourceCounters.chainCalls += 1;
     const operation = Promise.resolve()
-      .then(() => identity.kind === "index-futures" ? this.provider.getIndexFutures(identity) : this.provider.getOptionChain(identity))
+      .then(() => identity.kind === "index-futures"
+        ? this.provider.getIndexFutures(identity)
+        : identity.kind === "stock-futures"
+          ? this.provider.getStockFutures()
+          : this.provider.getOptionChain(identity))
       .then((snapshot) => this.#handleSuccess(identity.key, snapshot))
       .catch((error) => this.#handleFailure(identity.key, error))
       .finally(() => {
@@ -565,6 +596,9 @@ class DerivativesService {
     this.demands.clear();
     this.contractInflight.clear();
     this.equitySymbolsInflight = null;
+    if (this.optionStream) this.optionStream.stop();
+    for (const timer of this.streamEmitTimers.values()) this.timers.clearTimeout(timer);
+    this.streamEmitTimers.clear();
   }
 
   #release(key) {
@@ -572,6 +606,7 @@ class DerivativesService {
     if (!demand || demand.count < 1) return;
     demand.count -= 1;
     if (demand.count > 0) return;
+    this.#closeStream(key); // no subscribers left -> drop the live socket immediately
     if (demand.timer) {
       this.timers.clearTimeout(demand.timer);
       demand.timer = null;
@@ -646,6 +681,8 @@ class DerivativesService {
     this.#emitUpdate(stored, "snapshot");
     this.blockFailures = 0;
     this.blockedUntil = 0;
+    // The chain is now REST-seeded — safe to open the live WSS delta layer on top of it.
+    if (this.streamEnabled && this.isMarketOpen() && demand.kind === "option-chain" && !this.optionStream.has(key)) this.#openStream(demand);
     if (completedWhileClosed || stored.state === "closed") this.#scheduleNextOpen(key);
     else this.#schedule(key, this.#laterDelay());
     return stored;
@@ -748,6 +785,44 @@ class DerivativesService {
   #emitUpdate(snapshot, type) {
     if (!this.onUpdate) return;
     try { this.onUpdate(clone(snapshot), type); } catch (_) {}
+  }
+
+  // ---- live option-chain WSS (delta layer over the REST-seeded chain) ----
+  #openStream(demand) {
+    if (!this.streamEnabled || !demand || demand.kind !== "option-chain") return;
+    let expiryParam;
+    try { expiryParam = providerExpiry(demand.expiry); } catch (_) { return; }
+    this.optionStream.open(demand.key, { symbol: demand.symbol, providerExpiry: expiryParam }, (raw) => this.#onStreamFrame(demand, raw));
+  }
+
+  #onStreamFrame(demand, raw) {
+    const current = this.demands.get(demand.key);
+    if (this.closed || !current || current.count < 1) return; // don't feed a released chain
+    let delta;
+    try { delta = this.provider.normalizeStreamFrame(raw, { market: demand.market, symbol: demand.symbol, expiry: demand.expiry }); } catch (_) { return; }
+    if (!delta) return;
+    const updated = this.scope.applyTick(delta);
+    if (updated) this.#scheduleStreamEmit(demand.key); // coalesce -> one full-snapshot SSE per window
+  }
+
+  #scheduleStreamEmit(key) {
+    if (this.streamEmitTimers.has(key)) return;
+    const timer = this.timers.setTimeout(() => {
+      this.streamEmitTimers.delete(key);
+      const snapshot = this.scope.getSnapshot(key);
+      if (snapshot) this.#emitUpdate(snapshot, "snapshot");
+    }, this.streamEmitMs);
+    timer.unref?.();
+    this.streamEmitTimers.set(key, timer);
+  }
+
+  #closeStream(key) {
+    if (this.optionStream) this.optionStream.close(key);
+    const timer = this.streamEmitTimers.get(key);
+    if (timer) {
+      this.timers.clearTimeout(timer);
+      this.streamEmitTimers.delete(key);
+    }
   }
 
   #budgetStatus(name) {

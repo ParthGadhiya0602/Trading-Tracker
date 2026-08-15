@@ -317,6 +317,53 @@ function normalizeLeg(leg, side, symbol, expiry, strike, underlyingValue) {
   };
 }
 
+// One live WSS leg (streams/fo/mbp) -> a pruned patch of ONLY the fields the stream carries
+// (price/bid/ask/ltp/change). OI/volume/IV are never in a stream frame, so they are omitted
+// and the store keeps whatever REST last provided. Returns null when the leg has nothing usable.
+function normalizeStreamLeg(leg) {
+  if (!leg || typeof leg !== "object" || Array.isArray(leg)) return null;
+  const patch = {
+    lastPrice: numberOrNull(legValue(leg, ["lastPrice"])),
+    change: numberOrNull(legValue(leg, ["change"])),
+    bidPrice: numberOrNull(legValue(leg, ["buyPrice1", "bidPrice"])),
+    askPrice: numberOrNull(legValue(leg, ["sellPrice1", "askPrice"])),
+    bidQuantity: numberOrNull(legValue(leg, ["buyQuantity1", "bidQuantity"])),
+    askQuantity: numberOrNull(legValue(leg, ["sellQuantity1", "askQuantity"])),
+  };
+  const out = {};
+  for (const [name, value] of Object.entries(patch)) if (value != null) out[name] = value;
+  return Object.keys(out).length ? out : null;
+}
+
+// One raw option-chain WSS frame -> a normalized single-strike delta for
+// MarketStore.DerivativeScope.applyTick(). context = { market, symbol, expiry } where expiry
+// is the STORE (ISO) expiry, so the delta key matches the REST-seeded chain. Never throws.
+function normalizeStreamFrame(raw, context) {
+  let frame;
+  try { frame = typeof raw === "string" ? JSON.parse(raw) : raw; } catch (_) { return null; }
+  if (!frame || typeof frame !== "object" || Array.isArray(frame)) return null;
+  if (!context || !context.market || !context.symbol || !context.expiry) return null;
+  const strike = numberOrNull(frame.strikePrice);
+  if (strike == null) return null;
+  const call = normalizeStreamLeg(findLeg(frame, "CE"));
+  const put = normalizeStreamLeg(findLeg(frame, "PE"));
+  if (!call && !put) return null;
+  const delta = {
+    key: `${context.market}:${context.symbol}:${context.expiry}`,
+    kind: "option-chain",
+    market: context.market,
+    symbol: context.symbol,
+    expiry: context.expiry,
+    strike,
+  };
+  if (call) delta.call = call;
+  if (put) delta.put = put;
+  // A live-tick marker, kept distinct from REST's sourceTimestamp (which owns ingest ordering).
+  const stamp = sourceTimestamp(frame.timestamp);
+  if (typeof stamp === "string") delta.streamedAt = stamp;
+  return delta;
+}
+
 function createNseDerivatives(options) {
   const validated = validateFactoryOptions(options);
   const now = options.now || Date.now;
@@ -555,7 +602,78 @@ function createNseDerivatives(options) {
     };
   }
 
-  return { getEquitySymbols, getContracts, getOptionChain, getIndexFutures };
+  // Stock-futures WATCH (index=stock_fut): FUTSTK contracts across MANY underlyings — not a
+  // single-symbol chain. One snapshot, keyed `future:stock:watch`, each row tagged with its
+  // stock symbol. REST-poll only (no WSS for futures).
+  async function getStockFutures() {
+    if (!validated.futuresEndpoint) throw configError("futuresEndpoint is required for stock futures", { field: "futuresEndpoint" });
+    const url = new URL(validated.futuresEndpoint, validated.baseUrl);
+    url.searchParams.set("index", "stock_fut");
+    const payload = await readJson(options.fetchResponse, { url: url.toString(), referer: validated.futuresReferer });
+    const records = dataRoot(payload);
+    const rawRows = Array.isArray(records.data) ? records.data : Array.isArray(payload.data) ? payload.data : null;
+    if (!rawRows) throw schemaError("NSE stock-futures response has no data rows");
+
+    const rows = [];
+    let discardedRows = 0;
+    for (const raw of rawRows) {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw) || String(raw.instrumentType || "").toUpperCase() !== "FUTSTK") {
+        discardedRows += 1;
+        continue;
+      }
+      const symbol = stringOrNull(raw.underlying) && String(raw.underlying).trim().toUpperCase();
+      const expiry = canonicalExpiry(String(raw.expiryDate || ""));
+      // The stock_fut watch omits `identifier` — fall back to `contract`, then symbol:expiry.
+      const providerContractId = stringOrNull(raw.identifier) || stringOrNull(raw.contract) || (symbol && expiry ? `${symbol}:${expiry}` : null);
+      if (!symbol || !expiry) {
+        discardedRows += 1;
+        continue;
+      }
+      rows.push({
+        symbol,
+        underlying: symbol,
+        providerContractId,
+        contract: stringOrNull(raw.contract),
+        expiry,
+        lastPrice: numberOrNull(raw.lastPrice),
+        change: numberOrNull(raw.change),
+        percentChange: numberOrNull(raw.pChange == null ? raw.PChange : raw.pChange),
+        openPrice: numberOrNull(raw.openPrice),
+        highPrice: numberOrNull(raw.highPrice),
+        lowPrice: numberOrNull(raw.lowPrice),
+        previousClose: numberOrNull(raw.closePrice),
+        volume: numberOrNull(raw.volume),
+        turnover: numberOrNull(raw.totalTurnover == null ? raw.value : raw.totalTurnover),
+        openInterest: numberOrNull(raw.openInterest),
+        trades: numberOrNull(raw.noOfTrades),
+        underlyingValue: numberOrNull(raw.underlyingValue),
+      });
+    }
+    // Group by symbol, then nearest expiry first within each symbol.
+    rows.sort((a, b) => (a.symbol === b.symbol ? a.expiry.localeCompare(b.expiry) : a.symbol.localeCompare(b.symbol)));
+    if (!rows.length) throw schemaError("NSE stock-futures response has no valid FUTSTK rows", { totalRows: rawRows.length, discardedRows });
+    const marketStatus = payload.marketStatus && typeof payload.marketStatus === "object" ? payload.marketStatus : records.marketStatus;
+    const marketStatusText = marketStatus && typeof marketStatus === "object"
+      ? `${marketStatus.marketOpenOrClose || ""} ${marketStatus.marketStatusMessage || ""}`
+      : String(marketStatus || "");
+    const closed = /closed?/i.test(marketStatusText);
+    return {
+      kind: "stock-futures",
+      key: "future:stock:watch",
+      market: "stock",
+      symbol: "WATCH",
+      transport: "rest",
+      stale: closed,
+      state: closed ? "closed" : "live",
+      reason: closed ? "market-closed" : null,
+      data: { rows },
+      sourceTimestamp: sourceTimestamp(payload.timestamp || records.timestamp),
+      receivedAt: istIso(now()),
+      diagnostics: { totalRows: rawRows.length, validRows: rows.length, discardedRows, symbols: new Set(rows.map((r) => r.symbol)).size },
+    };
+  }
+
+  return { getEquitySymbols, getContracts, getOptionChain, getIndexFutures, getStockFutures, normalizeStreamFrame };
 }
 
-module.exports = { createNseDerivatives, ProviderError };
+module.exports = { createNseDerivatives, ProviderError, normalizeStreamFrame, providerExpiry };

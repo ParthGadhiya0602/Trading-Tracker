@@ -4,11 +4,14 @@
   "use strict";
   const $ = (s) => document.querySelector(s);
   const esc = (v) => String(v == null ? "" : v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-  let instrument = "options", optionMarket = "index", indexSymbol = "NIFTY", equitySymbol = "", symbol = "NIFTY";
+  let instrument = "options", optionMarket = "index", futuresMarket = "index", indexSymbol = "NIFTY", equitySymbol = "", stockFutureSymbol = "", symbol = "NIFTY";
   let expiry = null, stream = null, generation = 0, sequence = -1;
   let snapshot = null, analysis = null, active = false, bound = false, centerOnNext = false, hiddenTimer = null, futuresAvailable = false;
+  let stockFutureOptionsSig = ""; // tracks the dropdown's current option set to avoid rebuilds
   const expandedStrikes = new Set();
   const equitySymbols = new Set();
+  const isFuturesIndex = () => instrument === "futures" && futuresMarket === "index";
+  const isFuturesStock = () => instrument === "futures" && futuresMarket === "stock";
 
   async function api(path) {
     const res = await fetch(path, { headers: { "X-Requested-With": "XMLHttpRequest" } });
@@ -36,9 +39,10 @@
     node.textContent = fallback || stateCopy(envelope) + retry(envelope && envelope.retryAt);
   }
   function closeStream() { generation += 1; if (stream) stream.close(); stream = null; }
-  function selectedMarket() { return instrument === "futures" ? "index" : optionMarket; }
+  function selectedMarket() { return instrument === "futures" ? (futuresMarket === "stock" ? "stock" : "index") : optionMarket; }
   function optionApiPath(name) { return optionMarket === "equity" ? `/api/derivatives/equities/${name}` : `/api/derivatives/${name}`; }
   function selectedUrl(path) {
+    if (isFuturesStock()) return path; // whole-market watch: no symbol/expiry params
     const params = new URLSearchParams({ symbol });
     if (instrument === "options") params.set("expiry", expiry);
     return `${path}?${params}`;
@@ -118,8 +122,29 @@
       setState({ state: error.status === 429 ? "rate-limited" : error.status === 503 ? "blocked" : "error" }, `Could not load index futures. ${error.message}`);
     }
   }
+  function loadStockFutures() {
+    closeStream(); expiry = null; snapshot = null; analysis = null; sequence = -1; centerOnNext = false; expandedStrikes.clear();
+    futuresAvailable = false;
+    symbol = "WATCH"; // matches the server envelope's symbol for the stock-futures watch
+    const mine = generation;
+    setState({ state: "loading" }, "Loading stock futures…");
+    render();
+    api("/api/derivatives/status").then((status) => {
+      if (!active || mine !== generation) return;
+      if (!(status.config && status.config.futuresEnabled)) {
+        setState({ state: "error" }, "Stock futures are disabled. Enable DERIVATIVES_FUTURES_ENABLED and restart the server.");
+        return;
+      }
+      futuresAvailable = true;
+      openStream();
+    }).catch((error) => {
+      if (!active || mine !== generation) return;
+      setState({ state: error.status === 429 ? "rate-limited" : error.status === 503 ? "blocked" : "error" }, `Could not load stock futures. ${error.message}`);
+    });
+  }
   function loadSelected() {
-    if (instrument === "futures") void loadFutures();
+    if (isFuturesIndex()) void loadFutures();
+    else if (isFuturesStock()) void loadStockFutures();
     else if (optionMarket === "equity" && !equitySymbols.size) void loadEquitySymbols();
     else if (symbol) void loadContracts();
     else { resetSelection(); clearExpiry("Select a stock first"); setState({ state: "loading" }, "Select a stock symbol to load its option contracts."); }
@@ -127,9 +152,9 @@
   function openStream() {
     if (!active || (instrument === "options" && !expiry) || (instrument === "futures" && !futuresAvailable) || !navigator.onLine || document.hidden || !window.EventSource) return;
     closeStream(); const mine = generation;
-    const subject = instrument === "futures" ? "index futures" : "option chain";
+    const subject = isFuturesIndex() ? "index futures" : isFuturesStock() ? "stock futures" : "option chain";
     setState({ state: "loading" }, snapshot ? `Refreshing ${subject}; last snapshot remains visible.` : `Loading ${subject}…`);
-    const path = instrument === "futures" ? "/api/derivatives/futures/stream" : optionApiPath("stream");
+    const path = isFuturesStock() ? "/api/derivatives/stock-futures/stream" : isFuturesIndex() ? "/api/derivatives/futures/stream" : optionApiPath("stream");
     const es = stream = new EventSource(selectedUrl(path));
     es.addEventListener("snapshot", (event) => receive(event, mine));
     es.addEventListener("status", (event) => receive(event, mine));
@@ -139,7 +164,7 @@
     if (mine !== generation || !active) return;
     let next; try { next = JSON.parse(event.data); } catch (_) { return; }
     const nextSequence = Number(next && next.sequence), isSnapshot = event.type === "snapshot";
-    const expectedKind = instrument === "futures" ? "index-futures" : "option-chain";
+    const expectedKind = isFuturesIndex() ? "index-futures" : isFuturesStock() ? "stock-futures" : "option-chain";
     if (!next || next.kind !== expectedKind || next.market !== selectedMarket() || next.symbol !== symbol || (instrument === "options" && next.expiry !== expiry) || !Number.isFinite(nextSequence) || (isSnapshot ? nextSequence <= sequence : nextSequence < sequence)) return;
     sequence = Math.max(sequence, nextSequence);
     if (next.data && Array.isArray(next.data.rows) && next.data.rows.length) snapshot = next;
@@ -161,7 +186,25 @@
   function fact(label, value, detail = "") { return `<div class="fo-fact"><span>${esc(label)}</span><strong>${value}</strong>${detail ? `<small>${esc(detail)}</small>` : ""}</div>`; }
   function renderFacts() {
     const host = $("#foFacts"), meta = $("#foFactsMeta"); if (!host) return;
-    if (instrument === "futures") {
+    if (isFuturesStock()) {
+      const all = snapshot && snapshot.data && Array.isArray(snapshot.data.rows) ? snapshot.data.rows : [];
+      meta.textContent = snapshot ? `Source ${time(snapshot.sourceTimestamp || snapshot.receivedAt)}` : "";
+      if (!all.length) { host.innerHTML = '<span class="fo-empty">Facts unavailable for this source snapshot.</span>'; return; }
+      const symbols = new Set(all.map((r) => r.symbol));
+      const chosen = stockFutureSymbol && symbols.has(stockFutureSymbol) ? stockFutureSymbol : null;
+      const mine = chosen ? all.filter((r) => r.symbol === chosen) : [];
+      const near = mine[0];
+      host.innerHTML = [
+        fact("Selected", chosen || "All"),
+        fact("Contracts", numeric(chosen ? mine.length : all.length)),
+        fact("Underlyings", numeric(symbols.size)),
+        fact("Near expiry", near ? esc(near.expiry) : "—"),
+        fact("Near LTP", near ? price(near.lastPrice) : "—"),
+        fact("Near OI", near ? numeric(near.openInterest) : "—"),
+      ].join("");
+      return;
+    }
+    if (isFuturesIndex()) {
       const rows = snapshot && snapshot.data && Array.isArray(snapshot.data.rows) ? snapshot.data.rows : [];
       meta.textContent = snapshot ? `Source ${time(snapshot.sourceTimestamp || snapshot.receivedAt)}` : "";
       if (!rows.length) { host.innerHTML = '<span class="fo-empty">Facts unavailable for this source snapshot.</span>'; return; }
@@ -228,20 +271,56 @@
     wrap.scrollTop = preservedScroll;
   }
   function render() {
-    const optionWrap = $("#foTableWrap"), futuresWrap = $("#foFuturesTableWrap"), marketControl = $("#foOptionMarketSeg"), indexControl = $("#foIndexControl"), equityControl = $("#foEquityControl"), expiryControl = $("#foExpiryControl"), center = $("#foCenter"), title = $("#foChainTitle"), source = $("#foSource");
+    const optionWrap = $("#foTableWrap"), futuresWrap = $("#foFuturesTableWrap"), stockFuturesWrap = $("#foStockFuturesTableWrap"), marketControl = $("#foOptionMarketSeg"), futureMarketControl = $("#foFutureMarketSeg"), indexControl = $("#foIndexControl"), equityControl = $("#foEquityControl"), futureStockControl = $("#foFutureStockControl"), expiryControl = $("#foExpiryControl"), center = $("#foCenter"), title = $("#foChainTitle"), source = $("#foSource");
+    const options = instrument === "options";
     const futures = instrument === "futures";
-    marketControl.hidden = futures;
-    indexControl.hidden = !futures && optionMarket === "equity";
-    equityControl.hidden = futures || optionMarket !== "equity";
-    optionWrap.hidden = futures;
-    futuresWrap.hidden = !futures;
-    expiryControl.hidden = futures;
-    center.hidden = futures;
-    center.disabled = futures || !(snapshot && snapshot.data);
-    title.textContent = futures ? "Index futures" : "Option chain";
+    const fIndex = isFuturesIndex();
+    const fStock = isFuturesStock();
+    marketControl.hidden = !options;             // Options: Index / Stocks toggle
+    futureMarketControl.hidden = !futures;       // Futures: Index / Stock toggle
+    indexControl.hidden = !((options && optionMarket === "index") || fIndex); // index dropdown: index-options OR index-futures
+    equityControl.hidden = !(options && optionMarket === "equity");
+    futureStockControl.hidden = !fStock;         // stock dropdown: stock-futures only
+    optionWrap.hidden = !options;
+    futuresWrap.hidden = !fIndex;
+    stockFuturesWrap.hidden = !fStock;
+    expiryControl.hidden = !options;
+    center.hidden = !options;
+    center.disabled = !options || !(snapshot && snapshot.data);
+    title.textContent = fIndex ? "Index futures" : fStock ? "Stock futures" : "Option chain";
     source.textContent = snapshot ? `Source: ${time(snapshot.sourceTimestamp || snapshot.receivedAt)}` : "Source: not loaded";
     renderFacts();
-    if (futures) renderFutures(); else renderOptions();
+    if (fIndex) renderFutures(); else if (fStock) renderStockFutures(); else renderOptions();
+  }
+  function syncStockDropdown(symbols) {
+    const select = $("#foFutureStock");
+    if (!select) return;
+    const sig = symbols.join(",");
+    if (sig !== stockFutureOptionsSig) {
+      stockFutureOptionsSig = sig;
+      if (!symbols.length) { select.innerHTML = "<option>Loading stocks…</option>"; select.disabled = true; return; }
+      if (!stockFutureSymbol || !symbols.includes(stockFutureSymbol)) stockFutureSymbol = symbols[0]; // default to first
+      select.innerHTML = symbols.map((s) => `<option value="${esc(s)}"${s === stockFutureSymbol ? " selected" : ""}>${esc(s)}</option>`).join("");
+      select.disabled = false;
+    } else if (symbols.length && select.value !== stockFutureSymbol) {
+      select.value = stockFutureSymbol;
+    }
+  }
+  function renderStockFutures() {
+    const body = $("#foStockFutureBody"), meta = $("#foChainMeta"), wrap = $("#foStockFuturesTableWrap");
+    const preservedScroll = wrap ? wrap.scrollTop : 0;
+    const all = snapshot && snapshot.data && Array.isArray(snapshot.data.rows) ? snapshot.data.rows : [];
+    const symbols = [...new Set(all.map((r) => r.symbol))].sort((a, b) => a.localeCompare(b));
+    syncStockDropdown(symbols);
+    if (!all.length) { body.innerHTML = '<tr><td colspan="7" class="fo-empty">Loading stock futures…</td></tr>'; meta.textContent = ""; return; }
+    const chosen = stockFutureSymbol && symbols.includes(stockFutureSymbol) ? stockFutureSymbol : "";
+    const rows = chosen ? all.filter((r) => r.symbol === chosen) : all;
+    meta.textContent = chosen ? `${rows.length} ${chosen} contract${rows.length === 1 ? "" : "s"}` : `${all.length} contracts · ${symbols.length} underlyings`;
+    body.innerHTML = rows.map((row) => {
+      const change = finite(row.change), changeClass = change > 0 ? "up" : change < 0 ? "down" : "";
+      return `<tr><td>${esc(row.symbol)}</td><td>${esc(row.expiry)}</td><td class="num">${price(row.lastPrice)}</td><td class="num ${changeClass}">${price(row.change)}</td><td class="num ${changeClass}">${percent(row.percentChange)}</td><td class="num fo-future-activity">${numeric(row.openInterest)}</td><td class="num fo-future-activity">${numeric(row.volume)}</td></tr>`;
+    }).join("");
+    wrap.scrollTop = preservedScroll;
   }
   function centerAtm() { const row = $("#foBody .fo-atm"), wrap = $("#foTableWrap"); if (row && wrap) wrap.scrollTop = Math.max(0, row.offsetTop - wrap.clientHeight / 2 + row.offsetHeight / 2); }
   function toggleRow(row) {
@@ -256,9 +335,12 @@
   }
   function bind() {
     if (bound) return; bound = true;
-    $("#foInstrumentSeg").addEventListener("click", (event) => { const button = event.target.closest("[data-instrument]"); if (!button || button.dataset.instrument === instrument) return; instrument = button.dataset.instrument; symbol = instrument === "futures" || optionMarket === "index" ? indexSymbol : equitySymbol; $$("#foInstrumentSeg .seg").forEach((node) => { const on = node === button; node.classList.toggle("active", on); node.setAttribute("aria-selected", String(on)); }); loadSelected(); });
+    const futuresSymbolFor = () => futuresMarket === "stock" ? "WATCH" : indexSymbol;
+    $("#foInstrumentSeg").addEventListener("click", (event) => { const button = event.target.closest("[data-instrument]"); if (!button || button.dataset.instrument === instrument) return; instrument = button.dataset.instrument; symbol = instrument === "futures" ? futuresSymbolFor() : optionMarket === "index" ? indexSymbol : equitySymbol; $$("#foInstrumentSeg .seg").forEach((node) => { const on = node === button; node.classList.toggle("active", on); node.setAttribute("aria-selected", String(on)); }); loadSelected(); });
     $("#foOptionMarketSeg").addEventListener("click", (event) => { const button = event.target.closest("[data-option-market]"); if (!button || button.dataset.optionMarket === optionMarket) return; optionMarket = button.dataset.optionMarket; symbol = optionMarket === "index" ? indexSymbol : equitySymbol; $$("#foOptionMarketSeg .seg").forEach((node) => { const on = node === button; node.classList.toggle("active", on); node.setAttribute("aria-selected", String(on)); }); loadSelected(); });
-    $("#foSymbol").addEventListener("change", (event) => { if (event.target.value === indexSymbol) return; indexSymbol = event.target.value; if (instrument === "futures" || optionMarket === "index") { symbol = indexSymbol; loadSelected(); } });
+    $("#foFutureMarketSeg").addEventListener("click", (event) => { const button = event.target.closest("[data-future-market]"); if (!button || button.dataset.futureMarket === futuresMarket) return; futuresMarket = button.dataset.futureMarket; symbol = futuresSymbolFor(); $$("#foFutureMarketSeg .seg").forEach((node) => { const on = node === button; node.classList.toggle("active", on); node.setAttribute("aria-selected", String(on)); }); loadSelected(); });
+    $("#foFutureStock").addEventListener("change", (event) => { stockFutureSymbol = event.target.value; render(); }); // re-filter the watch, no re-fetch
+    $("#foSymbol").addEventListener("change", (event) => { if (event.target.value === indexSymbol) return; indexSymbol = event.target.value; if (isFuturesIndex() || (instrument === "options" && optionMarket === "index")) { symbol = indexSymbol; loadSelected(); } });
     $("#foEquity").addEventListener("change", (event) => { const value = event.target.value.trim().toUpperCase(); event.target.value = value; if (!equitySymbols.has(value)) { equitySymbol = ""; symbol = ""; resetSelection(); clearExpiry("Select a stock first"); setState({ state: "error" }, "Select a stock from the NSE symbol list."); return; } if (value === equitySymbol) return; equitySymbol = value; symbol = value; loadSelected(); });
     $("#foExpiry").addEventListener("change", (event) => { expiry = event.target.value; resetSelection(); openStream(); });
     $("#foCenter").addEventListener("click", centerAtm);
