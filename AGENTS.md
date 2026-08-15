@@ -10,9 +10,9 @@ and `logger.js`. `frontend/` is a no-build vanilla-JS app: `index.html`, page mo
 `js/`, and shared/page styles in `css/`. Node tests use `backend/*.test.js`. Local state and
 logs belong in gitignored `store/` and `logs/`; operational helpers belong in `scripts/`.
 
-Treat `config.json` as strictly user-owned: never read, inspect, modify, overwrite, or delete
-it. Runtime configuration is environment-only. Document safe placeholders in `.env.sample`;
-never put feed, MongoDB, Telegram, LLM, or authentication secrets in source or docs.
+Runtime configuration is environment-only. Keep `.env` local and untracked, document safe
+placeholders in `.env.sample`, and never put feed, MongoDB, Telegram, LLM, or authentication
+secrets in source or documentation.
 
 ## Build, Test, and Development Commands
 
@@ -23,7 +23,7 @@ never put feed, MongoDB, Telegram, LLM, or authentication secrets in source or d
 - `npm run doctor` — inspect Mongo connectivity and durable outboxes.
 - `node -c backend/server.js` — syntax-check each changed backend file.
 
-There is no frontend build step. Use Node 20.6+ when relying on `.env` loading.
+There is no frontend build step. Use Node 24 LTS (24.11+); `.nvmrc` selects `lts/krypton`.
 
 ## Coding Style & Naming Conventions
 
@@ -49,4 +49,4 @@ decisions and are not substitutes for current implementation.
 
 Use concise imperative subjects and keep commits focused. PRs should explain behavior and
 affected modules, include verification output, link relevant issues, and attach screenshots
-for UI changes. Never commit `.env`, `config.json`, `store/`, `logs/`, or secrets.
+for UI changes. Never commit `.env`, `store/`, `logs/`, or secrets.

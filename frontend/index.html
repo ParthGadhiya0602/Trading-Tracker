@@ -15,6 +15,7 @@
     <link rel="stylesheet" href="css/trades.css" />
     <link rel="stylesheet" href="css/reports.css" />
     <link rel="stylesheet" href="css/market.css" />
+    <link rel="stylesheet" href="css/derivatives.css" />
     <link rel="stylesheet" href="css/auth.css" />
   </head>
   <body>
@@ -95,6 +96,17 @@
             tabindex="-1"
           >
             <i data-lucide="candlestick-chart" aria-hidden="true"></i>Market Watch
+          </button>
+          <button
+            class="tab"
+            id="view-tab-derivatives"
+            data-view="derivatives"
+            role="tab"
+            aria-controls="derivativesView"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            <i data-lucide="chart-no-axes-combined" aria-hidden="true"></i>F&amp;O
           </button>
           <button
             class="tab"
@@ -455,6 +467,78 @@
       </div>
     </div>
     <!-- /#marketView -->
+
+    <div id="derivativesView" role="tabpanel" aria-labelledby="view-tab-derivatives" hidden>
+      <div class="derivatives-head">
+        <div>
+          <h2>Futures &amp; Options</h2>
+          <p>Read-only index and stock options, index futures, and observed market facts.</p>
+        </div>
+        <div class="derivatives-source" id="foSource">Source: not loaded</div>
+      </div>
+      <div class="fo-controls" aria-label="Futures and options controls">
+        <div class="segmented" id="foInstrumentSeg" role="tablist" aria-label="Instrument">
+          <button type="button" class="seg active" data-instrument="options" role="tab" aria-selected="true">Options</button>
+          <button type="button" class="seg" data-instrument="futures" role="tab" aria-selected="false">Futures</button>
+        </div>
+        <div class="segmented" id="foOptionMarketSeg" role="tablist" aria-label="Option market">
+          <button type="button" class="seg active" data-option-market="index" role="tab" aria-selected="true">Index</button>
+          <button type="button" class="seg" data-option-market="equity" role="tab" aria-selected="false">Stocks</button>
+        </div>
+        <label class="fo-index-label" id="foIndexControl" for="foSymbol">Index
+          <select id="foSymbol">
+            <option value="NIFTY" selected>NIFTY</option>
+            <option value="NIFTYNXT50">NIFTYNXT50</option>
+            <option value="FINNIFTY">FINNIFTY</option>
+            <option value="BANKNIFTY">BANKNIFTY</option>
+            <option value="MIDCPNIFTY">MIDCPNIFTY</option>
+            <option value="NIFTYFPI">NIFTYFPI</option>
+          </select>
+        </label>
+        <label class="fo-equity-label" id="foEquityControl" for="foEquity" hidden>Stock
+          <input id="foEquity" type="text" list="foEquitySymbols" maxlength="30" autocomplete="off" placeholder="Search symbol" disabled>
+          <datalist id="foEquitySymbols"></datalist>
+        </label>
+        <label class="fo-expiry-label" id="foExpiryControl" for="foExpiry">Expiry
+          <select id="foExpiry" disabled><option>Loading expiries…</option></select>
+        </label>
+        <button type="button" class="fo-center" id="foCenter" disabled>Center ATM</button>
+      </div>
+      <p class="fo-disclaimer">Observed market facts, not a trading recommendation.</p>
+      <div id="foState" class="fo-state" role="status" aria-live="polite">Select an index to load its available expiries.</div>
+      <details class="fo-facts card" open>
+        <summary class="section-head">
+          <span class="fo-facts-title">
+            <span class="title">Observed facts</span>
+            <span class="fo-disclosure-mark" aria-hidden="true"></span>
+          </span>
+          <span class="meta" id="foFactsMeta"></span>
+        </summary>
+        <div class="fo-facts-grid" id="foFacts"><span class="fo-empty">Facts will appear with a source snapshot.</span></div>
+      </details>
+      <section class="fo-chain card" aria-labelledby="foChainTitle">
+        <div class="section-head"><span class="title" id="foChainTitle">Option chain</span><span class="meta" id="foChainMeta"></span></div>
+        <div class="fo-tablewrap" id="foTableWrap">
+          <table id="foTable">
+            <caption>Selected option chain. Select a row to reveal hidden metrics.</caption>
+            <thead>
+              <tr><th scope="colgroup" colspan="7" class="fo-call-group">Calls</th><th scope="col" rowspan="2" class="fo-strike">Strike</th><th scope="colgroup" colspan="7" class="fo-put-group">Puts</th></tr>
+              <tr><th scope="col" class="fo-oi">OI</th><th scope="col" class="fo-change">ΔOI</th><th scope="col" class="fo-volume">Volume</th><th scope="col" class="fo-iv">IV</th><th scope="col" class="fo-bid">Bid</th><th scope="col" class="fo-ask">Ask</th><th scope="col" class="fo-ltp">LTP</th><th scope="col" class="fo-ltp">LTP</th><th scope="col" class="fo-bid">Bid</th><th scope="col" class="fo-ask">Ask</th><th scope="col" class="fo-iv">IV</th><th scope="col" class="fo-volume">Volume</th><th scope="col" class="fo-change">ΔOI</th><th scope="col" class="fo-oi">OI</th></tr>
+            </thead>
+            <tbody id="foBody"><tr><td colspan="15" class="fo-empty">Loading option chain…</td></tr></tbody>
+          </table>
+        </div>
+        <div class="fo-tablewrap" id="foFuturesTableWrap" hidden>
+          <table id="foFuturesTable">
+            <caption>Selected index futures contracts ordered by expiry.</caption>
+            <thead>
+              <tr><th scope="col">Expiry</th><th scope="col" class="num">LTP</th><th scope="col" class="num">Change</th><th scope="col" class="num">Change %</th><th scope="col" class="num fo-future-ohl">Open</th><th scope="col" class="num fo-future-ohl">High</th><th scope="col" class="num fo-future-ohl">Low</th><th scope="col" class="num">Underlying</th><th scope="col" class="num">Basis</th><th scope="col" class="num fo-future-activity">OI</th><th scope="col" class="num fo-future-activity">Volume</th></tr>
+            </thead>
+            <tbody id="foFutureBody"><tr><td colspan="11" class="fo-empty">Loading index futures…</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
 
     <div
       id="alertsView"

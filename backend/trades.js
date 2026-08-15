@@ -11,6 +11,9 @@
  * writes through to a MongoDB `trades` collection (if MONGO_URI is set and reachable)
  * AND always to store/trades.json as an offline cache, falling back to the file when
  * Mongo is down. P&L is DERIVED on read (derive()), never hand-stored.
+ *
+ * Exported as a shared singleton (drop-in for the old function-module API); the
+ * TradesRepo class is attached for tests / isolated instances.
  */
 const fs = require("fs");
 const path = require("path");
@@ -30,16 +33,7 @@ const TRADE_TYPES = ["intraday", "swing"];
 const EXCHANGES = ["NSE", "BSE"];
 const SIDES = ["BUY", "SELL"];
 
-let store = { trades: [] };
-let backend = "file"; // "file" | "mongo"
-let tradesColl = null;
-let processedColl = null;
-let mongoUri = "";
-let reconnectTimer = null;
-
-const outbox = new DurableOutbox(OUTBOX_FILE, { logError });
-
-// ---------- helpers ----------
+// ---------- pure helpers (no instance state) ----------
 function round2(n) {
   return Math.round(n * 100) / 100;
 }
@@ -53,163 +47,22 @@ function mongoDbName(uri) {
     "trading_tracker"
   );
 }
+function pad2(hhmm) {
+  const [h, m] = hhmm.split(":");
+  return `${String(h).padStart(2, "0")}:${m}`;
+}
 // A comparable epoch for an IST date (+ optional HH:MM). Both sides use the same
 // assumed +05:30, so relative comparisons (exit >= entry) are correct.
 function istEpoch(date, time) {
   if (!date) return NaN;
   return Date.parse(`${date}T${time && /^\d{1,2}:\d{2}$/.test(time) ? pad2(time) : "00:00"}:00+05:30`);
 }
-function pad2(hhmm) {
-  const [h, m] = hhmm.split(":");
-  return `${String(h).padStart(2, "0")}:${m}`;
-}
-
-// ---------- persistence (mirrors auth.js) ----------
 function loadConfig() {
   // MONGO_URI env only; unset -> Mongo disabled (local file mode)
   return String(process.env.MONGO_URI || "").trim();
 }
-function readFileStore() {
-  try {
-    const raw = JSON.parse(fs.readFileSync(STORE_FILE, "utf8"));
-    return { trades: Array.isArray(raw.trades) ? raw.trades : [] };
-  } catch (_) {
-    return { trades: [] };
-  }
-}
-async function load() {
-  mongoUri = loadConfig();
-  let seedFromLocal = false;
-  if (mongoUri) {
-    try {
-      const client = await connectMongoWithRetry(mongoUri, {
-        retries: 1,
-        retryDelayMs: 2000,
-        serverSelectionTimeoutMS: 6000,
-      });
-      configureMongo(client.db(mongoDbName(mongoUri)));
-      await outbox.drain();
-      backend = "mongo";
-      const docs = await tradesColl.find({}).toArray();
-      if (docs.length) {
-        store = {
-          trades: docs.map((d) => {
-            delete d._id;
-            return d;
-          }),
-        };
-      } else {
-        store = readFileStore();
-        seedFromLocal = true;
-        if (store.trades.length)
-          console.log(`  trades: seeded ${store.trades.length} trades from trades.json`);
-      }
-    } catch (e) {
-      logError("trades.mongo.connect", `${(e && e.message) || e} - using trades.json`);
-      tradesColl = null;
-      processedColl = null;
-      outbox.setProcessor(null);
-      backend = "file";
-      store = readFileStore();
-      seedFromLocal = true;
-    }
-  } else {
-    backend = "file";
-    store = readFileStore();
-    seedFromLocal = true;
-  }
-  migrate();
-  save({ queue: seedFromLocal });
-  startReconnectWorker();
-  return backend;
-}
-function backendName() {
-  return backend;
-}
-function queueTrade(trade) {
-  outbox.enqueue("TRADE_PUT", { ...trade }, { dedupeKey: `trade:${trade.id}` });
-}
-function queueTradeDelete(id) {
-  outbox.enqueue(
-    "TRADE_DELETE",
-    { id, at: istNow() },
-    { dedupeKey: `trade:${id}` },
-  );
-}
-async function processOutbox(operation) {
-  if (await processedColl.findOne({ _id: operation.operationId })) return;
-  if (operation.type === "TRADE_PUT") {
-    const trade = operation.payload;
-    await tradesColl.replaceOne(
-      { _id: trade.id },
-      { ...trade, _id: trade.id },
-      { upsert: true },
-    );
-  } else if (operation.type === "TRADE_DELETE") {
-    await tradesColl.deleteOne({ _id: operation.payload.id });
-  } else {
-    throw new Error(`unknown trades outbox operation: ${operation.type}`);
-  }
-  await processedColl.updateOne(
-    { _id: operation.operationId },
-    { $setOnInsert: { type: operation.type, processedAt: istNow() } },
-    { upsert: true },
-  );
-}
-function configureMongo(db) {
-  tradesColl = db.collection("trades");
-  // distinct ledger - do NOT share `processed_operations` with auth/alerts
-  processedColl = db.collection("trades_processed_operations");
-  outbox.setProcessor(processOutbox);
-}
-function save(options = {}) {
-  if (options.queue !== false) for (const trade of store.trades) queueTrade(trade);
-  try {
-    fs.mkdirSync(STORE_DIR, { recursive: true });
-    fs.writeFileSync(STORE_FILE, JSON.stringify(store, null, 2));
-  } catch (e) {
-    logError("trades.file.write", `trades.json - ${e.message}`);
-  }
-  if (backend === "mongo") void outbox.drain();
-}
-async function reconnectMongo() {
-  if (!mongoUri || backend === "mongo") return;
-  try {
-    const client = await connectMongoWithRetry(mongoUri, {
-      retries: 0,
-      serverSelectionTimeoutMS: 5000,
-    });
-    configureMongo(client.db(mongoDbName(mongoUri)));
-    backend = "mongo";
-    resetErrorOnce("trades.mongo.reconnect");
-    await outbox.drain();
-    console.log("  trades: MongoDB reconnected; durable outbox replayed");
-  } catch (error) {
-    backend = "file";
-    outbox.setProcessor(null);
-    logErrorOnce("trades.mongo.reconnect", error); // log once per outage
-  }
-}
-function startReconnectWorker() {
-  if (!mongoUri || reconnectTimer) return;
-  reconnectTimer = setInterval(() => void reconnectMongo(), 15_000);
-  if (reconnectTimer.unref) reconnectTimer.unref();
-}
-// Idempotent backfill for legacy / hand-edited rows.
-function migrate() {
-  let changed = false;
-  for (const t of store.trades) {
-    if (!t.tradeType) { t.tradeType = "intraday"; changed = true; }
-    if (t.charges == null) { t.charges = 0; changed = true; }
-    if (t.version == null) { t.version = 1; changed = true; }
-    if (t.schemaVersion == null) { t.schemaVersion = SCHEMA_VERSION; changed = true; }
-    const derivedStatus = isClosed(t) ? "closed" : "open";
-    if (t.status !== derivedStatus) { t.status = derivedStatus; changed = true; }
-  }
-  if (changed) save({ queue: false });
-}
 
-// ---------- domain ----------
+// ---------- domain (pure) ----------
 function isClosed(t) {
   return num(t.exitPrice) > 0 && !!t.exitDate;
 }
@@ -348,128 +201,290 @@ function validate(input) {
   };
 }
 
-// ---------- CRUD ----------
-function find(id) {
-  return store.trades.find((t) => t.id === id) || null;
-}
-function get(id) {
-  const t = find(id);
-  return t ? derive(t) : null;
-}
-function list(filters = {}) {
-  let rows = store.trades;
-  const f = filters;
-  if (f.tradeType) rows = rows.filter((t) => t.tradeType === f.tradeType);
-  if (f.status) rows = rows.filter((t) => t.status === f.status);
-  if (f.side) rows = rows.filter((t) => t.side === String(f.side).toUpperCase());
-  if (f.symbol) {
-    const s = String(f.symbol).toUpperCase();
-    rows = rows.filter((t) => (t.symbol || "").includes(s));
+// Trade journal repository: owns the in-memory store, Mongo↔file backend, and durable outbox.
+class TradesRepo {
+  constructor() {
+    this.store = { trades: [] };
+    this.backend = "file"; // "file" | "mongo"
+    this.tradesColl = null;
+    this.processedColl = null;
+    this.mongoUri = "";
+    this.reconnectTimer = null;
+    this.outbox = new DurableOutbox(OUTBOX_FILE, { logError });
   }
-  if (f.strategy) rows = rows.filter((t) => (t.strategy || "") === f.strategy);
-  if (f.from) rows = rows.filter((t) => t.entryDate >= f.from);
-  if (f.to) rows = rows.filter((t) => t.entryDate <= f.to);
-  return rows
-    .slice()
-    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
-    .map(derive);
-}
 
-function create(input, actor) {
-  const { errors, clean } = validate(input);
-  if (errors.length) return { error: errors.join("; ") };
-  const now = istNow();
-  const trade = {
-    id: crypto.randomUUID(),
-    ...clean,
-    status: clean.exitPrice > 0 && clean.exitDate ? "closed" : "open",
-    createdByUserId: (actor && actor.id) || null,
-    createdByUsername: (actor && actor.username) || null,
-    createdByRole: (actor && actor.role) || null,
-    createdAt: now,
-    updatedAt: now,
-    version: 1,
-    schemaVersion: SCHEMA_VERSION,
-  };
-  store.trades.push(trade);
-  save();
-  return { trade: derive(trade) };
-}
-
-function update(id, input, actor) {
-  const existing = find(id);
-  if (!existing) return { error: "not found", status: 404 };
-  // merge stored + patch, then validate the full candidate
-  const merged = { ...existing, ...input };
-  const { errors, clean } = validate(merged);
-  if (errors.length) return { error: errors.join("; ") };
-  Object.assign(existing, clean, {
-    status: clean.exitPrice > 0 && clean.exitDate ? "closed" : "open",
-    updatedAt: istNow(),
-    version: (existing.version || 1) + 1,
-  });
-  save();
-  return { trade: derive(existing) };
-}
-
-function remove(id) {
-  const i = store.trades.findIndex((t) => t.id === id);
-  if (i < 0) return { error: "not found", status: 404 };
-  store.trades.splice(i, 1);
-  queueTradeDelete(id);
-  save();
-  return { ok: true };
-}
-
-function summary(filters = {}) {
-  const rows = list(filters); // already derived + filtered
-  const byType = {
-    intraday: { open: 0, closed: 0, netPnl: 0 },
-    swing: { open: 0, closed: 0, netPnl: 0 },
-  };
-  let open = 0;
-  let closed = 0;
-  let wins = 0;
-  let losses = 0;
-  let netPnl = 0;
-  for (const t of rows) {
-    const bt = byType[t.tradeType] || (byType[t.tradeType] = { open: 0, closed: 0, netPnl: 0 });
-    if (t.status === "closed") {
-      closed++;
-      bt.closed++;
-      netPnl = round2(netPnl + (t.netPnl || 0));
-      bt.netPnl = round2(bt.netPnl + (t.netPnl || 0));
-      if ((t.netPnl || 0) > 0) wins++;
-      else if ((t.netPnl || 0) < 0) losses++;
-    } else {
-      open++;
-      bt.open++;
+  // ---------- persistence (mirrors auth.js) ----------
+  #readFileStore() {
+    try {
+      const raw = JSON.parse(fs.readFileSync(STORE_FILE, "utf8"));
+      return { trades: Array.isArray(raw.trades) ? raw.trades : [] };
+    } catch (_) {
+      return { trades: [] };
     }
   }
-  const resolved = wins + losses;
-  return {
-    open: { count: open },
-    closed: {
-      count: closed,
-      netPnl,
-      wins,
-      losses,
-      winRate: resolved ? round2((wins / resolved) * 100) : 0,
-    },
-    byType,
-  };
+
+  async load() {
+    this.mongoUri = loadConfig();
+    let seedFromLocal = false;
+    if (this.mongoUri) {
+      try {
+        const client = await connectMongoWithRetry(this.mongoUri, {
+          retries: 1,
+          retryDelayMs: 2000,
+          serverSelectionTimeoutMS: 6000,
+        });
+        this.#configureMongo(client.db(mongoDbName(this.mongoUri)));
+        await this.outbox.drain();
+        this.backend = "mongo";
+        const docs = await this.tradesColl.find({}).toArray();
+        if (docs.length) {
+          this.store = {
+            trades: docs.map((d) => {
+              delete d._id;
+              return d;
+            }),
+          };
+        } else {
+          this.store = this.#readFileStore();
+          seedFromLocal = true;
+          if (this.store.trades.length)
+            console.log(`  trades: seeded ${this.store.trades.length} trades from trades.json`);
+        }
+      } catch (e) {
+        logError("trades.mongo.connect", `${(e && e.message) || e} - using trades.json`);
+        this.tradesColl = null;
+        this.processedColl = null;
+        this.outbox.setProcessor(null);
+        this.backend = "file";
+        this.store = this.#readFileStore();
+        seedFromLocal = true;
+      }
+    } else {
+      this.backend = "file";
+      this.store = this.#readFileStore();
+      seedFromLocal = true;
+    }
+    this.#migrate();
+    this.#save({ queue: seedFromLocal });
+    this.#startReconnectWorker();
+    return this.backend;
+  }
+
+  backendName() {
+    return this.backend;
+  }
+
+  #queueTrade(trade) {
+    this.outbox.enqueue("TRADE_PUT", { ...trade }, { dedupeKey: `trade:${trade.id}` });
+  }
+  #queueTradeDelete(id) {
+    this.outbox.enqueue(
+      "TRADE_DELETE",
+      { id, at: istNow() },
+      { dedupeKey: `trade:${id}` },
+    );
+  }
+
+  async #processOutbox(operation) {
+    if (await this.processedColl.findOne({ _id: operation.operationId })) return;
+    if (operation.type === "TRADE_PUT") {
+      const trade = operation.payload;
+      await this.tradesColl.replaceOne(
+        { _id: trade.id },
+        { ...trade, _id: trade.id },
+        { upsert: true },
+      );
+    } else if (operation.type === "TRADE_DELETE") {
+      await this.tradesColl.deleteOne({ _id: operation.payload.id });
+    } else {
+      throw new Error(`unknown trades outbox operation: ${operation.type}`);
+    }
+    await this.processedColl.updateOne(
+      { _id: operation.operationId },
+      { $setOnInsert: { type: operation.type, processedAt: istNow() } },
+      { upsert: true },
+    );
+  }
+
+  #configureMongo(db) {
+    this.tradesColl = db.collection("trades");
+    // distinct ledger - do NOT share `processed_operations` with auth/alerts
+    this.processedColl = db.collection("trades_processed_operations");
+    this.outbox.setProcessor((operation) => this.#processOutbox(operation));
+  }
+
+  #save(options = {}) {
+    if (options.queue !== false) for (const trade of this.store.trades) this.#queueTrade(trade);
+    try {
+      fs.mkdirSync(STORE_DIR, { recursive: true });
+      fs.writeFileSync(STORE_FILE, JSON.stringify(this.store, null, 2));
+    } catch (e) {
+      logError("trades.file.write", `trades.json - ${e.message}`);
+    }
+    if (this.backend === "mongo") void this.outbox.drain();
+  }
+
+  async #reconnectMongo() {
+    if (!this.mongoUri || this.backend === "mongo") return;
+    try {
+      const client = await connectMongoWithRetry(this.mongoUri, {
+        retries: 0,
+        serverSelectionTimeoutMS: 5000,
+      });
+      this.#configureMongo(client.db(mongoDbName(this.mongoUri)));
+      this.backend = "mongo";
+      resetErrorOnce("trades.mongo.reconnect");
+      await this.outbox.drain();
+      console.log("  trades: MongoDB reconnected; durable outbox replayed");
+    } catch (error) {
+      this.backend = "file";
+      this.outbox.setProcessor(null);
+      logErrorOnce("trades.mongo.reconnect", error); // log once per outage
+    }
+  }
+
+  #startReconnectWorker() {
+    if (!this.mongoUri || this.reconnectTimer) return;
+    this.reconnectTimer = setInterval(() => void this.#reconnectMongo(), 15_000);
+    if (this.reconnectTimer.unref) this.reconnectTimer.unref();
+  }
+
+  // Idempotent backfill for legacy / hand-edited rows.
+  #migrate() {
+    let changed = false;
+    for (const t of this.store.trades) {
+      if (!t.tradeType) { t.tradeType = "intraday"; changed = true; }
+      if (t.charges == null) { t.charges = 0; changed = true; }
+      if (t.version == null) { t.version = 1; changed = true; }
+      if (t.schemaVersion == null) { t.schemaVersion = SCHEMA_VERSION; changed = true; }
+      const derivedStatus = isClosed(t) ? "closed" : "open";
+      if (t.status !== derivedStatus) { t.status = derivedStatus; changed = true; }
+    }
+    if (changed) this.#save({ queue: false });
+  }
+
+  // ---------- CRUD ----------
+  find(id) {
+    return this.store.trades.find((t) => t.id === id) || null;
+  }
+  get(id) {
+    const t = this.find(id);
+    return t ? derive(t) : null;
+  }
+  list(filters = {}) {
+    let rows = this.store.trades;
+    const f = filters;
+    if (f.tradeType) rows = rows.filter((t) => t.tradeType === f.tradeType);
+    if (f.status) rows = rows.filter((t) => t.status === f.status);
+    if (f.side) rows = rows.filter((t) => t.side === String(f.side).toUpperCase());
+    if (f.symbol) {
+      const s = String(f.symbol).toUpperCase();
+      rows = rows.filter((t) => (t.symbol || "").includes(s));
+    }
+    if (f.strategy) rows = rows.filter((t) => (t.strategy || "") === f.strategy);
+    if (f.from) rows = rows.filter((t) => t.entryDate >= f.from);
+    if (f.to) rows = rows.filter((t) => t.entryDate <= f.to);
+    return rows
+      .slice()
+      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+      .map(derive);
+  }
+
+  create(input, actor) {
+    const { errors, clean } = validate(input);
+    if (errors.length) return { error: errors.join("; ") };
+    const now = istNow();
+    const trade = {
+      id: crypto.randomUUID(),
+      ...clean,
+      status: clean.exitPrice > 0 && clean.exitDate ? "closed" : "open",
+      createdByUserId: (actor && actor.id) || null,
+      createdByUsername: (actor && actor.username) || null,
+      createdByRole: (actor && actor.role) || null,
+      createdAt: now,
+      updatedAt: now,
+      version: 1,
+      schemaVersion: SCHEMA_VERSION,
+    };
+    this.store.trades.push(trade);
+    this.#save();
+    return { trade: derive(trade) };
+  }
+
+  update(id, input, actor) {
+    const existing = this.find(id);
+    if (!existing) return { error: "not found", status: 404 };
+    // merge stored + patch, then validate the full candidate
+    const merged = { ...existing, ...input };
+    const { errors, clean } = validate(merged);
+    if (errors.length) return { error: errors.join("; ") };
+    Object.assign(existing, clean, {
+      status: clean.exitPrice > 0 && clean.exitDate ? "closed" : "open",
+      updatedAt: istNow(),
+      version: (existing.version || 1) + 1,
+    });
+    this.#save();
+    return { trade: derive(existing) };
+  }
+
+  remove(id) {
+    const i = this.store.trades.findIndex((t) => t.id === id);
+    if (i < 0) return { error: "not found", status: 404 };
+    this.store.trades.splice(i, 1);
+    this.#queueTradeDelete(id);
+    this.#save();
+    return { ok: true };
+  }
+
+  summary(filters = {}) {
+    const rows = this.list(filters); // already derived + filtered
+    const byType = {
+      intraday: { open: 0, closed: 0, netPnl: 0 },
+      swing: { open: 0, closed: 0, netPnl: 0 },
+    };
+    let open = 0;
+    let closed = 0;
+    let wins = 0;
+    let losses = 0;
+    let netPnl = 0;
+    for (const t of rows) {
+      const bt = byType[t.tradeType] || (byType[t.tradeType] = { open: 0, closed: 0, netPnl: 0 });
+      if (t.status === "closed") {
+        closed++;
+        bt.closed++;
+        netPnl = round2(netPnl + (t.netPnl || 0));
+        bt.netPnl = round2(bt.netPnl + (t.netPnl || 0));
+        if ((t.netPnl || 0) > 0) wins++;
+        else if ((t.netPnl || 0) < 0) losses++;
+      } else {
+        open++;
+        bt.open++;
+      }
+    }
+    const resolved = wins + losses;
+    return {
+      open: { count: open },
+      closed: {
+        count: closed,
+        netPnl,
+        wins,
+        losses,
+        winRate: resolved ? round2((wins / resolved) * 100) : 0,
+      },
+      byType,
+    };
+  }
+
+  // pure helpers exposed for callers/tests (no instance state)
+  derive(t) {
+    return derive(t);
+  }
+  validate(input) {
+    return validate(input);
+  }
 }
 
-module.exports = {
-  load,
-  list,
-  get,
-  find,
-  create,
-  update,
-  remove,
-  summary,
-  backendName,
-  derive,
-  validate,
-};
+// Shared singleton (drop-in for the old function-module API) + the class for tests/isolated instances.
+const trades = new TradesRepo();
+trades.TradesRepo = TradesRepo;
+module.exports = trades;

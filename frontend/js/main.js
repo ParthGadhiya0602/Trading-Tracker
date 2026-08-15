@@ -5,5 +5,6 @@ import "./alerts-ui.js";
 import "./trades-ui.js";
 import "./reports-ui.js";
 import "./market-ui.js";
+import "./derivatives-ui.js";
 import "./shell-ui.js";
 import "./auth-ui.js";

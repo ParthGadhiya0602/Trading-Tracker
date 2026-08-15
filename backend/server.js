@@ -30,6 +30,8 @@ const telegram = require("./telegram");
 const llm = require("./llm");
 const trades = require("./trades");
 const store = require("./market-store"); // single in-memory source of truth for market data
+const { createNseDerivatives } = require("./nse-derivatives");
+const { DerivativesError, DerivativesService } = require("./derivatives");
 const { logInfo, logWarn } = require("./logger");
 const { istNow, envFlag } = require("./utils");
 const {
@@ -58,6 +60,10 @@ function loadFeedConfig() {
 }
 const FEED = loadFeedConfig();
 const BASE = FEED ? FEED.base : null;
+const DERIVATIVES_ENABLED = envFlag(process.env.DERIVATIVES_ENABLED);
+const DERIVATIVES_FUTURES_ENABLED = envFlag(process.env.DERIVATIVES_FUTURES_ENABLED);
+const DERIVATIVES_STOCK_OPTIONS_ENABLED = envFlag(process.env.DERIVATIVES_STOCK_OPTIONS_ENABLED);
+const DERIVATIVES_ALLOW_CLOSED_REVIEW = envFlag(process.env.DERIVATIVES_ALLOW_CLOSED_REVIEW);
 function requireFeed() {
   if (!FEED)
     throw new Error(
@@ -118,6 +124,145 @@ function headers(uaIndex = 0) {
 let jar = new Map();
 let warmedAt = 0;
 let warming = null; // in-flight warm promise, so concurrent requests share one warmup
+let warmingKind = null;
+
+class SourceTrafficCoordinator {
+  constructor({ now = Date.now, random = Math.random, sleep = null } = {}) {
+    this.now = now;
+    this.random = random;
+    this.sleep = sleep || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+    this.closed = false;
+    this.cashFlows = 0;
+    this.cashPending = 0;
+    this.cashInFlight = 0;
+    this.derivativeInFlight = 0;
+    this.sourceBlockedUntil = 0;
+    this.derivativeBlockedUntil = 0;
+    this.blockStreak = 0;
+    this.counters = {
+      total: 0,
+      cash: 0,
+      derivatives: 0,
+      warmups: 0,
+      blocks: 0,
+      lastRequestAt: null,
+      lastSuccessAt: null,
+    };
+  }
+
+  async runCash(task, { warmup = false } = {}) {
+    if (this.closed) throw new Error("source traffic coordinator is closed");
+    let admitted = false;
+    this.cashPending += 1;
+    try {
+      const waitMs = Math.max(0, this.sourceBlockedUntil - this.now());
+      if (waitMs) await this.sleep(waitMs);
+      if (this.closed) throw new Error("source traffic coordinator is closed");
+      this.cashPending -= 1;
+      admitted = true;
+      this.cashInFlight += 1;
+      this.#recordAttempt("cash", warmup);
+      try {
+        return await task();
+      } finally {
+        this.cashInFlight -= 1;
+      }
+    } finally {
+      if (!admitted) this.cashPending -= 1;
+    }
+  }
+
+  async withCashPriority(task) {
+    if (this.closed) throw new Error("source traffic coordinator is closed");
+    this.cashFlows += 1;
+    try {
+      return await task();
+    } finally {
+      this.cashFlows -= 1;
+    }
+  }
+
+  async runDerivative(task, { warmup = false } = {}) {
+    const now = this.now();
+    if (this.closed) {
+      throw new DerivativesError("SOURCE_CLOSED", "source traffic coordinator is closed");
+    }
+    if (this.cashFlows > 0 || this.cashPending > 0 || this.cashInFlight > 0) {
+      throw new DerivativesError("SOURCE_BUSY", "cash market traffic has priority", {
+        retryAfter: new Date(now + 1000).toUTCString(),
+      });
+    }
+    const blockedUntil = Math.max(this.sourceBlockedUntil, this.derivativeBlockedUntil);
+    if (blockedUntil > now) {
+      throw new DerivativesError("SOURCE_BLOCKED", "upstream source is cooling down", {
+        retryAfter: new Date(blockedUntil).toUTCString(),
+      });
+    }
+    if (this.derivativeInFlight >= 2) {
+      throw new DerivativesError("SOURCE_BUSY", "derivative request concurrency reached", {
+        retryAfter: new Date(now + 1000).toUTCString(),
+      });
+    }
+    this.derivativeInFlight += 1;
+    this.#recordAttempt("derivative", warmup);
+    try {
+      return await task();
+    } finally {
+      this.derivativeInFlight -= 1;
+    }
+  }
+
+  observeResponse(kind, response) {
+    if (!response || typeof response.status !== "number") return response;
+    const now = this.now();
+    if (response.status === 401 || response.status === 403) {
+      this.blockStreak += 1;
+      this.counters.blocks += 1;
+      this.sourceBlockedUntil = Math.max(this.sourceBlockedUntil, now + 1000);
+      const derivativeBackoff = Math.min(300_000, 5000 * 2 ** (this.blockStreak - 1));
+      const jitter = Math.floor(this.random() * Math.min(1000, derivativeBackoff * 0.1));
+      this.derivativeBlockedUntil = Math.max(
+        this.derivativeBlockedUntil,
+        now + derivativeBackoff + jitter,
+      );
+    } else if (response.status >= 200 && response.status < 300) {
+      this.blockStreak = 0;
+      this.sourceBlockedUntil = 0;
+      this.derivativeBlockedUntil = 0;
+      this.counters.lastSuccessAt = new Date(now).toISOString();
+    }
+    return response;
+  }
+
+  status() {
+    return {
+      ...this.counters,
+      cashFlows: this.cashFlows,
+      cashPending: this.cashPending,
+      cashInFlight: this.cashInFlight,
+      derivativeInFlight: this.derivativeInFlight,
+      blockedUntil: this.sourceBlockedUntil
+        ? new Date(this.sourceBlockedUntil).toISOString()
+        : null,
+      derivativeCooldownUntil: this.derivativeBlockedUntil
+        ? new Date(this.derivativeBlockedUntil).toISOString()
+        : null,
+    };
+  }
+
+  close() {
+    this.closed = true;
+  }
+
+  #recordAttempt(kind, warmup) {
+    this.counters.total += 1;
+    this.counters[kind === "cash" ? "cash" : "derivatives"] += 1;
+    if (warmup) this.counters.warmups += 1;
+    this.counters.lastRequestAt = new Date(this.now()).toISOString();
+  }
+}
+
+const sourceTraffic = new SourceTrafficCoordinator();
 
 function storeCookies(res) {
   // Node 24 exposes getSetCookie(); retain the folded-header fallback for defensive parsing.
@@ -162,23 +307,49 @@ async function srcGet(url, uaIndex, timeoutMs = 15000, referer = null) {
   }
 }
 
-async function warm(uaIndex = 0) {
+async function warm(uaIndex = 0, kind = "cash") {
   requireFeed();
   jar = new Map();
   // Hit each configured warmup path in order to accumulate the anti-bot cookies
   // (homepage first, then a page that sets the session cookies /api/* needs).
   const paths = Array.isArray(FEED.warmupPaths) ? FEED.warmupPaths : ["/"];
   for (const p of paths) {
-    await (await srcGet(`${BASE}${p}`, uaIndex, 10000)).text();
+    const response = await sourceTraffic[
+      kind === "derivative" ? "runDerivative" : "runCash"
+    ](() => srcGet(`${BASE}${p}`, uaIndex, 10000), { warmup: true });
+    sourceTraffic.observeResponse(kind, response);
+    await response.text();
     await new Promise((r) => setTimeout(r, 300));
   }
   warmedAt = Date.now();
 }
 
-async function ensureWarm(uaIndex) {
+async function ensureWarm(uaIndex, kind = "cash") {
   if (jar.size && Date.now() - warmedAt <= SESSION_TTL) return;
-  if (!warming) warming = warm(uaIndex).finally(() => (warming = null));
-  await warming;
+  if (!warming) {
+    warmingKind = kind;
+    warming = warm(uaIndex, kind).finally(() => {
+      warming = null;
+      warmingKind = null;
+    });
+  }
+  const ownerKind = warmingKind;
+  try {
+    await warming;
+  } catch (error) {
+    // If a derivative-triggered warm yielded to newly pending cash traffic, let the
+    // cash caller immediately own the shared warm mutex instead of spending one of
+    // its JSON retry attempts on the derivative admission failure.
+    if (kind !== "cash" || ownerKind !== "derivative") throw error;
+    if (!warming) {
+      warmingKind = "cash";
+      warming = warm(uaIndex, "cash").finally(() => {
+        warming = null;
+        warmingKind = null;
+      });
+    }
+    await warming;
+  }
 }
 
 function num(v) {
@@ -189,13 +360,20 @@ function num(v) {
 
 // GET one data-source path (with warm session, rewarm-on-block, backoff). Returns JSON.
 async function srcJson(url, retries = 2) {
+  return sourceTraffic.withCashPriority(() => srcJsonWithRetries(url, retries));
+}
+
+async function srcJsonWithRetries(url, retries) {
   let last = null;
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (attempt)
       await new Promise((r) => setTimeout(r, 2 ** (attempt - 1) * 1000));
     try {
-      await ensureWarm(attempt);
-      const res = await srcGet(url, attempt, 15000, FEED_REF);
+      await ensureWarm(attempt, "cash");
+      const res = sourceTraffic.observeResponse(
+        "cash",
+        await sourceTraffic.runCash(() => srcGet(url, attempt, 15000, FEED_REF)),
+      );
       if (res.status === 401 || res.status === 403) {
         last = `HTTP ${res.status} (anti-bot block)`;
         jar = new Map();
@@ -219,6 +397,89 @@ async function srcJson(url, retries = 2) {
     }
   }
   throw new Error(`data fetch failed: ${last}`);
+}
+
+async function derivativeResponse(request) {
+  await ensureWarm(0, "derivative");
+  const referer = request && request.referer
+    ? new URL(request.referer, BASE).toString()
+    : FEED_REF;
+  const response = sourceTraffic.observeResponse(
+    "derivative",
+    await sourceTraffic.runDerivative(() =>
+      srcGet(request.url, 0, 15000, referer),
+    ),
+  );
+  if (response.status === 401 || response.status === 403) {
+    jar = new Map();
+    warmedAt = 0;
+  }
+  return response;
+}
+
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+function istTradingDate(nowMs = Date.now()) {
+  return new Date(nowMs + IST_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+function nextDerivativeOpenDelayMs(nowMs = Date.now()) {
+  const ist = new Date(nowMs + IST_OFFSET_MS);
+  const year = ist.getUTCFullYear();
+  const month = ist.getUTCMonth();
+  const day = ist.getUTCDate();
+  for (let offset = 0; offset < 8; offset += 1) {
+    const candidate = Date.UTC(year, month, day + offset, 3, 45);
+    const weekday = new Date(candidate + IST_OFFSET_MS).getUTCDay();
+    if (weekday === 0 || weekday === 6 || candidate <= nowMs) continue;
+    return Math.max(1000, candidate - nowMs);
+  }
+  return 24 * 60 * 60 * 1000;
+}
+
+let derivativesService = null;
+
+function createDerivativesRuntime() {
+  if (!DERIVATIVES_ENABLED) return null;
+  if (!FEED || !FEED.derivatives) {
+    throw new Error(
+      "derivatives are enabled but FEED_JSON.derivatives is missing (see .env.sample)",
+    );
+  }
+  const provider = createNseDerivatives({
+    base: BASE,
+    config: FEED.derivatives,
+    fetchResponse: derivativeResponse,
+  });
+  return new DerivativesService({
+    provider,
+    store,
+    isMarketOpen: () => marketState() === "open",
+    nextOpenDelayMs: () => nextDerivativeOpenDelayMs(),
+    tradingDate: () => istTradingDate(),
+    sourceStatus: () => sourceTraffic.status(),
+    onUpdate: (snapshot, type) => scheduleDerivativeFanout(snapshot.key, type),
+    config: {
+      refreshMs:
+        Math.max(3, Number(process.env.DERIVATIVES_POLL_SECONDS) || 5) * 1000,
+      graceMs:
+        Math.max(0, Number(process.env.DERIVATIVES_IDLE_GRACE_SECONDS) || 60) *
+        1000,
+      chainBudget: Math.max(
+        1,
+        Number(process.env.DERIVATIVES_REQUEST_BUDGET_PER_MINUTE) || 24,
+      ),
+      metadataBudget: Math.max(
+        2,
+        Number(process.env.DERIVATIVES_METADATA_BUDGET_PER_MINUTE) || 12,
+      ),
+      maxActiveKeys: 24,
+      maxCalls: 2,
+      allowClosedReview: DERIVATIVES_ALLOW_CLOSED_REVIEW,
+      futuresEnabled: DERIVATIVES_FUTURES_ENABLED,
+      stockOptionsEnabled: DERIVATIVES_STOCK_OPTIONS_ENABLED,
+    },
+  });
 }
 
 // ---- index API: full constituents + open + level + advance/decline + status ----
@@ -487,6 +748,7 @@ function applyTick(t) {
 // SSE fan-out for /api/stream (only ever populated when STREAM_WS is on - the endpoint
 // itself 404s otherwise, so nothing subscribes).
 const sseClients = new Set();
+const derivativeSseClients = new Map(); // key -> Set<{ res, release, heartbeat }>
 const stateSseClients = new Set(); // { res, userId }
 const stateChanges = [];
 let stateRevision = 0;
@@ -520,6 +782,53 @@ function scheduleFanout() {
   const wait = since >= FANOUT_MIN_MS ? 0 : FANOUT_MIN_MS - since;
   fanoutTimer = setTimeout(fanoutNow, wait);
   if (fanoutTimer.unref) fanoutTimer.unref();
+}
+
+let derivativeFanoutTimer = null;
+let derivativeLastFanoutMs = 0;
+const derivativePendingUpdates = new Map();
+function derivativeSseWrite(client, chunk) {
+  try {
+    if (client.res.writableEnded) return false;
+    client.res.write(chunk);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+function removeDerivativeClient(key, client) {
+  const clients = derivativeSseClients.get(key);
+  if (!clients || !clients.delete(client)) return;
+  if (client.heartbeat) clearInterval(client.heartbeat);
+  client.release();
+  if (!clients.size) derivativeSseClients.delete(key);
+}
+function derivativeEvent(snapshot, type) {
+  const event = type === "status" ? "status" : "snapshot";
+  const id = Number.isFinite(snapshot && snapshot.sequence) ? `id: ${snapshot.sequence}\n` : "";
+  return `event: ${event}\n${id}data: ${JSON.stringify(snapshot)}\n\n`;
+}
+function fanoutDerivativeNow() {
+  derivativeFanoutTimer = null;
+  derivativeLastFanoutMs = Date.now();
+  for (const [key, type] of derivativePendingUpdates) {
+    derivativePendingUpdates.delete(key);
+    const clients = derivativeSseClients.get(key);
+    const snapshot = store.derivatives.getSnapshot(key);
+    if (!clients || !snapshot) continue;
+    const chunk = derivativeEvent(snapshot, type);
+    for (const client of [...clients]) {
+      if (!derivativeSseWrite(client, chunk)) removeDerivativeClient(key, client);
+    }
+  }
+}
+function scheduleDerivativeFanout(key, type) {
+  if (!DERIVATIVES_ENABLED || !derivativeSseClients.has(key)) return;
+  derivativePendingUpdates.set(key, type);
+  if (derivativeFanoutTimer) return;
+  const since = Date.now() - derivativeLastFanoutMs;
+  derivativeFanoutTimer = setTimeout(fanoutDerivativeNow, Math.max(0, FANOUT_MIN_MS - since));
+  derivativeFanoutTimer.unref?.();
 }
 function stateSseWrite(client, chunk) {
   try {
@@ -664,6 +973,201 @@ function permit(res, user, action, alert) {
   const denied = authorize(user, action, alert);
   if (!denied) return true;
   sendJson(res, denied.status, { error: denied.error });
+  return false;
+}
+
+function derivativeErrorResponse(res, error) {
+  const code = error instanceof DerivativesError ? error.code : "SOURCE_ERROR";
+  const status = code === "INVALID_QUERY" || code === "INVALID_KEY" ? 400
+    : code === "SNAPSHOT_UNAVAILABLE" || code === "NOT_FOUND" ? 404
+    : code === "REQUEST_BUDGET" || code === "CAPACITY" ? 429
+      : code === "UPSTREAM_BLOCK" || code === "SOURCE_BUSY" || code === "CLOSED" ? 503
+        : 502;
+  const retryAfterMs = error && Number.isFinite(Number(error.retryAfterMs))
+    ? Math.max(0, Number(error.retryAfterMs)) : null;
+  sendJson(res, status, {
+    error: error instanceof DerivativesError ? error.message : "derivatives source request failed",
+    code,
+    ...(retryAfterMs == null ? {} : { retryAfterMs }),
+  });
+}
+
+function derivativeQuery(req, fields, market = "index") {
+  if ((req.url || "").length > 512) throw new DerivativesError("INVALID_QUERY", "query is too long");
+  const query = new URL(req.url, `http://${HOST}`).searchParams;
+  for (const name of query.keys()) {
+    if (!fields.includes(name) || query.getAll(name).length !== 1) {
+      throw new DerivativesError("INVALID_QUERY", "invalid query parameters");
+    }
+  }
+  const result = {};
+  for (const field of fields) {
+    const value = query.get(field);
+    const maxLength = field === "symbol" ? (market === "equity" ? 30 : 12) : 10;
+    if (typeof value !== "string" || !value || value.length > maxLength) {
+      throw new DerivativesError("INVALID_QUERY", `invalid ${field}`);
+    }
+    result[field] = value;
+  }
+  if (market === "index" && !["NIFTY", "NIFTYNXT50", "FINNIFTY", "BANKNIFTY", "MIDCPNIFTY", "NIFTYFPI"].includes(result.symbol)) {
+    throw new DerivativesError("INVALID_QUERY", "symbol is not a supported index derivative");
+  }
+  if (market === "equity" && !/^[A-Z0-9][A-Z0-9&._-]{0,29}$/.test(result.symbol)) {
+    throw new DerivativesError("INVALID_QUERY", "invalid equity symbol");
+  }
+  if (result.expiry && !validDerivativeDate(result.expiry)) {
+    throw new DerivativesError("INVALID_QUERY", "expiry must be an ISO calendar date");
+  }
+  return result;
+}
+
+function validDerivativeDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
+function derivativeExpiryIsValid(contracts, expiry) {
+  return Boolean(contracts && Array.isArray(contracts.expiries) && contracts.expiries.some((entry) => entry && entry.expiry === expiry));
+}
+
+async function handleDerivativesApi(req, res, url, method) {
+  let requestClosed = false;
+  if (!DERIVATIVES_ENABLED) {
+    sendJson(res, 404, { error: "not found" });
+    return true;
+  }
+  if (!derivativesService) {
+    sendJson(res, 503, { error: "derivatives service unavailable" });
+    return true;
+  }
+  if (url.includes("/futures") && !DERIVATIVES_FUTURES_ENABLED) {
+    sendJson(res, 404, { error: "not found" });
+    return true;
+  }
+  if (url.includes("/equities") && !DERIVATIVES_STOCK_OPTIONS_ENABLED) {
+    sendJson(res, 404, { error: "not found" });
+    return true;
+  }
+  try {
+    if (url === "/api/derivatives/equities" && method === "GET") {
+      if (new URL(req.url, `http://${HOST}`).search) throw new DerivativesError("INVALID_QUERY", "equities accepts no query parameters");
+      sendJson(res, 200, await derivativesService.getEquitySymbols());
+      return true;
+    }
+    if ((url === "/api/derivatives/analysis" || url === "/api/derivatives/equities/analysis") && method === "GET") {
+      const market = url.includes("/equities/") ? "equity" : "index";
+      const { symbol, expiry } = derivativeQuery(req, ["symbol", "expiry"], market);
+      sendJson(res, 200, derivativesService.getAnalysis({ market, symbol, expiry }));
+      return true;
+    }
+    if ((url === "/api/derivatives/contracts" || url === "/api/derivatives/equities/contracts") && method === "GET") {
+      const market = url.includes("/equities/") ? "equity" : "index";
+      const { symbol } = derivativeQuery(req, ["symbol"], market);
+      sendJson(res, 200, await derivativesService.getContracts({ market, symbol }));
+      return true;
+    }
+    if ((url === "/api/derivatives/options" || url === "/api/derivatives/equities/options") && method === "GET") {
+      const market = url.includes("/equities/") ? "equity" : "index";
+      const { symbol, expiry } = derivativeQuery(req, ["symbol", "expiry"], market);
+      const snapshot = store.derivatives.getSnapshot(`${market}:${symbol}:${expiry}`);
+      if (!snapshot) sendJson(res, 404, { error: "option chain snapshot unavailable" });
+      else sendJson(res, 200, snapshot);
+      return true;
+    }
+    if (url === "/api/derivatives/futures" && method === "GET") {
+      const { symbol } = derivativeQuery(req, ["symbol"]);
+      const snapshot = store.derivatives.getSnapshot(`future:index:${symbol}`);
+      if (!snapshot) sendJson(res, 404, { error: "index futures snapshot unavailable" });
+      else sendJson(res, 200, snapshot);
+      return true;
+    }
+    if (url === "/api/derivatives/status" && method === "GET") {
+      if (new URL(req.url, `http://${HOST}`).search) throw new DerivativesError("INVALID_QUERY", "status accepts no query parameters");
+      sendJson(res, 200, derivativesService.getStatus());
+      return true;
+    }
+    if ((url === "/api/derivatives/stream" || url === "/api/derivatives/equities/stream" || url === "/api/derivatives/futures/stream") && method === "GET") {
+      const isFutures = url === "/api/derivatives/futures/stream";
+      const market = url === "/api/derivatives/equities/stream" ? "equity" : "index";
+      const { symbol, expiry } = derivativeQuery(req, isFutures ? ["symbol"] : ["symbol", "expiry"], market);
+      let streamClosed = false;
+      let demand = null;
+      let key = null;
+      let client = null;
+      let clientRegistered = false;
+      let streamStarted = false;
+      const closeStream = () => {
+        requestClosed = true;
+        streamClosed = true;
+        if (clientRegistered && client && key) removeDerivativeClient(key, client);
+        else if (demand) demand.release();
+      };
+      // Register before metadata I/O so an abandoned request can never acquire demand.
+      req.once("close", closeStream);
+      if (!isFutures) {
+        const contracts = await derivativesService.getContracts({ market, symbol });
+        if (streamClosed || req.destroyed || res.destroyed || res.writableEnded) return true;
+        if (!derivativeExpiryIsValid(contracts, expiry)) {
+          throw new DerivativesError("INVALID_QUERY", "expiry is not available for this symbol");
+        }
+      }
+      demand = isFutures
+        ? derivativesService.addFuturesDemand({ market: "index", symbol })
+        : derivativesService.addDemand({ market, symbol, expiry });
+      key = demand.key;
+      if (streamClosed || req.destroyed || res.destroyed || res.writableEnded) {
+        demand.release();
+        return true;
+      }
+      try {
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        });
+        streamStarted = true;
+        res.write("retry: 3000\n\n");
+        client = { res, release: demand.release, heartbeat: null };
+        const clients = derivativeSseClients.get(key) || new Set();
+        clients.add(client);
+        derivativeSseClients.set(key, clients);
+        clientRegistered = true;
+        if (streamClosed || req.destroyed || res.destroyed || res.writableEnded) {
+          removeDerivativeClient(key, client);
+          return true;
+        }
+        // The first application event is always a complete snapshot envelope,
+        // including the normalized loading envelope created by addDemand().
+        const current = store.derivatives.getSnapshot(key);
+        if (!current || !derivativeSseWrite(client, derivativeEvent(current, "snapshot"))) {
+          removeDerivativeClient(key, client);
+          return true;
+        }
+        client.heartbeat = setInterval(() => {
+          if (!derivativeSseWrite(client, ": heartbeat\n\n")) removeDerivativeClient(key, client);
+        }, 15_000);
+        client.heartbeat.unref?.();
+      } catch (error) {
+        if (clientRegistered && client) removeDerivativeClient(key, client);
+        else if (demand) demand.release();
+        if (streamStarted || streamClosed || req.destroyed || res.destroyed || res.writableEnded) {
+          if (streamStarted && !res.destroyed && !res.writableEnded) {
+            try { res.end(); } catch (_) {}
+          }
+          return true;
+        }
+        throw error;
+      }
+      return true;
+    }
+  } catch (error) {
+    if (requestClosed || req.destroyed || res.destroyed || res.writableEnded) return true;
+    derivativeErrorResponse(res, error);
+    return true;
+  }
   return false;
 }
 
@@ -1215,6 +1719,12 @@ const server = http.createServer(async (req, res) => {
       const token = getToken(req);
       // open auth endpoints (status/setup/login/logout/users-public) need no session
       if (await handleAuthApi(req, res, url, method, token)) return;
+      // A disabled feature must be indistinguishable from an unimplemented route,
+      // including to callers without a session.
+      if (!DERIVATIVES_ENABLED && url.startsWith("/api/derivatives")) {
+        sendJson(res, 404, { error: "not found" });
+        return;
+      }
       // everything else requires a valid session
       const user = auth.sessionUser(token);
       if (!user) {
@@ -1238,6 +1748,11 @@ const server = http.createServer(async (req, res) => {
       }
       if (url.startsWith("/api/telegram")) {
         if (await handleTelegramApi(req, res, url, method, user)) return;
+        sendJson(res, 404, { error: "not found" });
+        return;
+      }
+      if (url.startsWith("/api/derivatives")) {
+        if (await handleDerivativesApi(req, res, url, method)) return;
         sendJson(res, 404, { error: "not found" });
         return;
       }
@@ -1343,6 +1858,17 @@ const server = http.createServer(async (req, res) => {
   serveStatic(res, url);
 });
 
+server.on("close", () => {
+  if (derivativeFanoutTimer) clearTimeout(derivativeFanoutTimer);
+  derivativeFanoutTimer = null;
+  derivativePendingUpdates.clear();
+  for (const [key, clients] of derivativeSseClients) {
+    for (const client of [...clients]) removeDerivativeClient(key, client);
+  }
+  if (derivativesService) derivativesService.close();
+  sourceTraffic.close();
+});
+
 async function main() {
   console.log(
     "\n  Trading Tracker - NSE market dashboard and journal (Node)",
@@ -1351,6 +1877,12 @@ async function main() {
     FEED
       ? "  Data source: configured from FEED_JSON"
       : "  Data source: NOT configured - set FEED_JSON (see .env.sample)",
+  );
+  derivativesService = createDerivativesRuntime();
+  console.log(
+    derivativesService
+      ? `  Derivatives: enabled · futures: ${DERIVATIVES_FUTURES_ENABLED ? "on" : "off"} · stock options: ${DERIVATIVES_STOCK_OPTIONS_ENABLED ? "on" : "off"} · closed-hours review: ${DERIVATIVES_ALLOW_CLOSED_REVIEW ? "on" : "off"} (idle until demand)`
+      : "  Derivatives: disabled",
   );
   await auth.load();
   console.log(
