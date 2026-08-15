@@ -61,6 +61,8 @@ function loadFeedConfig() {
 const FEED = loadFeedConfig();
 const BASE = FEED ? FEED.base : null;
 const DERIVATIVES_ENABLED = envFlag(process.env.DERIVATIVES_ENABLED);
+const DERIVATIVES_FUTURES_ENABLED = envFlag(process.env.DERIVATIVES_FUTURES_ENABLED);
+const DERIVATIVES_STOCK_OPTIONS_ENABLED = envFlag(process.env.DERIVATIVES_STOCK_OPTIONS_ENABLED);
 const DERIVATIVES_ALLOW_CLOSED_REVIEW = envFlag(process.env.DERIVATIVES_ALLOW_CLOSED_REVIEW);
 function requireFeed() {
   if (!FEED)
@@ -467,10 +469,15 @@ function createDerivativesRuntime() {
         1,
         Number(process.env.DERIVATIVES_REQUEST_BUDGET_PER_MINUTE) || 24,
       ),
-      metadataBudget: 4,
-      maxActiveKeys: 2,
+      metadataBudget: Math.max(
+        2,
+        Number(process.env.DERIVATIVES_METADATA_BUDGET_PER_MINUTE) || 12,
+      ),
+      maxActiveKeys: 24,
       maxCalls: 2,
       allowClosedReview: DERIVATIVES_ALLOW_CLOSED_REVIEW,
+      futuresEnabled: DERIVATIVES_FUTURES_ENABLED,
+      stockOptionsEnabled: DERIVATIVES_STOCK_OPTIONS_ENABLED,
     },
   });
 }
@@ -972,7 +979,7 @@ function permit(res, user, action, alert) {
 function derivativeErrorResponse(res, error) {
   const code = error instanceof DerivativesError ? error.code : "SOURCE_ERROR";
   const status = code === "INVALID_QUERY" || code === "INVALID_KEY" ? 400
-    : code === "SNAPSHOT_UNAVAILABLE" ? 404
+    : code === "SNAPSHOT_UNAVAILABLE" || code === "NOT_FOUND" ? 404
     : code === "REQUEST_BUDGET" || code === "CAPACITY" ? 429
       : code === "UPSTREAM_BLOCK" || code === "SOURCE_BUSY" || code === "CLOSED" ? 503
         : 502;
@@ -985,7 +992,7 @@ function derivativeErrorResponse(res, error) {
   });
 }
 
-function derivativeQuery(req, fields) {
+function derivativeQuery(req, fields, market = "index") {
   if ((req.url || "").length > 512) throw new DerivativesError("INVALID_QUERY", "query is too long");
   const query = new URL(req.url, `http://${HOST}`).searchParams;
   for (const name of query.keys()) {
@@ -996,13 +1003,17 @@ function derivativeQuery(req, fields) {
   const result = {};
   for (const field of fields) {
     const value = query.get(field);
-    if (typeof value !== "string" || !value || value.length > (field === "symbol" ? 12 : 10)) {
+    const maxLength = field === "symbol" ? (market === "equity" ? 30 : 12) : 10;
+    if (typeof value !== "string" || !value || value.length > maxLength) {
       throw new DerivativesError("INVALID_QUERY", `invalid ${field}`);
     }
     result[field] = value;
   }
-  if (result.symbol !== "NIFTY" && result.symbol !== "BANKNIFTY") {
-    throw new DerivativesError("INVALID_QUERY", "symbol must be NIFTY or BANKNIFTY");
+  if (market === "index" && !["NIFTY", "NIFTYNXT50", "FINNIFTY", "BANKNIFTY", "MIDCPNIFTY", "NIFTYFPI"].includes(result.symbol)) {
+    throw new DerivativesError("INVALID_QUERY", "symbol is not a supported index derivative");
+  }
+  if (market === "equity" && !/^[A-Z0-9][A-Z0-9&._-]{0,29}$/.test(result.symbol)) {
+    throw new DerivativesError("INVALID_QUERY", "invalid equity symbol");
   }
   if (result.expiry && !validDerivativeDate(result.expiry)) {
     throw new DerivativesError("INVALID_QUERY", "expiry must be an ISO calendar date");
@@ -1031,21 +1042,44 @@ async function handleDerivativesApi(req, res, url, method) {
     sendJson(res, 503, { error: "derivatives service unavailable" });
     return true;
   }
+  if (url.includes("/futures") && !DERIVATIVES_FUTURES_ENABLED) {
+    sendJson(res, 404, { error: "not found" });
+    return true;
+  }
+  if (url.includes("/equities") && !DERIVATIVES_STOCK_OPTIONS_ENABLED) {
+    sendJson(res, 404, { error: "not found" });
+    return true;
+  }
   try {
-    if (url === "/api/derivatives/analysis" && method === "GET") {
-      const { symbol, expiry } = derivativeQuery(req, ["symbol", "expiry"]);
-      sendJson(res, 200, derivativesService.getAnalysis({ market: "index", symbol, expiry }));
+    if (url === "/api/derivatives/equities" && method === "GET") {
+      if (new URL(req.url, `http://${HOST}`).search) throw new DerivativesError("INVALID_QUERY", "equities accepts no query parameters");
+      sendJson(res, 200, await derivativesService.getEquitySymbols());
       return true;
     }
-    if (url === "/api/derivatives/contracts" && method === "GET") {
-      const { symbol } = derivativeQuery(req, ["symbol"]);
-      sendJson(res, 200, await derivativesService.getContracts({ market: "index", symbol }));
+    if ((url === "/api/derivatives/analysis" || url === "/api/derivatives/equities/analysis") && method === "GET") {
+      const market = url.includes("/equities/") ? "equity" : "index";
+      const { symbol, expiry } = derivativeQuery(req, ["symbol", "expiry"], market);
+      sendJson(res, 200, derivativesService.getAnalysis({ market, symbol, expiry }));
       return true;
     }
-    if (url === "/api/derivatives/options" && method === "GET") {
-      const { symbol, expiry } = derivativeQuery(req, ["symbol", "expiry"]);
-      const snapshot = store.derivatives.getSnapshot(`index:${symbol}:${expiry}`);
+    if ((url === "/api/derivatives/contracts" || url === "/api/derivatives/equities/contracts") && method === "GET") {
+      const market = url.includes("/equities/") ? "equity" : "index";
+      const { symbol } = derivativeQuery(req, ["symbol"], market);
+      sendJson(res, 200, await derivativesService.getContracts({ market, symbol }));
+      return true;
+    }
+    if ((url === "/api/derivatives/options" || url === "/api/derivatives/equities/options") && method === "GET") {
+      const market = url.includes("/equities/") ? "equity" : "index";
+      const { symbol, expiry } = derivativeQuery(req, ["symbol", "expiry"], market);
+      const snapshot = store.derivatives.getSnapshot(`${market}:${symbol}:${expiry}`);
       if (!snapshot) sendJson(res, 404, { error: "option chain snapshot unavailable" });
+      else sendJson(res, 200, snapshot);
+      return true;
+    }
+    if (url === "/api/derivatives/futures" && method === "GET") {
+      const { symbol } = derivativeQuery(req, ["symbol"]);
+      const snapshot = store.derivatives.getSnapshot(`future:index:${symbol}`);
+      if (!snapshot) sendJson(res, 404, { error: "index futures snapshot unavailable" });
       else sendJson(res, 200, snapshot);
       return true;
     }
@@ -1054,8 +1088,10 @@ async function handleDerivativesApi(req, res, url, method) {
       sendJson(res, 200, derivativesService.getStatus());
       return true;
     }
-    if (url === "/api/derivatives/stream" && method === "GET") {
-      const { symbol, expiry } = derivativeQuery(req, ["symbol", "expiry"]);
+    if ((url === "/api/derivatives/stream" || url === "/api/derivatives/equities/stream" || url === "/api/derivatives/futures/stream") && method === "GET") {
+      const isFutures = url === "/api/derivatives/futures/stream";
+      const market = url === "/api/derivatives/equities/stream" ? "equity" : "index";
+      const { symbol, expiry } = derivativeQuery(req, isFutures ? ["symbol"] : ["symbol", "expiry"], market);
       let streamClosed = false;
       let demand = null;
       let key = null;
@@ -1070,12 +1106,16 @@ async function handleDerivativesApi(req, res, url, method) {
       };
       // Register before metadata I/O so an abandoned request can never acquire demand.
       req.once("close", closeStream);
-      const contracts = await derivativesService.getContracts({ market: "index", symbol });
-      if (streamClosed || req.destroyed || res.destroyed || res.writableEnded) return true;
-      if (!derivativeExpiryIsValid(contracts, expiry)) {
-        throw new DerivativesError("INVALID_QUERY", "expiry is not available for this symbol");
+      if (!isFutures) {
+        const contracts = await derivativesService.getContracts({ market, symbol });
+        if (streamClosed || req.destroyed || res.destroyed || res.writableEnded) return true;
+        if (!derivativeExpiryIsValid(contracts, expiry)) {
+          throw new DerivativesError("INVALID_QUERY", "expiry is not available for this symbol");
+        }
       }
-      demand = derivativesService.addDemand({ market: "index", symbol, expiry });
+      demand = isFutures
+        ? derivativesService.addFuturesDemand({ market: "index", symbol })
+        : derivativesService.addDemand({ market, symbol, expiry });
       key = demand.key;
       if (streamClosed || req.destroyed || res.destroyed || res.writableEnded) {
         demand.release();
@@ -1841,7 +1881,7 @@ async function main() {
   derivativesService = createDerivativesRuntime();
   console.log(
     derivativesService
-      ? `  Derivatives: enabled · closed-hours review: ${DERIVATIVES_ALLOW_CLOSED_REVIEW ? "on" : "off"} (idle until demand)`
+      ? `  Derivatives: enabled · futures: ${DERIVATIVES_FUTURES_ENABLED ? "on" : "off"} · stock options: ${DERIVATIVES_STOCK_OPTIONS_ENABLED ? "on" : "off"} · closed-hours review: ${DERIVATIVES_ALLOW_CLOSED_REVIEW ? "on" : "off"} (idle until demand)`
       : "  Derivatives: disabled",
   );
   await auth.load();

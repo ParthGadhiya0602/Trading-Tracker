@@ -1,7 +1,10 @@
 "use strict";
 
-const SUPPORTED_SYMBOLS = new Set(["NIFTY", "BANKNIFTY"]);
-const KEY_PATTERN = /^index:(NIFTY|BANKNIFTY):(\d{4}-\d{2}-\d{2})$/;
+const SUPPORTED_SYMBOLS = new Set(["NIFTY", "NIFTYNXT50", "FINNIFTY", "BANKNIFTY", "MIDCPNIFTY", "NIFTYFPI"]);
+const OPTION_KEY_PATTERN = /^index:(NIFTY|NIFTYNXT50|FINNIFTY|BANKNIFTY|MIDCPNIFTY|NIFTYFPI):(\d{4}-\d{2}-\d{2})$/;
+const EQUITY_KEY_PATTERN = /^equity:([A-Z0-9][A-Z0-9&._-]{0,29}):(\d{4}-\d{2}-\d{2})$/;
+const FUTURE_KEY_PATTERN = /^future:index:(NIFTY|NIFTYNXT50|FINNIFTY|BANKNIFTY|MIDCPNIFTY|NIFTYFPI)$/;
+const EQUITY_SYMBOL_PATTERN = /^[A-Z0-9][A-Z0-9&._-]{0,29}$/;
 
 class DerivativesError extends Error {
   constructor(code, message, options = {}) {
@@ -28,22 +31,30 @@ function validDate(value) {
 }
 
 function queryIdentity(query, requireExpiry) {
-  if (!query || typeof query !== "object" || query.market !== "index") {
-    throw new DerivativesError("INVALID_QUERY", "market must be index", { details: { field: "market" } });
+  if (!query || typeof query !== "object" || !["index", "equity"].includes(query.market)) {
+    throw new DerivativesError("INVALID_QUERY", "market must be index or equity", { details: { field: "market" } });
   }
-  if (typeof query.symbol !== "string" || !SUPPORTED_SYMBOLS.has(query.symbol)) {
-    throw new DerivativesError("INVALID_QUERY", "symbol must be NIFTY or BANKNIFTY", { details: { field: "symbol" } });
+  const validSymbol = query.market === "index"
+    ? typeof query.symbol === "string" && SUPPORTED_SYMBOLS.has(query.symbol)
+    : typeof query.symbol === "string" && EQUITY_SYMBOL_PATTERN.test(query.symbol);
+  if (!validSymbol) {
+    throw new DerivativesError("INVALID_QUERY", "symbol is not a supported derivative", { details: { field: "symbol" } });
   }
   if (requireExpiry && !validDate(query.expiry)) {
     throw new DerivativesError("INVALID_QUERY", "expiry must be an ISO calendar date", { details: { field: "expiry" } });
   }
-  return { market: "index", symbol: query.symbol, ...(requireExpiry ? { expiry: query.expiry } : {}) };
+  return { market: query.market, symbol: query.symbol, ...(requireExpiry ? { expiry: query.expiry } : {}) };
 }
 
 function keyIdentity(key) {
-  const match = typeof key === "string" ? KEY_PATTERN.exec(key) : null;
-  if (!match || !validDate(match[2])) throw new DerivativesError("INVALID_KEY", "key must identify a supported index option chain");
-  return { key, market: "index", symbol: match[1], expiry: match[2] };
+  if (typeof key !== "string") throw new DerivativesError("INVALID_KEY", "key must identify a supported derivative snapshot");
+  const option = OPTION_KEY_PATTERN.exec(key);
+  if (option && validDate(option[2])) return { key, kind: "option-chain", market: "index", symbol: option[1], expiry: option[2] };
+  const equity = EQUITY_KEY_PATTERN.exec(key);
+  if (equity && validDate(equity[2])) return { key, kind: "option-chain", market: "equity", symbol: equity[1], expiry: equity[2] };
+  const future = FUTURE_KEY_PATTERN.exec(key);
+  if (future) return { key, kind: "index-futures", market: "index", symbol: future[1] };
+  throw new DerivativesError("INVALID_KEY", "key must identify a supported derivative snapshot");
 }
 
 function retryAfterMs(value, now) {
@@ -130,7 +141,7 @@ class DerivativesAnalysis {
 
   getAnalysis(query) {
     const identity = queryIdentity(query, true);
-    const key = `index:${identity.symbol}:${identity.expiry}`;
+    const key = `${identity.market}:${identity.symbol}:${identity.expiry}`;
     const snapshot = this.scope.getSnapshot(key);
     if (!snapshot || !snapshot.data || !Array.isArray(snapshot.data.rows) || !snapshot.data.rows.length) {
       throw new DerivativesError("SNAPSHOT_UNAVAILABLE", "option chain snapshot unavailable", { details: { key } });
@@ -269,10 +280,20 @@ class DerivativesService {
     this.chainBudget = Math.max(1, Number(config.chainBudget == null ? 24 : config.chainBudget) || 24);
     this.metadataBudget = Math.max(1, Number(config.metadataBudget == null ? 4 : config.metadataBudget) || 4);
     this.allowClosedReview = Boolean(config.allowClosedReview);
+    this.futuresEnabled = Boolean(config.futuresEnabled);
+    this.stockOptionsEnabled = Boolean(config.stockOptionsEnabled);
+    if (this.futuresEnabled && typeof this.provider.getIndexFutures !== "function") {
+      throw new DerivativesError("CONFIG_ERROR", "provider must implement getIndexFutures when futures are enabled");
+    }
+    if (this.stockOptionsEnabled && typeof this.provider.getEquitySymbols !== "function") {
+      throw new DerivativesError("CONFIG_ERROR", "provider must implement getEquitySymbols when stock options are enabled");
+    }
 
     this.demands = new Map();
     this.contractCache = new Map();
     this.contractInflight = new Map();
+    this.equitySymbolsCache = null;
+    this.equitySymbolsInflight = null;
     this.metadataDate = null;
     this.budgets = { chain: { window: null, count: 0 }, metadata: { window: null, count: 0 } };
     this.activeCalls = 0;
@@ -283,11 +304,22 @@ class DerivativesService {
   }
 
   getContracts(query) {
-    if (this.closed) return Promise.reject(new DerivativesError("CLOSED", "derivatives service is closed"));
     const identity = queryIdentity(query, false);
+    if (identity.market === "equity") {
+      if (!this.stockOptionsEnabled) return Promise.reject(new DerivativesError("NOT_FOUND", "stock options are disabled"));
+      return this.getEquitySymbols().then((result) => {
+        if (!result.symbols.includes(identity.symbol)) throw new DerivativesError("INVALID_QUERY", "symbol is not available in NSE master quote");
+        return this.#getContracts(identity);
+      });
+    }
+    return this.#getContracts(identity);
+  }
+
+  #getContracts(identity) {
+    if (this.closed) return Promise.reject(new DerivativesError("CLOSED", "derivatives service is closed"));
     const date = String(this.tradingDate());
     this.#rollMetadataDate(date);
-    const cacheKey = `${date}:${identity.symbol}`;
+    const cacheKey = `${date}:${identity.market}:${identity.symbol}`;
     const cached = this.contractCache.get(cacheKey);
     if (cached) return Promise.resolve(clone(cached));
     const inFlight = this.contractInflight.get(cacheKey);
@@ -333,18 +365,73 @@ class DerivativesService {
     return request.then(clone);
   }
 
+  getEquitySymbols() {
+    if (this.closed) return Promise.reject(new DerivativesError("CLOSED", "derivatives service is closed"));
+    if (!this.stockOptionsEnabled) return Promise.reject(new DerivativesError("NOT_FOUND", "stock options are disabled"));
+    const date = String(this.tradingDate());
+    this.#rollMetadataDate(date);
+    if (this.equitySymbolsCache) return Promise.resolve(clone(this.equitySymbolsCache));
+    if (this.equitySymbolsInflight) return this.equitySymbolsInflight.then(clone);
+    if (this.now() < this.blockedUntil) {
+      return Promise.reject(new DerivativesError("UPSTREAM_BLOCK", "derivatives source is temporarily blocked", { retryAfterMs: this.blockedUntil - this.now() }));
+    }
+    if (this.activeCalls >= this.maxCalls || !this.#takeBudget("metadata")) {
+      return Promise.reject(new DerivativesError("REQUEST_BUDGET", "stock symbol request budget is exhausted", { retryAfterMs: this.#nextWindowDelay() }));
+    }
+    this.activeCalls += 1;
+    this.sourceCounters.metadataCalls += 1;
+    const request = Promise.resolve()
+      .then(() => this.provider.getEquitySymbols())
+      .then((result) => {
+        const saved = clone(result);
+        if (!this.closed && this.metadataDate === date) {
+          this.equitySymbolsCache = saved;
+          this.blockFailures = 0;
+          this.blockedUntil = 0;
+        }
+        return saved;
+      })
+      .catch((error) => {
+        if (!this.closed) {
+          this.sourceCounters.failures += 1;
+          if (this.#isBlocked(sourceCode(error))) {
+            const now = this.now();
+            const localBackoff = this.#registerBlock(now);
+            const coordinatorRetry = errorRetryAfterMs(error, now);
+            const delay = Math.min(300_000, Math.max(localBackoff, coordinatorRetry == null ? 0 : coordinatorRetry));
+            this.blockedUntil = Math.max(this.blockedUntil, now + delay);
+          }
+        }
+        throw this.#asPublicError(error);
+      })
+      .finally(() => {
+        this.activeCalls -= 1;
+        this.equitySymbolsInflight = null;
+      });
+    this.equitySymbolsInflight = request;
+    return request.then(clone);
+  }
+
   getAnalysis(query) {
     return clone(this.analysis.getAnalysis(query));
   }
 
   addDemand(query) {
+    return this.#addDemand(queryIdentity(query, true), "option-chain");
+  }
+
+  addFuturesDemand(query) {
+    if (!this.futuresEnabled) throw new DerivativesError("NOT_FOUND", "index futures are disabled");
+    return this.#addDemand(queryIdentity(query, false), "index-futures");
+  }
+
+  #addDemand(identity, kind) {
     if (this.closed) throw new DerivativesError("CLOSED", "derivatives service is closed");
-    const identity = queryIdentity(query, true);
-    const key = `index:${identity.symbol}:${identity.expiry}`;
+    const key = kind === "index-futures" ? `future:index:${identity.symbol}` : `${identity.market}:${identity.symbol}:${identity.expiry}`;
     let demand = this.demands.get(key);
     if (!demand) {
-      if (this.demands.size >= this.maxActiveKeys) throw new DerivativesError("CAPACITY", "at most two option chains may have active demand or grace retention");
-      demand = { ...identity, key, count: 0, timer: null, graceTimer: null, graceExpired: false, inFlight: null, nextAttemptAt: 0, closedReviewUsed: false };
+      if (this.demands.size >= this.maxActiveKeys) throw new DerivativesError("CAPACITY", "derivative demand capacity reached");
+      demand = { ...identity, kind, key, count: 0, timer: null, graceTimer: null, graceExpired: false, inFlight: null, nextAttemptAt: 0, closedReviewUsed: false };
       this.demands.set(key, demand);
     }
     demand.count += 1;
@@ -418,7 +505,7 @@ class DerivativesService {
     this.activeCalls += 1;
     this.sourceCounters.chainCalls += 1;
     const operation = Promise.resolve()
-      .then(() => this.provider.getOptionChain(identity))
+      .then(() => identity.kind === "index-futures" ? this.provider.getIndexFutures(identity) : this.provider.getOptionChain(identity))
       .then((snapshot) => this.#handleSuccess(identity.key, snapshot))
       .catch((error) => this.#handleFailure(identity.key, error))
       .finally(() => {
@@ -450,6 +537,8 @@ class DerivativesService {
         chainBudget: this.chainBudget,
         metadataBudget: this.metadataBudget,
         allowClosedReview: this.allowClosedReview,
+        futuresEnabled: this.futuresEnabled,
+        stockOptionsEnabled: this.stockOptionsEnabled,
       },
       activeKeys: [...this.demands.values()].map((entry) => ({
         key: entry.key,
@@ -475,6 +564,7 @@ class DerivativesService {
     }
     this.demands.clear();
     this.contractInflight.clear();
+    this.equitySymbolsInflight = null;
   }
 
   #release(key) {
@@ -552,7 +642,7 @@ class DerivativesService {
       ? { ...snapshot, state: "closed", reason: "market-closed", stale: true, upstreamState: snapshot.state }
       : snapshot;
     const stored = this.scope.ingestSnapshot(normalizedSnapshot);
-    if (!stored) return this.#handleFailure(key, new DerivativesError("SCHEMA_ERROR", "provider returned an invalid option-chain snapshot"));
+    if (!stored) return this.#handleFailure(key, new DerivativesError("SCHEMA_ERROR", "provider returned an invalid derivative snapshot"));
     this.#emitUpdate(stored, "snapshot");
     this.blockFailures = 0;
     this.blockedUntil = 0;
@@ -585,6 +675,11 @@ class DerivativesService {
     } else if (["SCHEMA_ERROR", "MALFORMED_JSON", "NON_JSON_RESPONSE", "IDENTITY_MISMATCH"].includes(code)) {
       state = "error";
       reason = "schema-error";
+    } else if (code === "CONFIG_ERROR") {
+      // Unconfigured endpoint: back off hard (5 min) so a config gap can't retry-spam upstream.
+      state = "error";
+      reason = "not-configured";
+      delay = 300_000;
     } else if (code === "NOT_FOUND") {
       state = "error";
       reason = "source-lag";
@@ -625,6 +720,10 @@ class DerivativesService {
       return new DerivativesError("SCHEMA_ERROR", "derivatives source returned invalid data", { cause: error });
     }
     if (code === "SOURCE_BUSY") return new DerivativesError("SOURCE_BUSY", "derivatives source is busy", { cause: error, retryAfterMs: errorRetryAfterMs(error, this.now()), retryAt: causeRetryAt(error) });
+    // A missing/misconfigured upstream endpoint (e.g. FEED_JSON.derivatives.masterQuoteEndpoint
+    // or .futuresEndpoint) never fixes itself — surface it verbatim instead of masking it as a
+    // generic, retryable "source request failed".
+    if (code === "CONFIG_ERROR") return new DerivativesError("CONFIG_ERROR", (error && error.message) || "derivatives endpoint is not configured", { cause: error });
     if (error instanceof DerivativesError) return error;
     return new DerivativesError("SOURCE_ERROR", "derivatives source request failed", { cause: error });
   }
@@ -664,6 +763,7 @@ class DerivativesService {
     if (this.metadataDate === date) return;
     this.metadataDate = date;
     this.contractCache.clear();
+    this.equitySymbolsCache = null;
   }
 }
 

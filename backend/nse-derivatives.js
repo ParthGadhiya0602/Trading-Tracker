@@ -1,6 +1,15 @@
 "use strict";
 
-const SUPPORTED_SYMBOLS = new Set(["NIFTY", "BANKNIFTY"]);
+const SUPPORTED_SYMBOLS = new Set(["NIFTY", "NIFTYNXT50", "FINNIFTY", "BANKNIFTY", "MIDCPNIFTY", "NIFTYFPI"]);
+const EQUITY_SYMBOL_PATTERN = /^[A-Z0-9][A-Z0-9&._-]{0,29}$/;
+const FUTURES_CATEGORIES = Object.freeze({
+  NIFTY: "nse50_fut",
+  NIFTYNXT50: "niftynxt50_fut",
+  FINNIFTY: "finnifty_fut",
+  BANKNIFTY: "nifty_bank_fut",
+  MIDCPNIFTY: "niftymidcap_fut",
+  NIFTYFPI: "niftyfpi_fut",
+});
 const MONTHS = {
   JAN: 1,
   FEB: 2,
@@ -170,7 +179,10 @@ function validateFactoryOptions(options) {
   if (!config || typeof config !== "object") throw configError("config is required");
   const contractInfoEndpoint = rootRelativeEndpoint(baseUrl, config.contractInfoEndpoint, "contractInfoEndpoint");
   const optionChainEndpoint = rootRelativeEndpoint(baseUrl, config.optionChainEndpoint, "optionChainEndpoint");
+  const masterQuoteEndpoint = config.masterQuoteEndpoint == null ? null : rootRelativeEndpoint(baseUrl, config.masterQuoteEndpoint, "masterQuoteEndpoint");
+  const futuresEndpoint = config.futuresEndpoint == null ? null : rootRelativeEndpoint(baseUrl, config.futuresEndpoint, "futuresEndpoint");
   const referer = rootRelativeEndpoint(baseUrl, config.referer, "referer");
+  const futuresReferer = config.futuresReferer == null ? referer : rootRelativeEndpoint(baseUrl, config.futuresReferer, "futuresReferer");
   if (!Array.isArray(config.enabledSymbols) || config.enabledSymbols.some((symbol) => !SUPPORTED_SYMBOLS.has(symbol))) {
     throw configError("enabledSymbols must contain only supported symbols", { field: "enabledSymbols" });
   }
@@ -178,14 +190,17 @@ function validateFactoryOptions(options) {
   if (typeof options.now !== "undefined" && typeof options.now !== "function") {
     throw configError("now must be a function", { field: "now" });
   }
-  return { baseUrl, contractInfoEndpoint, optionChainEndpoint, referer, enabledSymbols: new Set(config.enabledSymbols) };
+  return { baseUrl, contractInfoEndpoint, optionChainEndpoint, masterQuoteEndpoint, futuresEndpoint, referer, futuresReferer, enabledSymbols: new Set(config.enabledSymbols) };
 }
 
 function validateQuery(query, requireExpiry, enabledSymbols) {
-  if (!query || typeof query !== "object" || query.market !== "index") {
-    throw new ProviderError("INVALID_QUERY", "market must be index", { details: { field: "market" } });
+  if (!query || typeof query !== "object" || !["index", "equity"].includes(query.market)) {
+    throw new ProviderError("INVALID_QUERY", "market must be index or equity", { details: { field: "market" } });
   }
-  if (typeof query.symbol !== "string" || !enabledSymbols.has(query.symbol)) {
+  const validSymbol = query.market === "index"
+    ? typeof query.symbol === "string" && enabledSymbols.has(query.symbol)
+    : typeof query.symbol === "string" && EQUITY_SYMBOL_PATTERN.test(query.symbol);
+  if (!validSymbol) {
     throw new ProviderError("INVALID_QUERY", "symbol is not enabled", { details: { field: "symbol" } });
   }
   if (!requireExpiry) return null;
@@ -306,6 +321,28 @@ function createNseDerivatives(options) {
   const validated = validateFactoryOptions(options);
   const now = options.now || Date.now;
 
+  async function getEquitySymbols() {
+    if (!validated.masterQuoteEndpoint) throw configError("masterQuoteEndpoint is required for stock options", { field: "masterQuoteEndpoint" });
+    const url = new URL(validated.masterQuoteEndpoint, validated.baseUrl);
+    const payload = await readJson(options.fetchResponse, { url: url.toString(), referer: validated.referer });
+    if (!Array.isArray(payload)) throw schemaError("NSE master quote response must be an array");
+    const symbols = new Set();
+    let discardedSymbols = 0;
+    for (const raw of payload) {
+      const symbol = typeof raw === "string" ? raw.trim().toUpperCase() : "";
+      if (!EQUITY_SYMBOL_PATTERN.test(symbol)) discardedSymbols += 1;
+      else symbols.add(symbol);
+    }
+    if (!symbols.size) throw schemaError("NSE master quote response has no valid symbols");
+    return {
+      kind: "equity-symbols",
+      market: "equity",
+      symbols: [...symbols].sort((a, b) => a.localeCompare(b)),
+      receivedAt: istIso(now()),
+      diagnostics: { totalSymbols: payload.length, validSymbols: symbols.size, discardedSymbols },
+    };
+  }
+
   async function getContracts(query) {
     validateQuery(query, false, validated.enabledSymbols);
     const url = new URL(validated.contractInfoEndpoint, validated.baseUrl);
@@ -339,7 +376,7 @@ function createNseDerivatives(options) {
     }
     return {
       kind: "option-contracts",
-      market: "index",
+      market: query.market,
       symbol: query.symbol,
       expiries: [...expiries].sort(([a], [b]) => a.localeCompare(b)).map(([expiry, providerValue]) => ({ expiry, providerValue })),
       strikes: [...strikes].sort((a, b) => a - b),
@@ -352,7 +389,7 @@ function createNseDerivatives(options) {
   async function getOptionChain(query) {
     const expiry = validateQuery(query, true, validated.enabledSymbols);
     const url = new URL(validated.optionChainEndpoint, validated.baseUrl);
-    url.searchParams.set("type", "Indices");
+    url.searchParams.set("type", query.market === "equity" ? "Equity" : "Indices");
     url.searchParams.set("symbol", query.symbol);
     url.searchParams.set("expiry", providerExpiry(expiry));
     const payload = await readJson(options.fetchResponse, { url: url.toString(), referer: validated.referer });
@@ -418,8 +455,8 @@ function createNseDerivatives(options) {
     const partial = rows.some((row) => !row.call || !row.put);
     return {
       kind: "option-chain",
-      key: `index:${query.symbol}:${expiry}`,
-      market: "index",
+      key: `${query.market}:${query.symbol}:${expiry}`,
+      market: query.market,
       symbol: query.symbol,
       expiry,
       transport: "rest",
@@ -440,7 +477,85 @@ function createNseDerivatives(options) {
     };
   }
 
-  return { getContracts, getOptionChain };
+  async function getIndexFutures(query) {
+    validateQuery(query, false, validated.enabledSymbols);
+    if (query.market !== "index") throw new ProviderError("INVALID_QUERY", "futures market must be index", { details: { field: "market" } });
+    if (!validated.futuresEndpoint) throw configError("futuresEndpoint is required for index futures", { field: "futuresEndpoint" });
+    const url = new URL(validated.futuresEndpoint, validated.baseUrl);
+    url.searchParams.set("index", FUTURES_CATEGORIES[query.symbol]);
+    const payload = await readJson(options.fetchResponse, { url: url.toString(), referer: validated.futuresReferer });
+    const records = dataRoot(payload);
+    const rawRows = Array.isArray(records.data) ? records.data : Array.isArray(payload.data) ? payload.data : null;
+    if (!rawRows) throw schemaError("NSE futures response has no data rows");
+
+    const rows = [];
+    let discardedRows = 0;
+    for (const raw of rawRows) {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw) || String(raw.instrumentType || "").toUpperCase() !== "FUTIDX") {
+        discardedRows += 1;
+        continue;
+      }
+      if (String(raw.underlying || "").trim().toUpperCase() !== query.symbol) {
+        discardedRows += 1;
+        continue;
+      }
+      try {
+        validateIdentity(raw.underlying, query.symbol, null, "underlying");
+      } catch (error) {
+        if (error && error.code === "IDENTITY_MISMATCH") {
+          discardedRows += 1;
+          continue;
+        }
+        throw error;
+      }
+      const expiry = canonicalExpiry(String(raw.expiryDate || ""));
+      const providerContractId = stringOrNull(raw.identifier);
+      if (!expiry || !providerContractId) {
+        discardedRows += 1;
+        continue;
+      }
+      rows.push({
+        providerContractId,
+        contract: stringOrNull(raw.contract),
+        expiry,
+        lastPrice: numberOrNull(raw.lastPrice),
+        change: numberOrNull(raw.change),
+        percentChange: numberOrNull(raw.pChange == null ? raw.PChange : raw.pChange),
+        openPrice: numberOrNull(raw.openPrice),
+        highPrice: numberOrNull(raw.highPrice),
+        lowPrice: numberOrNull(raw.lowPrice),
+        previousClose: numberOrNull(raw.closePrice),
+        volume: numberOrNull(raw.volume),
+        turnover: numberOrNull(raw.totalTurnover == null ? raw.value : raw.totalTurnover),
+        openInterest: numberOrNull(raw.openInterest),
+        trades: numberOrNull(raw.noOfTrades),
+        underlyingValue: numberOrNull(raw.underlyingValue),
+      });
+    }
+    rows.sort((a, b) => a.expiry.localeCompare(b.expiry));
+    if (!rows.length) throw schemaError("NSE futures response has no valid index-futures rows", { totalRows: rawRows.length, discardedRows });
+    const marketStatus = payload.marketStatus && typeof payload.marketStatus === "object" ? payload.marketStatus : records.marketStatus;
+    const marketStatusText = marketStatus && typeof marketStatus === "object"
+      ? `${marketStatus.marketOpenOrClose || ""} ${marketStatus.marketStatusMessage || ""}`
+      : String(marketStatus || "");
+    const closed = /closed?/i.test(marketStatusText);
+    return {
+      kind: "index-futures",
+      key: `future:index:${query.symbol}`,
+      market: "index",
+      symbol: query.symbol,
+      transport: "rest",
+      stale: closed,
+      state: closed ? "closed" : "live",
+      reason: closed ? "market-closed" : null,
+      data: { rows },
+      sourceTimestamp: sourceTimestamp(payload.timestamp || records.timestamp),
+      receivedAt: istIso(now()),
+      diagnostics: { totalRows: rawRows.length, validRows: rows.length, discardedRows },
+    };
+  }
+
+  return { getEquitySymbols, getContracts, getOptionChain, getIndexFutures };
 }
 
 module.exports = { createNseDerivatives, ProviderError };

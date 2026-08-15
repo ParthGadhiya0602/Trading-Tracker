@@ -4,9 +4,11 @@
   "use strict";
   const $ = (s) => document.querySelector(s);
   const esc = (v) => String(v == null ? "" : v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-  let symbol = "NIFTY", expiry = null, stream = null, generation = 0, sequence = -1;
-  let snapshot = null, analysis = null, active = false, bound = false, centerOnNext = false, hiddenTimer = null;
+  let instrument = "options", optionMarket = "index", indexSymbol = "NIFTY", equitySymbol = "", symbol = "NIFTY";
+  let expiry = null, stream = null, generation = 0, sequence = -1;
+  let snapshot = null, analysis = null, active = false, bound = false, centerOnNext = false, hiddenTimer = null, futuresAvailable = false;
   const expandedStrikes = new Set();
+  const equitySymbols = new Set();
 
   async function api(path) {
     const res = await fetch(path, { headers: { "X-Requested-With": "XMLHttpRequest" } });
@@ -17,6 +19,7 @@
     return data;
   }
   const numeric = (value, digits = 0) => value == null || !Number.isFinite(Number(value)) ? "—" : Number(value).toLocaleString("en-IN", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  const finite = (value) => value == null || !Number.isFinite(Number(value)) ? null : Number(value);
   const percent = (value) => value == null || !Number.isFinite(Number(value)) ? "—" : `${numeric(value, 2)}%`;
   const price = (value) => numeric(value, 2);
   const time = (value) => value ? new Date(value).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "medium" }) : "Unavailable";
@@ -33,7 +36,18 @@
     node.textContent = fallback || stateCopy(envelope) + retry(envelope && envelope.retryAt);
   }
   function closeStream() { generation += 1; if (stream) stream.close(); stream = null; }
-  function selectedUrl(path) { return `${path}?symbol=${encodeURIComponent(symbol)}&expiry=${encodeURIComponent(expiry)}`; }
+  function selectedMarket() { return instrument === "futures" ? "index" : optionMarket; }
+  function optionApiPath(name) { return optionMarket === "equity" ? `/api/derivatives/equities/${name}` : `/api/derivatives/${name}`; }
+  function selectedUrl(path) {
+    const params = new URLSearchParams({ symbol });
+    if (instrument === "options") params.set("expiry", expiry);
+    return `${path}?${params}`;
+  }
+  function clearExpiry(message) {
+    const select = $("#foExpiry");
+    select.disabled = true;
+    select.innerHTML = `<option>${esc(message)}</option>`;
+  }
   function resetSelection() { closeStream(); sequence = -1; snapshot = null; analysis = null; centerOnNext = true; expandedStrikes.clear(); render(); }
 
   async function loadContracts() {
@@ -42,10 +56,10 @@
     const select = $("#foExpiry"); select.disabled = true; select.innerHTML = "<option>Loading expiries…</option>";
     setState({ state: "loading" }, `Loading ${symbol} expiries…`); render();
     try {
-      const contracts = await api(`/api/derivatives/contracts?symbol=${encodeURIComponent(symbol)}`);
+      const contracts = await api(`${optionApiPath("contracts")}?symbol=${encodeURIComponent(symbol)}`);
       const expiries = Array.isArray(contracts.expiries) ? contracts.expiries : [];
       if (!active || mine !== generation) return;
-      if (!expiries.length) { select.innerHTML = "<option>No expiries available</option>"; setState({ state: "error" }, "No expiries are available for this index."); return; }
+      if (!expiries.length) { select.innerHTML = "<option>No expiries available</option>"; setState({ state: "error" }, "No expiries are available for this symbol."); return; }
       expiry = expiries[0].expiry;
       select.innerHTML = expiries.map((entry) => `<option value="${esc(entry.expiry)}">${esc(entry.expiry)}</option>`).join("");
       select.disabled = false; openStream();
@@ -55,11 +69,68 @@
       setState({ state: error.status === 429 ? "rate-limited" : error.status === 503 ? "blocked" : "error" }, `Could not load expiries. ${error.message}`);
     }
   }
+  async function loadEquitySymbols() {
+    closeStream(); expiry = null; snapshot = null; analysis = null; sequence = -1; centerOnNext = true; expandedStrikes.clear();
+    const mine = generation, input = $("#foEquity"), list = $("#foEquitySymbols");
+    input.disabled = true;
+    clearExpiry("Select a stock first");
+    setState({ state: "loading" }, "Loading stock-option symbols…");
+    render();
+    try {
+      const result = await api("/api/derivatives/equities");
+      if (!active || mine !== generation) return;
+      const symbols = Array.isArray(result.symbols) ? result.symbols : [];
+      equitySymbols.clear();
+      for (const value of symbols) if (typeof value === "string") equitySymbols.add(value);
+      list.innerHTML = [...equitySymbols].map((value) => `<option value="${esc(value)}"></option>`).join("");
+      input.disabled = false;
+      if (equitySymbol && equitySymbols.has(equitySymbol)) {
+        input.value = equitySymbol;
+        symbol = equitySymbol;
+        void loadContracts();
+      } else {
+        equitySymbol = ""; symbol = ""; input.value = "";
+        setState({ state: "loading" }, "Select a stock symbol to load its option contracts.");
+        render();
+      }
+    } catch (error) {
+      if (!active || mine !== generation) return;
+      setState({ state: error.status === 429 ? "rate-limited" : error.status === 503 ? "blocked" : "error" }, `Could not load stock symbols. ${error.message}`);
+    }
+  }
+  async function loadFutures() {
+    closeStream(); expiry = null; snapshot = null; analysis = null; sequence = -1; centerOnNext = false; expandedStrikes.clear();
+    futuresAvailable = false;
+    const mine = generation;
+    setState({ state: "loading" }, `Loading ${symbol} futures…`);
+    render();
+    try {
+      const status = await api("/api/derivatives/status");
+      if (!active || mine !== generation) return;
+      if (!(status.config && status.config.futuresEnabled)) {
+        setState({ state: "error" }, "Index futures are disabled. Enable DERIVATIVES_FUTURES_ENABLED and restart the server.");
+        return;
+      }
+      futuresAvailable = true;
+      openStream();
+    } catch (error) {
+      if (!active || mine !== generation) return;
+      setState({ state: error.status === 429 ? "rate-limited" : error.status === 503 ? "blocked" : "error" }, `Could not load index futures. ${error.message}`);
+    }
+  }
+  function loadSelected() {
+    if (instrument === "futures") void loadFutures();
+    else if (optionMarket === "equity" && !equitySymbols.size) void loadEquitySymbols();
+    else if (symbol) void loadContracts();
+    else { resetSelection(); clearExpiry("Select a stock first"); setState({ state: "loading" }, "Select a stock symbol to load its option contracts."); }
+  }
   function openStream() {
-    if (!active || !expiry || !navigator.onLine || document.hidden || !window.EventSource) return;
+    if (!active || (instrument === "options" && !expiry) || (instrument === "futures" && !futuresAvailable) || !navigator.onLine || document.hidden || !window.EventSource) return;
     closeStream(); const mine = generation;
-    setState({ state: "loading" }, snapshot ? "Refreshing selected chain; last snapshot remains visible." : "Loading selected chain…");
-    const es = stream = new EventSource(selectedUrl("/api/derivatives/stream"));
+    const subject = instrument === "futures" ? "index futures" : "option chain";
+    setState({ state: "loading" }, snapshot ? `Refreshing ${subject}; last snapshot remains visible.` : `Loading ${subject}…`);
+    const path = instrument === "futures" ? "/api/derivatives/futures/stream" : optionApiPath("stream");
+    const es = stream = new EventSource(selectedUrl(path));
     es.addEventListener("snapshot", (event) => receive(event, mine));
     es.addEventListener("status", (event) => receive(event, mine));
     es.onerror = () => { if (mine === generation && active) setState(snapshot || { state: "error" }, "Stream reconnecting; last snapshot remains visible."); };
@@ -68,18 +139,20 @@
     if (mine !== generation || !active) return;
     let next; try { next = JSON.parse(event.data); } catch (_) { return; }
     const nextSequence = Number(next && next.sequence), isSnapshot = event.type === "snapshot";
-    if (!next || next.symbol !== symbol || next.expiry !== expiry || !Number.isFinite(nextSequence) || (isSnapshot ? nextSequence <= sequence : nextSequence < sequence)) return;
+    const expectedKind = instrument === "futures" ? "index-futures" : "option-chain";
+    if (!next || next.kind !== expectedKind || next.market !== selectedMarket() || next.symbol !== symbol || (instrument === "options" && next.expiry !== expiry) || !Number.isFinite(nextSequence) || (isSnapshot ? nextSequence <= sequence : nextSequence < sequence)) return;
     sequence = Math.max(sequence, nextSequence);
     if (next.data && Array.isArray(next.data.rows) && next.data.rows.length) snapshot = next;
     else if (snapshot) snapshot = { ...snapshot, ...next, data: snapshot.data };
     else snapshot = next;
     setState(snapshot); render();
-    if (isSnapshot && snapshot.data) void loadAnalysis(mine, nextSequence, symbol, expiry);
+    if (isSnapshot && snapshot.data && instrument === "options") void loadAnalysis(mine, nextSequence, selectedMarket(), symbol, expiry);
   }
-  async function loadAnalysis(mine, expectedSequence, expectedSymbol, expectedExpiry) {
+  async function loadAnalysis(mine, expectedSequence, expectedMarket, expectedSymbol, expectedExpiry) {
     try {
-      const next = await api(`/api/derivatives/analysis?symbol=${encodeURIComponent(expectedSymbol)}&expiry=${encodeURIComponent(expectedExpiry)}`);
-      if (mine !== generation || expectedSymbol !== symbol || expectedExpiry !== expiry || Number(next.sequence) !== expectedSequence || sequence !== expectedSequence) return;
+      const path = expectedMarket === "equity" ? "/api/derivatives/equities/analysis" : "/api/derivatives/analysis";
+      const next = await api(`${path}?symbol=${encodeURIComponent(expectedSymbol)}&expiry=${encodeURIComponent(expectedExpiry)}`);
+      if (mine !== generation || expectedMarket !== selectedMarket() || expectedSymbol !== symbol || expectedExpiry !== expiry || Number(next.sequence) !== expectedSequence || sequence !== expectedSequence) return;
       analysis = next;
       render();
       if (centerOnNext) { centerOnNext = false; requestAnimationFrame(centerAtm); }
@@ -88,6 +161,22 @@
   function fact(label, value, detail = "") { return `<div class="fo-fact"><span>${esc(label)}</span><strong>${value}</strong>${detail ? `<small>${esc(detail)}</small>` : ""}</div>`; }
   function renderFacts() {
     const host = $("#foFacts"), meta = $("#foFactsMeta"); if (!host) return;
+    if (instrument === "futures") {
+      const rows = snapshot && snapshot.data && Array.isArray(snapshot.data.rows) ? snapshot.data.rows : [];
+      meta.textContent = snapshot ? `Source ${time(snapshot.sourceTimestamp || snapshot.receivedAt)}` : "";
+      if (!rows.length) { host.innerHTML = '<span class="fo-empty">Facts unavailable for this source snapshot.</span>'; return; }
+      const near = rows[0], futuresPrice = finite(near.lastPrice), underlying = finite(near.underlyingValue);
+      const basisValue = futuresPrice == null || underlying == null ? null : futuresPrice - underlying;
+      const basisPercent = basisValue != null && underlying ? basisValue / underlying * 100 : null;
+      host.innerHTML = [
+        fact("Underlying", price(near.underlyingValue)), fact("Near expiry", esc(near.expiry)),
+        fact("Near futures LTP", price(near.lastPrice)), fact("Basis", basisValue == null ? "Unavailable" : price(basisValue)),
+        fact("Basis %", basisPercent == null ? "Unavailable" : percent(basisPercent)), fact("Open interest", numeric(near.openInterest)),
+        fact("Volume", numeric(near.volume)), fact("Day range", `${price(near.lowPrice)} – ${price(near.highPrice)}`),
+        fact("Contracts", numeric(rows.length)),
+      ].join("");
+      return;
+    }
     const facts = analysis && analysis.facts;
     const liquidity = analysis && analysis.diagnostics && analysis.diagnostics.liquidity;
     meta.textContent = snapshot ? `Source ${time(snapshot.sourceTimestamp || snapshot.receivedAt)}` : "";
@@ -107,11 +196,9 @@
     const values = [value("openInterest", "fo-oi"), value("changeInOpenInterest", "fo-change"), value("volume", "fo-volume"), value("impliedVolatility", "fo-iv", percent), value("bidPrice", "fo-bid", price), value("askPrice", "fo-ask", price), value("lastPrice", "fo-ltp", price)];
     return (call ? values : values.slice().reverse()).join("");
   }
-  function render() {
-    const body = $("#foBody"), meta = $("#foChainMeta"), source = $("#foSource"), center = $("#foCenter"), wrap = $("#foTableWrap"); if (!body) return;
+  function renderOptions() {
+    const body = $("#foBody"), meta = $("#foChainMeta"), wrap = $("#foTableWrap");
     const preservedScroll = wrap && !centerOnNext ? wrap.scrollTop : null;
-    renderFacts(); center.disabled = !(snapshot && snapshot.data);
-    source.textContent = snapshot ? `Source: ${time(snapshot.sourceTimestamp || snapshot.receivedAt)}` : "Source: not loaded";
     if (!snapshot || !snapshot.data || !Array.isArray(snapshot.data.rows)) { body.innerHTML = '<tr><td colspan="15" class="fo-empty">Loading option chain…</td></tr>'; meta.textContent = ""; return; }
     const atm = analysis && analysis.facts && analysis.facts.atm && analysis.facts.atm.strike;
     const rows = snapshot.data.rows.slice().sort((a, b) => Number(a.strike) - Number(b.strike));
@@ -126,6 +213,36 @@
     }).join("");
     if (wrap && preservedScroll != null) wrap.scrollTop = preservedScroll;
   }
+  function renderFutures() {
+    const body = $("#foFutureBody"), meta = $("#foChainMeta"), wrap = $("#foFuturesTableWrap");
+    const preservedScroll = wrap ? wrap.scrollTop : 0;
+    const rows = snapshot && snapshot.data && Array.isArray(snapshot.data.rows) ? snapshot.data.rows : [];
+    if (!rows.length) { body.innerHTML = '<tr><td colspan="11" class="fo-empty">Loading index futures…</td></tr>'; meta.textContent = ""; return; }
+    meta.textContent = `${rows.length} contracts · nearest expiry first`;
+    body.innerHTML = rows.map((row) => {
+      const futuresPrice = finite(row.lastPrice), underlying = finite(row.underlyingValue);
+      const basis = futuresPrice == null || underlying == null ? null : futuresPrice - underlying;
+      const change = finite(row.change), changeClass = change > 0 ? "up" : change < 0 ? "down" : "";
+      return `<tr><td>${esc(row.expiry)}</td><td class="num">${price(row.lastPrice)}</td><td class="num ${changeClass}">${price(row.change)}</td><td class="num ${changeClass}">${percent(row.percentChange)}</td><td class="num fo-future-ohl">${price(row.openPrice)}</td><td class="num fo-future-ohl">${price(row.highPrice)}</td><td class="num fo-future-ohl">${price(row.lowPrice)}</td><td class="num">${price(row.underlyingValue)}</td><td class="num">${basis == null ? "—" : price(basis)}</td><td class="num fo-future-activity">${numeric(row.openInterest)}</td><td class="num fo-future-activity">${numeric(row.volume)}</td></tr>`;
+    }).join("");
+    wrap.scrollTop = preservedScroll;
+  }
+  function render() {
+    const optionWrap = $("#foTableWrap"), futuresWrap = $("#foFuturesTableWrap"), marketControl = $("#foOptionMarketSeg"), indexControl = $("#foIndexControl"), equityControl = $("#foEquityControl"), expiryControl = $("#foExpiryControl"), center = $("#foCenter"), title = $("#foChainTitle"), source = $("#foSource");
+    const futures = instrument === "futures";
+    marketControl.hidden = futures;
+    indexControl.hidden = !futures && optionMarket === "equity";
+    equityControl.hidden = futures || optionMarket !== "equity";
+    optionWrap.hidden = futures;
+    futuresWrap.hidden = !futures;
+    expiryControl.hidden = futures;
+    center.hidden = futures;
+    center.disabled = futures || !(snapshot && snapshot.data);
+    title.textContent = futures ? "Index futures" : "Option chain";
+    source.textContent = snapshot ? `Source: ${time(snapshot.sourceTimestamp || snapshot.receivedAt)}` : "Source: not loaded";
+    renderFacts();
+    if (futures) renderFutures(); else renderOptions();
+  }
   function centerAtm() { const row = $("#foBody .fo-atm"), wrap = $("#foTableWrap"); if (row && wrap) wrap.scrollTop = Math.max(0, row.offsetTop - wrap.clientHeight / 2 + row.offsetHeight / 2); }
   function toggleRow(row) {
     const detail = document.getElementById(row.dataset.detail);
@@ -139,7 +256,10 @@
   }
   function bind() {
     if (bound) return; bound = true;
-    $("#foSymbolSeg").addEventListener("click", (event) => { const button = event.target.closest("[data-symbol]"); if (!button || button.dataset.symbol === symbol) return; symbol = button.dataset.symbol; $$("#foSymbolSeg .seg").forEach((node) => { const on = node === button; node.classList.toggle("active", on); node.setAttribute("aria-selected", String(on)); }); void loadContracts(); });
+    $("#foInstrumentSeg").addEventListener("click", (event) => { const button = event.target.closest("[data-instrument]"); if (!button || button.dataset.instrument === instrument) return; instrument = button.dataset.instrument; symbol = instrument === "futures" || optionMarket === "index" ? indexSymbol : equitySymbol; $$("#foInstrumentSeg .seg").forEach((node) => { const on = node === button; node.classList.toggle("active", on); node.setAttribute("aria-selected", String(on)); }); loadSelected(); });
+    $("#foOptionMarketSeg").addEventListener("click", (event) => { const button = event.target.closest("[data-option-market]"); if (!button || button.dataset.optionMarket === optionMarket) return; optionMarket = button.dataset.optionMarket; symbol = optionMarket === "index" ? indexSymbol : equitySymbol; $$("#foOptionMarketSeg .seg").forEach((node) => { const on = node === button; node.classList.toggle("active", on); node.setAttribute("aria-selected", String(on)); }); loadSelected(); });
+    $("#foSymbol").addEventListener("change", (event) => { if (event.target.value === indexSymbol) return; indexSymbol = event.target.value; if (instrument === "futures" || optionMarket === "index") { symbol = indexSymbol; loadSelected(); } });
+    $("#foEquity").addEventListener("change", (event) => { const value = event.target.value.trim().toUpperCase(); event.target.value = value; if (!equitySymbols.has(value)) { equitySymbol = ""; symbol = ""; resetSelection(); clearExpiry("Select a stock first"); setState({ state: "error" }, "Select a stock from the NSE symbol list."); return; } if (value === equitySymbol) return; equitySymbol = value; symbol = value; loadSelected(); });
     $("#foExpiry").addEventListener("change", (event) => { expiry = event.target.value; resetSelection(); openStream(); });
     $("#foCenter").addEventListener("click", centerAtm);
     $("#foBody").addEventListener("click", (event) => { const row = event.target.closest(".fo-data-row"); if (row) toggleRow(row); });
@@ -149,6 +269,6 @@
     document.addEventListener("visibilitychange", () => { if (!active) return; if (document.hidden) hiddenTimer = setTimeout(closeStream, 30000); else { clearTimeout(hiddenTimer); hiddenTimer = null; openStream(); } });
   }
   const $$ = (s) => document.querySelectorAll(s);
-  window.__initDerivatives = () => { active = true; bind(); if (!expiry) void loadContracts(); else openStream(); };
+  window.__initDerivatives = () => { active = true; bind(); if (!expiry) loadSelected(); else openStream(); };
   window.__stopDerivatives = () => { active = false; clearTimeout(hiddenTimer); hiddenTimer = null; closeStream(); };
 })();

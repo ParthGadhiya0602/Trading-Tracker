@@ -26,13 +26,20 @@ function copy(value) {
   return value == null ? value : structuredClone(value);
 }
 
-const DERIVATIVE_KEY = /^index:(NIFTY|BANKNIFTY):(\d{4}-\d{2}-\d{2})$/;
+const OPTION_KEY = /^index:(NIFTY|NIFTYNXT50|FINNIFTY|BANKNIFTY|MIDCPNIFTY|NIFTYFPI):(\d{4}-\d{2}-\d{2})$/;
+const EQUITY_OPTION_KEY = /^equity:([A-Z0-9][A-Z0-9&._-]{0,29}):(\d{4}-\d{2}-\d{2})$/;
+const FUTURE_KEY = /^future:index:(NIFTY|NIFTYNXT50|FINNIFTY|BANKNIFTY|MIDCPNIFTY|NIFTYFPI)$/;
 const DERIVATIVE_STATES = new Set(["loading", "live", "partial", "closed", "stale", "blocked", "rate-limited", "error"]);
 const STALE_DERIVATIVE_STATES = new Set(["closed", "stale", "blocked", "rate-limited", "error"]);
 
 function derivativeIdentity(key) {
-  const match = typeof key === "string" ? DERIVATIVE_KEY.exec(key) : null;
-  return match ? { key, market: "index", symbol: match[1], expiry: match[2] } : null;
+  if (typeof key !== "string") return null;
+  const option = OPTION_KEY.exec(key);
+  if (option) return { key, kind: "option-chain", market: "index", symbol: option[1], expiry: option[2] };
+  const equity = EQUITY_OPTION_KEY.exec(key);
+  if (equity) return { key, kind: "option-chain", market: "equity", symbol: equity[1], expiry: equity[2] };
+  const future = FUTURE_KEY.exec(key);
+  return future ? { key, kind: "index-futures", market: "index", symbol: future[1] } : null;
 }
 
 function sourceMs(value) {
@@ -55,7 +62,8 @@ class DerivativeScope {
   #validSnapshot(snapshot) {
     const identity = derivativeIdentity(snapshot && snapshot.key);
     if (!identity || !snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return null;
-    if (snapshot.kind !== "option-chain" || snapshot.market !== identity.market || snapshot.symbol !== identity.symbol || snapshot.expiry !== identity.expiry) return null;
+    if (snapshot.kind !== identity.kind || snapshot.market !== identity.market || snapshot.symbol !== identity.symbol) return null;
+    if (identity.expiry && snapshot.expiry !== identity.expiry) return null;
     if (!DERIVATIVE_STATES.has(snapshot.state) || !snapshot.data || typeof snapshot.data !== "object" || !Array.isArray(snapshot.data.rows) || snapshot.data.rows.length === 0) return null;
     return identity;
   }
@@ -66,7 +74,7 @@ class DerivativeScope {
     const previous = this.entries.get(identity.key);
     const incomingSource = sourceMs(snapshot.sourceTimestamp);
     const previousSource = previous && sourceMs(previous.sourceTimestamp);
-    if (previous) {
+    if (previous && previous.data) {
       if (incomingSource != null && previousSource != null && incomingSource < previousSource) return null;
       const sourceOrdersSnapshot = incomingSource != null && previousSource != null && incomingSource > previousSource;
       if (!sourceOrdersSnapshot) {
@@ -96,7 +104,6 @@ class DerivativeScope {
     if (!DERIVATIVE_STATES.has(requestedState) || requestedState === "live" || requestedState === "partial") return null;
 
     const next = previous ? copy(previous) : {
-      kind: "option-chain",
       ...identity,
       data: null,
       sourceTimestamp: null,
