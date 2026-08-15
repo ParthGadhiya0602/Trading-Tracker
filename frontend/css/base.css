@@ -690,6 +690,19 @@
         background: var(--flat);
         opacity: 0.5;
       }
+      /* Hide scrollbars app-wide (dashboard, F&O, trades, the page itself) — scrolling still
+         works via wheel/trackpad/touch/keys, there's just no visible bar. Kills the default
+         white scrollbar without theming one. */
+      * {
+        scrollbar-width: none;      /* Firefox */
+        -ms-overflow-style: none;   /* legacy Edge/IE */
+      }
+      ::-webkit-scrollbar {         /* Chrome / Safari / Edge */
+        width: 0;
+        height: 0;
+        display: none;
+      }
+
       /* the table itself scrolls, both directions; header + first column stay put */
       .tablewrap,
       #alertList,
