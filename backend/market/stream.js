@@ -2,8 +2,8 @@
 /**
  * Live WS feed (Approach A, open-session only). Zero dependencies - uses Node's built-in
  * `WebSocket` global provided by the required Node 24 LTS runtime. Sources come ONLY from
- * `feed.stream` (FEED_JSON env,
- * never read here directly - the caller passes the already-loaded `feed` block).
+ * `feed.stream` (assembled from MARKET_* env variables; never read here directly -
+ * the caller passes the already-loaded `feed` block).
  *
  * Exposes a StreamClient with start({feed, onTick, isOpen, log, userAgent}) / stop(),
  * exported as a shared singleton (drop-in for the old function-module API). Opens one socket
@@ -173,7 +173,7 @@ class StreamClient {
     this.sockets = [];
   }
 
-  // start({ feed, onTick, isOpen, log, userAgent }) - feed is the parsed FEED_JSON object
+  // start({ feed, onTick, isOpen, log, userAgent }) - feed is the assembled market config
   // (feed.stream holds wsBase/origin/constituents/levels). Safe to call when feed.stream is
   // missing/incomplete: it simply connects nothing.
   start(o) {
