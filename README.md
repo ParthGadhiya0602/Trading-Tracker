@@ -30,9 +30,9 @@ mobile. Light/dark follow the system theme.
 
 - **Node.js 24 LTS (24.11+)**. With nvm, run `nvm use`; otherwise check with
   `node --version` and install a supported 24.x LTS release.
-- **Environment variables** for all config (see `.env.sample`): `AUTH_PASSWORD_PEPPER` + `FEED_JSON`
-  are required; `MONGO_URI` / Telegram / LLM are optional. There is **no config file** — nothing
-  secret gets committed or uploaded.
+- **Environment variables** for all config (see `.env.sample`): `AUTH_PASSWORD_PEPPER`,
+  `MARKET_BASE_URL`, and `MARKET_INDICES_ENDPOINT` are required; MongoDB, streaming,
+  derivatives, Telegram, and LLM settings are optional.
 - A network the data source answers on — home/office broadband is fine; VPN/datacentre IPs
   are often blocked (HTTP 401/403).
 - `npm install` installs the MongoDB driver declared by the backend. The frontend still has
@@ -52,9 +52,9 @@ mobile. Light/dark follow the system theme.
    openssl rand -hex 32
    ```
    Back it up; don't rotate it without resetting every user's password.
-3. Set **`FEED_JSON`** in `.env` — the data-source `feed` block as **one-line JSON**
-   (`base`, `indicesEndpoint`, `preopenEndpoint`, `referer`, `warmupPaths`, optional cash
-   `stream`, and optional `derivatives`). The endpoints aren't shipped in the repo.
+3. Fill the grouped **`MARKET_*`** variables in `.env`. The configuration adapter rebuilds
+   the internal feed object; JSON escaping is not required. Stream origins reuse
+   `MARKET_BASE_URL`, and both WSS transports reuse `MARKET_STREAM_BASE_URL`.
 4. (Optional) Set `MONGO_URI` (Atlas), `TELEGRAM_BOT_TOKEN`, `LLM_*`.
 5. Start the app (see **Running**) and open it; the first run shows a **Create admin** screen.
 
@@ -66,7 +66,8 @@ mobile. Light/dark follow the system theme.
 |---|---|
 | `AUTH_PASSWORD_PEPPER` | **Required** (>= 32 chars, `openssl rand -hex 32`). Replaces `auth.passwordPepper`. |
 | `MONGO_URI` | MongoDB Atlas connection string (omit for local file storage). |
-| `FEED_JSON` | The whole `feed` block as **one-line JSON** — the data-source endpoints. |
+| `MARKET_BASE_URL` / `MARKET_INDICES_ENDPOINT` | Required market origin and index REST endpoint. |
+| `MARKET_*` | Optional REST, index-stream, derivatives, and commodity paths grouped in `.env.sample`. |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_BOT_USERNAME` | Telegram bot (optional). Replace `telegram.*`. |
 | `LLM_PROVIDER` / `LLM_API_KEY` / `LLM_MODEL` / `LLM_TEMPERATURE` / `LLM_MAX_TOKENS` | LLM analysis (dormant without a key). `LLM_ENABLED=false` forces off. |
 
@@ -76,10 +77,11 @@ mobile. Light/dark follow the system theme.
 |---|---|
 | `PORT` | HTTP port (default `8787`). |
 | `HOST` | Bind address (default `127.0.0.1`). Set `0.0.0.0` to accept external connections directly (e.g. an EC2 security group). |
-| `STREAM_WS=1` | Enable the live WebSocket feed (needs `feed.stream`); serves SSE at `/api/stream`. Off = REST polling. |
+| `STREAM_WS=1` | Enable configured index and derivative WebSocket feeds; serves index SSE at `/api/stream`. Off = REST polling. |
 | `DERIVATIVES_ENABLED=1` | Enable authenticated Futures & Options APIs and workspace. |
 | `DERIVATIVES_FUTURES_ENABLED=1` | Enable index and stock futures polling. |
 | `DERIVATIVES_STOCK_OPTIONS_ENABLED=1` | Enable the stock-symbol master and equity option chains. |
+| `DERIVATIVES_COMMODITY_ENABLED=1` | Enable commodity futures and option chains. |
 | `DERIVATIVES_ALLOW_CLOSED_REVIEW=1` | Allow one on-demand derivatives snapshot outside market hours. |
 | `DERIVATIVES_POLL_SECONDS` | REST reconciliation cadence while a derivatives view has demand (minimum `3`, default `5`). |
 | `STORE_REFRESH_SECONDS` | Market-hours background refresh cadence for the store (default `3`). |
@@ -88,7 +90,8 @@ mobile. Light/dark follow the system theme.
 | `MARKET_CAPTURE=1` | Log every `marketStatus` transition + a raw sample to `logs/market-capture-<date>.jsonl`. |
 | `STREAM_CAPTURE=1` | Log a bounded sample of raw WSS frames for stream-schema diagnosis. |
 
-**Deploy with no config file:** set `AUTH_PASSWORD_PEPPER` + `FEED_JSON` (+ `MONGO_URI` / Telegram / LLM as needed), then either load a `.env` natively —
+**Deploy with no config file:** set `AUTH_PASSWORD_PEPPER` and the required `MARKET_*`
+variables (+ MongoDB / Telegram / LLM as needed), then either load a `.env` natively —
 ```bash
 node --env-file=.env run.js      # Node 24 LTS (24.11+)
 ```
@@ -152,12 +155,34 @@ Live data flows **Mon–Fri, IST**: pre-open **09:00–09:15**, continuous sessi
 The derivatives workspace is demand-driven: opening a chain or futures view starts backend
 collection, normalized snapshots are stored under `store.derivatives`, and SSE delivers them
 to the browser. Option chains use REST as the baseline and reconciliation source. When both
-`STREAM_WS=1` and `FEED_JSON.derivatives.stream` are configured, option-chain WSS ticks patch
+`STREAM_WS=1` and `MARKET_DERIVATIVE_STREAM_PATH` are configured, option-chain WSS ticks patch
 the same snapshot. Index and stock futures use the configured derivatives REST endpoint.
 
-Stock-option symbols come from `FEED_JSON.derivatives.masterQuoteEndpoint`; expiries come from
-the contract-info endpoint. Feature flags can expose index options, futures, and stock options
-independently.
+Stock-option symbols come from `MARKET_DERIVATIVE_MASTER_QUOTE_ENDPOINT`; expiries come from
+the contract-info endpoint. Feature flags can expose index options, futures, stock options,
+and commodities independently.
+
+### Previous `FEED_JSON` mapping
+
+| Previous property | New source |
+|---|---|
+| `base` | `MARKET_BASE_URL` |
+| `indicesEndpoint`, `preopenEndpoint`, `referer` | `MARKET_INDICES_ENDPOINT`, `MARKET_PREOPEN_ENDPOINT`, `MARKET_REFERER` |
+| `warmupPaths` | Code constant in `backend/config/nse.config.js` |
+| `stream.wsBase` | `MARKET_STREAM_BASE_URL` + `MARKET_INDEX_STREAM_PATH` |
+| `stream.origin` | Reuses `MARKET_BASE_URL` |
+| `stream.indexParam` | Code constant `index` |
+| `stream.constituents.*.path` | Four `MARKET_*_CONSTITUENTS_PATH` variables |
+| `stream.levels.*.path` | Four `MARKET_*_LEVEL_PATH` variables |
+| Constituent/level object keys and `index` values | Code constants |
+| `derivatives.masterQuoteEndpoint`, `stockQuoteEndpoint` | Corresponding `MARKET_DERIVATIVE_*` endpoint variables |
+| `derivatives.contractInfoEndpoint`, `optionChainEndpoint`, `futuresEndpoint` | Corresponding `MARKET_DERIVATIVE_*` endpoint variables |
+| `derivatives.referer`, `futuresReferer` | `MARKET_DERIVATIVE_REFERER`, `MARKET_DERIVATIVE_FUTURES_REFERER` |
+| `derivatives.enabledSymbols` | CSV `MARKET_DERIVATIVE_SYMBOLS`, converted to a deduplicated array |
+| `derivatives.commodity*` | Corresponding `MARKET_COMMODITY_*` variables |
+| `derivatives.stream.wsBase` | `MARKET_STREAM_BASE_URL` + `MARKET_DERIVATIVE_STREAM_PATH` |
+| `derivatives.stream.origin` | Reuses `MARKET_BASE_URL` |
+| `derivatives.stream.path`, `symbolParam`, `expiryParam` | Code constants `mbp`, `symbol`, `expiry` |
 
 ---
 
@@ -241,7 +266,7 @@ also echoed to the console.
 ```
 backend/
   server.js              composition root and process lifecycle
-  config/                environment parsing and FEED_JSON access
+  config/                environment parsing and market configuration assembly
   core/                  market store, outbox, Mongo retry, logging, utilities
   derivatives/           option/futures providers, demand service, option WSS
   http/                  router, response/SSE helpers, domain route handlers

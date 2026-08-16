@@ -3,7 +3,7 @@
  * Trading Tracker - market proxy, application APIs, and static server.
  *
  * Feed transport uses the Node 24 LTS built-in fetch. Data-source endpoints
- * come from the FEED_JSON environment variable and are never hardcoded here.
+ * come from grouped MARKET_* environment variables and are never hardcoded here.
  */
 "use strict";
 
@@ -27,7 +27,7 @@ const {
 const { logInfo, logWarn } = require("./core/logger");
 const { istNow } = require("./core/utils");
 const config = require("./config/env");
-const feedConfig = require("./config/feed");
+const feedConfig = require("./config/nse.config");
 const { createNseSession } = require("./net/nse-session");
 const {
   istTradingDate,
@@ -51,7 +51,7 @@ function createDerivativesRuntime({ nseSession, sse }) {
   if (!config.DERIVATIVES_ENABLED) return null;
   if (!feedConfig.FEED || !feedConfig.FEED.derivatives) {
     throw new Error(
-      "derivatives are enabled but FEED_JSON.derivatives is missing (see .env.sample)",
+      "derivatives are enabled but MARKET_* derivative variables are missing (see .env.sample)",
     );
   }
   const provider = createNseDerivatives({
@@ -109,8 +109,8 @@ async function main() {
   );
   console.log(
     feedConfig.FEED
-      ? "  Data source: configured from FEED_JSON"
-      : "  Data source: NOT configured - set FEED_JSON (see .env.sample)",
+      ? "  Data source: configured from MARKET_* variables"
+      : "  Data source: NOT configured - set MARKET_BASE_URL and MARKET_INDICES_ENDPOINT (see .env.sample)",
   );
 
   const nseSession = createNseSession({

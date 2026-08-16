@@ -801,7 +801,7 @@ class DerivativesService {
       return new DerivativesError("SCHEMA_ERROR", "derivatives source returned invalid data", { cause: error });
     }
     if (code === "SOURCE_BUSY") return new DerivativesError("SOURCE_BUSY", "derivatives source is busy", { cause: error, retryAfterMs: errorRetryAfterMs(error, this.now()), retryAt: causeRetryAt(error) });
-    // A missing/misconfigured upstream endpoint (e.g. FEED_JSON.derivatives.masterQuoteEndpoint
+    // A missing/misconfigured upstream endpoint (e.g. derivatives.masterQuoteEndpoint
     // or .futuresEndpoint) never fixes itself — surface it verbatim instead of masking it as a
     // generic, retryable "source request failed".
     if (code === "CONFIG_ERROR") return new DerivativesError("CONFIG_ERROR", (error && error.message) || "derivatives endpoint is not configured", { cause: error });

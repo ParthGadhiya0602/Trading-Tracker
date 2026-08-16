@@ -5,7 +5,7 @@
  * applies per-key exponential backoff, and hands each raw parsed frame to `onTick`. All domain
  * knowledge (normalization, store merge, SSE emit) lives in the DerivativesService.
  *
- * Endpoint + headers come ONLY from the injected `config` block (FEED_JSON.derivatives.stream);
+ * Endpoint + headers come ONLY from the injected `config` block assembled from MARKET_* env;
  * nothing is hardcoded here. `config` = { wsBase, origin, path, symbolParam?, expiryParam? }.
  *   url = `${wsBase}/${path}?${symbolParam}=<symbol>&${expiryParam}=<providerExpiry>`
  */
