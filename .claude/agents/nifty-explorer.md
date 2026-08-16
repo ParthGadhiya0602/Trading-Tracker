@@ -38,7 +38,7 @@ review, or write code.
   - Runtime data in **`store/`** (`alerts.json`, `users.json`, `telegram.json`,
     `trades.json` + `*-outbox.json`); logs in **`logs/YYYY-MM-DD.log`**.
 - **Config is environment-only. There is no `config.json`.** Feed/secrets come from env
-  (`FEED_JSON`, `MONGO_URI`, `AUTH_PASSWORD_PEPPER`, `TELEGRAM_*`, `LLM_*`, `HOST`, `PORT`,
+  (grouped `MARKET_*` market-source vars, `MONGO_URI`, `AUTH_PASSWORD_PEPPER`, `TELEGRAM_*`, `LLM_*`, `HOST`, `PORT`,
   `STREAM_WS`, `STORE_REFRESH_SECONDS`, `ALERT_POLL_SECONDS`, `ALERTS_NO_TICK`,
   `DERIVATIVES_ENABLED`). Never print, echo, or paste secret env values or a data-source
   endpoint — refer to the source generically.

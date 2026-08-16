@@ -25,7 +25,7 @@ write code, design pixels, or review builds.
   - **Zero runtime deps** (Node built-ins; `mongodb` is the only optional dep, required lazily).
     **No build step**; frontend is native ES modules.
   - **Config is environment-only — there is no `config.json`.** Endpoints/secrets come from
-    env (`FEED_JSON`, `MONGO_URI`, `AUTH_PASSWORD_PEPPER`, `TELEGRAM_*`, `LLM_*`, feature
+    env (grouped `MARKET_*` market-source vars, `MONGO_URI`, `AUTH_PASSWORD_PEPPER`, `TELEGRAM_*`, `LLM_*`, feature
     flags). New switches are env vars documented in `.env.sample`; never hardcode endpoints
     or name the data source in code.
   - **`market-store.js` is the single source of truth** for snapshots/prices — consumers
