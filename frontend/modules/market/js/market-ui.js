@@ -272,7 +272,7 @@
         ...row,
         ohPct: o > 0 ? ((Number(row.dayHigh) - o) / o) * 100 : null,
         olPct: o > 0 ? ((Number(row.dayLow) - o) / o) * 100 : null,
-      });
+      }, mwIndex);
     };
     $("#mwBody").addEventListener("click", (e) => {
       const tr = e.target.closest("tr[data-symbol]");

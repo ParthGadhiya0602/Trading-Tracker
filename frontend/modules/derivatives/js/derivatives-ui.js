@@ -232,6 +232,7 @@
     const es = stream = new EventSource(selectedUrl(path));
     es.addEventListener("snapshot", (event) => receive(event, mine));
     es.addEventListener("status", (event) => receive(event, mine));
+    es.addEventListener("delta", (event) => receiveDelta(event, mine));
     es.onerror = () => { if (mine === generation && active) setState(snapshot || { state: "error" }, "Stream reconnecting; last snapshot remains visible."); };
   }
   function receive(event, mine) {
@@ -239,13 +240,42 @@
     let next; try { next = JSON.parse(event.data); } catch (_) { return; }
     const nextSequence = Number(next && next.sequence), isSnapshot = event.type === "snapshot";
     const expectedKind = isFuturesIndex() ? "index-futures" : isFuturesStock() ? "stock-futures" : isFuturesCommodity() ? "commodity-futures" : "option-chain";
-    if (!next || next.kind !== expectedKind || next.market !== selectedMarket() || next.symbol !== symbol || (instrument === "options" && next.expiry !== expiry) || !Number.isFinite(nextSequence) || (isSnapshot ? nextSequence <= sequence : nextSequence < sequence)) return;
+    // Accept an equal-sequence full snapshot: with per-message deltas sharing the key's single
+    // monotonic sequence, the ~5s REST snapshot usually equals the last applied delta seq. It's
+    // read from the same live entry (already has every delta merged) so it can't clobber newer
+    // prices, and it re-lands the REST-only fields (OI / volume / IV) deltas don't carry.
+    if (!next || next.kind !== expectedKind || next.market !== selectedMarket() || next.symbol !== symbol || (instrument === "options" && next.expiry !== expiry) || !Number.isFinite(nextSequence) || nextSequence < sequence) return;
     sequence = Math.max(sequence, nextSequence);
     if (next.data && Array.isArray(next.data.rows) && next.data.rows.length) snapshot = next;
     else if (snapshot) snapshot = { ...snapshot, ...next, data: snapshot.data };
     else snapshot = next;
     setState(snapshot); render();
     if (isSnapshot && snapshot.data && instrument === "options") void loadAnalysis(mine, nextSequence, selectedMarket(), symbol, expiry);
+  }
+  // Per-message option-strike delta: merge one strike's CE/PE patch into the seeded chain the
+  // instant it arrives, then paint on the next animation frame (many strikes in one frame => one
+  // paint). The ~5s REST snapshot (receive) remains the full-chain resync + analysis refresh.
+  function receiveDelta(event, mine) {
+    if (mine !== generation || !active || instrument !== "options") return;
+    if (!snapshot || !snapshot.data || !Array.isArray(snapshot.data.rows)) return; // need a REST seed first
+    let d; try { d = JSON.parse(event.data); } catch (_) { return; }
+    const seq = Number(d && d.sequence);
+    if (!d || d.kind !== "option-chain" || d.market !== selectedMarket() || d.symbol !== symbol
+      || d.expiry !== expiry || !Number.isFinite(seq) || seq <= sequence) return;
+    const row = snapshot.data.rows.find((r) => Number(r.strike) === Number(d.strike));
+    if (!row) return; // strike universe is REST-owned
+    if (d.call && row.call) Object.assign(row.call, d.call);
+    if (d.put && row.put) Object.assign(row.put, d.put);
+    sequence = seq;
+    snapshot.sequence = seq;
+    snapshot.transport = "wss";
+    if (d.streamedAt) snapshot.streamedAt = d.streamedAt;
+    scheduleRender();
+  }
+  let renderRAF = 0;
+  function scheduleRender() {
+    if (renderRAF) return;
+    renderRAF = requestAnimationFrame(() => { renderRAF = 0; setState(snapshot); render(); });
   }
   async function loadAnalysis(mine, expectedSequence, expectedMarket, expectedSymbol, expectedExpiry) {
     try {

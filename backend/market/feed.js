@@ -52,16 +52,14 @@ function createMarketFeed({
     };
   }
 
-  async function fetchIndexNext(name) {
-    requireFeed();
-    const response = await srcJson(indexUrl(name));
+  // Extract the index headline level from a raw indices-endpoint response (the priority:1 row
+   // whose symbol === the index name). Shared by open-session and pre-open paths.
+  function indexLevelFrom(response, name) {
     const data = (response && response.data) || {};
     const rows = Array.isArray(data.data) ? data.data : [];
     const index = rows.find((row) => row.symbol === name) || {};
-    const stocks = rows.filter((row) => row.symbol && row.symbol !== name);
-    if (!stocks.length && !(num(index.lastPrice) > 0))
-      throw new Error(`no data for ${name}`);
-    const level = {
+    if (num(index.lastPrice) == null) return null;
+    return {
       last: num(index.lastPrice),
       variation: num(index.change),
       pChange: num(index.pChange),
@@ -74,6 +72,18 @@ function createMarketFeed({
       perChange30d: num(index.perChange30d),
       perChange365d: num(index.perChange365d),
     };
+  }
+
+  async function fetchIndexNext(name) {
+    requireFeed();
+    const response = await srcJson(indexUrl(name));
+    const data = (response && response.data) || {};
+    const rows = Array.isArray(data.data) ? data.data : [];
+    const index = rows.find((row) => row.symbol === name) || {};
+    const stocks = rows.filter((row) => row.symbol && row.symbol !== name);
+    if (!stocks.length && !(num(index.lastPrice) > 0))
+      throw new Error(`no data for ${name}`);
+    const level = indexLevelFrom(response, name) || {};
     const counts = data.aduCount || {};
     const advance = {
       advances: num(counts.advances) || 0,
@@ -115,6 +125,20 @@ function createMarketFeed({
         });
     }
     const stamp = (response && response.timestamp) || null;
+    // The key=ALL pre-open feed is stock-level only — the index headline level comes from the
+    // indices endpoint (which serves a pre-open index value during 09:00–09:15). Fetched in
+    // parallel; a per-index failure just leaves that card's level null.
+    const levelByIndex = Object.fromEntries(
+      await Promise.all(
+        dashboardIndices.map(async (name) => {
+          try {
+            return [name, indexLevelFrom(await srcJson(indexUrl(name)), name)];
+          } catch (_) {
+            return [name, null];
+          }
+        }),
+      ),
+    );
     const output = {};
     for (const index of dashboardIndices) {
       const symbols = alerts.symbols()[index] || [];
@@ -184,7 +208,7 @@ function createMarketFeed({
         timestamp: stamp,
         marketStatus: "Pre-open",
         marketDataLive: data.length > 0,
-        level: null,
+        level: levelByIndex[index] || null,
         advance: { advances, declines, unchanged },
         data,
       };

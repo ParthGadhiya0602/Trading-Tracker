@@ -280,6 +280,7 @@ class DerivativesService {
     this.tradingDate = options.tradingDate || (() => new Date(this.now()).toISOString().slice(0, 10));
     this.sourceStatus = typeof options.sourceStatus === "function" ? options.sourceStatus : null;
     this.onUpdate = typeof options.onUpdate === "function" ? options.onUpdate : null;
+    this.onDelta = typeof options.onDelta === "function" ? options.onDelta : null;
     this.timers = options.timers || { setTimeout, clearTimeout };
     if (typeof this.timers.setTimeout !== "function" || typeof this.timers.clearTimeout !== "function") {
       throw new DerivativesError("CONFIG_ERROR", "timers must implement setTimeout and clearTimeout");
@@ -317,8 +318,6 @@ class DerivativesService {
       && typeof this.optionStream.configured === "function"
       && this.optionStream.configured()
       && typeof this.provider.normalizeStreamFrame === "function";
-    this.streamEmitMs = Math.max(50, Number(options.streamEmitMs == null ? 250 : options.streamEmitMs) || 250);
-    this.streamEmitTimers = new Map();
 
     this.demands = new Map();
     this.contractCache = new Map();
@@ -641,8 +640,6 @@ class DerivativesService {
     this.contractInflight.clear();
     this.equitySymbolsInflight = null;
     if (this.optionStream) this.optionStream.stop();
-    for (const timer of this.streamEmitTimers.values()) this.timers.clearTimeout(timer);
-    this.streamEmitTimers.clear();
   }
 
   #release(key) {
@@ -846,27 +843,31 @@ class DerivativesService {
     try { delta = this.provider.normalizeStreamFrame(raw, { market: demand.market, symbol: demand.symbol, expiry: demand.expiry }); } catch (_) { return; }
     if (!delta) return;
     const updated = this.scope.applyTick(delta);
-    if (updated) this.#scheduleStreamEmit(demand.key); // coalesce -> one full-snapshot SSE per window
+    // Push this one strike immediately (no coalescing). The client merges it by strike; the
+    // periodic REST refresh (#emitUpdate "snapshot", ~refreshMs) is the full-chain resync.
+    if (updated) this.#emitDelta(delta, updated.sequence);
   }
 
-  #scheduleStreamEmit(key) {
-    if (this.streamEmitTimers.has(key)) return;
-    const timer = this.timers.setTimeout(() => {
-      this.streamEmitTimers.delete(key);
-      const snapshot = this.scope.getSnapshot(key);
-      if (snapshot) this.#emitUpdate(snapshot, "snapshot");
-    }, this.streamEmitMs);
-    timer.unref?.();
-    this.streamEmitTimers.set(key, timer);
+  #emitDelta(delta, sequence) {
+    if (!this.onDelta) return;
+    const payload = {
+      key: delta.key,
+      kind: "option-chain",
+      market: delta.market,
+      symbol: delta.symbol,
+      expiry: delta.expiry,
+      sequence,
+      transport: "wss",
+      strike: delta.strike,
+    };
+    if (delta.call) payload.call = delta.call;
+    if (delta.put) payload.put = delta.put;
+    if (delta.streamedAt) payload.streamedAt = delta.streamedAt;
+    try { this.onDelta(clone(payload)); } catch (_) {}
   }
 
   #closeStream(key) {
     if (this.optionStream) this.optionStream.close(key);
-    const timer = this.streamEmitTimers.get(key);
-    if (timer) {
-      this.timers.clearTimeout(timer);
-      this.streamEmitTimers.delete(key);
-    }
   }
 
   #budgetStatus(name) {

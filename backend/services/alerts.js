@@ -19,7 +19,7 @@ const crypto = require("crypto");
 const { connectMongoWithRetry } = require("../core/mongo-retry");
 const { DurableOutbox } = require("../core/durable-outbox");
 const { istNow, istFromMs } = require("../core/utils");
-const { logError, logErrorOnce, resetErrorOnce } = require("../core/logger"); // daily-rotating logger, shared app-wide
+const { logError, logWarn, logErrorOnce, resetErrorOnce } = require("../core/logger"); // daily-rotating logger, shared app-wide
 
 const ROOT = path.join(__dirname, ".."); // repo root for local stores and logs
 const STORE_DIR = path.join(ROOT, "store"); // alert + user data files live here
@@ -183,6 +183,12 @@ function freshState(alert) {
   alert.ringing = false;
   alert.snoozed = false;
   alert.reanchorChecked = false; // one-time re-anchor happens on first live tick
+  // Intraday-extreme references (wick-proof entry + zone). Re-seeded lazily on the next tick so a
+  // stale extreme from before this (re)arm can't false-enter or false-resolve the trade.
+  alert.armRefLow = undefined;
+  alert.armRefHigh = undefined;
+  alert.zoneRefLow = undefined;
+  alert.zoneRefHigh = undefined;
   // Review is independent from market lifecycle. New or edited definitions need review.
   alert.reviewState = "pending"; // pending | approved | rejected
   alert.reviewer = "";
@@ -580,7 +586,10 @@ class AlertEngine {
     let seedFromLocal = false;
     this.mongoUri = this.#loadConfig();
     if (this.mongoUri) {
-      const retryCount = 1;
+      // Patient boot: retry a few times before falling back to the local cache — a transient
+      // Mongo blip at startup must NOT silently drop us onto a possibly-stale/empty file cache
+      // (which would make the alert engine evaluate the wrong/no alert set all session).
+      const retryCount = 3;
       try {
         const client = await connectMongoWithRetry(this.mongoUri, {
           retries: retryCount,
@@ -683,6 +692,14 @@ class AlertEngine {
     }
     if (seedFromLocal) this.#queueAllState();
     this.#save(); // persist the migrated local cache; outbox handles Mongo asynchronously
+    if (this.mongoUri && this.backend === "file") {
+      logWarn(
+        "alerts.degraded",
+        `MongoDB unreachable at startup — the alert engine is running on the local file cache ` +
+          `with ${this.store.alerts.length} alert(s). Alerts stored only in Mongo (e.g. created on ` +
+          `another device) will NOT evaluate until Mongo reconnects (auto-retry every 15s, then reloaded).`,
+      );
+    }
     this.#startReconnectWorker();
   }
   backendName() {
@@ -724,7 +741,32 @@ class AlertEngine {
       this.backend = "mongo";
       resetErrorOnce("mongo.reconnect"); // re-arm logging for the next outage
       await this.outbox.drain();
-      console.log("  alerts: MongoDB reconnected; durable outbox replayed");
+      // CRITICAL: pull the authoritative set from Mongo so alerts that exist in Mongo but not
+      // in memory (e.g. the process booted in file mode off a stale/empty cache while Mongo was
+      // down, or alerts were created on another device) start being evaluated. Only pull once
+      // the outbox is fully drained, so unsynced local changes are never clobbered.
+      if (this.outbox.status().pending === 0) {
+        const [alertDocs, archivedDocs, eventDocs, notificationDocs, symDoc] = await Promise.all([
+          this.alertsColl.find({}).toArray(),
+          this.archivedColl.find({}).toArray(),
+          this.eventsColl.find({}).sort({ at: 1 }).toArray(),
+          this.notificationsColl.find({}).toArray(),
+          this.metaColl.findOne({ _id: "symbols" }),
+        ]);
+        const strip = (d) => { delete d._id; return d; };
+        this.store = {
+          alerts: alertDocs.map(strip),
+          archived: archivedDocs.map(strip),
+          events: eventDocs.map(strip),
+          notifications: notificationDocs.map(strip),
+          symbols: (symDoc && symDoc.data) || this.store.symbols || {},
+        };
+        this.#migrate(this.usersProvider ? this.usersProvider() : []);
+        this.#save(); // refresh the local file cache with the reloaded set
+        console.log(`  alerts: MongoDB reconnected; reloaded ${this.store.alerts.length} active alert(s) from Mongo`);
+      } else {
+        console.log("  alerts: MongoDB reconnected; outbox replayed (reload deferred — local sync still pending)");
+      }
     } catch (error) {
       this.outbox.setProcessor(null);
       this.backend = "file";
@@ -1267,22 +1309,41 @@ class AlertEngine {
   // "active"), so targets/stop-loss can't fire before the price reaches the alert price.
   // Returns { fired, terminal } - terminal outcomes auto-close (Success 5×, Fail SL, and
   // stop-loss after a Partial which closes keeping the "partial" status).
-  #evaluateZone(alert, ltp) {
+  #evaluateZone(alert, ltp, dayHigh, dayLow) {
     if (!(alert.stopLoss > 0) || alert.target5 == null)
       return { fired: false, terminal: false };
     const buy = alert.side === "BUY";
-    const hit5 = buy ? ltp >= alert.target5 : ltp <= alert.target5;
-    const hit3 = buy ? ltp >= alert.target3 : ltp <= alert.target3;
-    const slHit = buy ? ltp <= alert.stopLoss : ltp >= alert.stopLoss;
+    // Lazy-seed the entry reference for alerts entered without it (created already-past-entry,
+    // or pre-fix records already active): from here on only a NEW extreme beyond this counts.
+    if (!Number.isFinite(alert.zoneRefLow))
+      alert.zoneRefLow = Number.isFinite(dayLow) ? Math.min(dayLow, ltp) : ltp;
+    if (!Number.isFinite(alert.zoneRefHigh))
+      alert.zoneRefHigh = Number.isFinite(dayHigh) ? Math.max(dayHigh, ltp) : ltp;
+    // Effective extremes = the current tick's lastPrice widened by any intraday extreme printed
+    // strictly BEYOND the entry reference (a fresh post-entry wick). A stale pre-entry extreme is
+    // never counted, so it can't resolve the trade; a wick the sampling stepped over still does.
+    const effLow = Math.min(
+      ltp,
+      Number.isFinite(dayLow) && dayLow < alert.zoneRefLow ? dayLow : ltp,
+    );
+    const effHigh = Math.max(
+      ltp,
+      Number.isFinite(dayHigh) && dayHigh > alert.zoneRefHigh ? dayHigh : ltp,
+    );
+    const hit5 = buy ? effHigh >= alert.target5 : effLow <= alert.target5;
+    const hit3 = buy ? effHigh >= alert.target3 : effLow <= alert.target3;
+    const slHit = buy ? effLow <= alert.stopLoss : effHigh >= alert.stopLoss;
+    const slPrice = buy ? effLow : effHigh; // price at which the stop was pierced
+    const tgtPrice = buy ? effHigh : effLow; // price at which a target was reached
     if (alert.zoneOutcome === "partial") {
       if (hit5) {
         alert.zoneOutcome = "success";
-        this.#fire(alert, "SUCCESS", round2(ltp), { ring: false });
+        this.#fire(alert, "SUCCESS", round2(tgtPrice), { ring: false });
         return { fired: true, terminal: true };
       }
       if (slHit) {
         // point 5: stop loss after 3× -> close, but keep the "partial" outcome
-        this.#fire(alert, "SL_AFTER_PARTIAL", round2(ltp), { ring: false });
+        this.#fire(alert, "SL_AFTER_PARTIAL", round2(slPrice), { ring: false });
         return { fired: true, terminal: true };
       }
       return { fired: false, terminal: false };
@@ -1290,17 +1351,17 @@ class AlertEngine {
     // pending (5× checked before 3× so a gap through both counts as success)
     if (slHit) {
       alert.zoneOutcome = "fail";
-      this.#fire(alert, "FAIL", round2(ltp), { ring: false });
+      this.#fire(alert, "FAIL", round2(slPrice), { ring: false });
       return { fired: true, terminal: true };
     }
     if (hit5) {
       alert.zoneOutcome = "success";
-      this.#fire(alert, "SUCCESS", round2(ltp), { ring: false });
+      this.#fire(alert, "SUCCESS", round2(tgtPrice), { ring: false });
       return { fired: true, terminal: true };
     }
     if (hit3) {
       alert.zoneOutcome = "partial";
-      this.#fire(alert, "PARTIAL", round2(ltp), { ring: false });
+      this.#fire(alert, "PARTIAL", round2(tgtPrice), { ring: false });
       return { fired: true, terminal: false };
     }
     return { fired: false, terminal: false };
@@ -1308,9 +1369,14 @@ class AlertEngine {
 
   // Enter the trade: price has touched the alert price. Opens the zone gate and marks entry
   // with a silent ENTRY event (no Snooze/Close prompt).
-  #enterAlert(alert, ltp) {
+  #enterAlert(alert, ltp, dayHigh, dayLow) {
     alert.status = "active";
     alert.entered = true;
+    // Snapshot the day extremes AT entry. The zone machine only counts a NEW extreme made
+    // beyond these as an SL/target breach, so a low/high printed BEFORE entry (e.g. a pre-entry
+    // dip while still armed) can never falsely resolve the trade.
+    alert.zoneRefLow = Number.isFinite(dayLow) ? Math.min(dayLow, ltp) : ltp;
+    alert.zoneRefHigh = Number.isFinite(dayHigh) ? Math.max(dayHigh, ltp) : ltp;
     alert.updatedAt = istNow();
     this.#fire(alert, "ENTRY", round2(ltp), { ring: false });
   }
@@ -1329,6 +1395,10 @@ class AlertEngine {
       const row = rows.find((r) => r.symbol === alert.symbol);
       const ltp = row && Number(row.lastPrice);
       if (!(ltp > 0)) continue; // no live price (market closed / not trading) -> skip
+      // Intraday extremes catch fast wicks the ~5s lastPrice sampling steps over (the zone
+      // machine uses these so an SL/target pierced between samples still resolves).
+      const dayHigh = row && Number(row.dayHigh);
+      const dayLow = row && Number(row.dayLow);
       if (alert.status === "closed") continue;
       const buy = alert.side === "BUY";
       // During pre-open (09:00-09:15) the price is the INDICATIVE equilibrium (IEP) - a
@@ -1342,7 +1412,7 @@ class AlertEngine {
         // transient indicative swing before the market truly opens). The zone outcome only
         // settles in the continuous session (>=09:15). Entry/trigger below still run.
         if (preopen) continue;
-        const r = this.#evaluateZone(alert, ltp);
+        const r = this.#evaluateZone(alert, ltp, dayHigh, dayLow);
         if (r.fired) mutated = true;
         if (r.terminal) {
           alert.status = "closed";
@@ -1379,9 +1449,36 @@ class AlertEngine {
         }
       }
       // ENTRY: price touched the alert price (works whether armed or already triggered).
-      const entryHit = buy ? ltp <= alert.alertPrice : ltp >= alert.alertPrice;
+      // Detect against the intraday extreme, not just the ~5s sampled lastPrice, so a fast wick
+      // that touches the entry between samples still fills. Guarded by an arm-time reference so a
+      // stale extreme printed BEFORE the alert armed can never false-enter (only a NEW post-arm
+      // extreme beyond the reference counts).
+      if (!Number.isFinite(alert.armRefLow))
+        alert.armRefLow = Number.isFinite(dayLow) ? Math.min(dayLow, ltp) : ltp;
+      if (!Number.isFinite(alert.armRefHigh))
+        alert.armRefHigh = Number.isFinite(dayHigh) ? Math.max(dayHigh, ltp) : ltp;
+      const entryLow = Math.min(
+        ltp,
+        Number.isFinite(dayLow) && dayLow < alert.armRefLow ? dayLow : ltp,
+      );
+      const entryHigh = Math.max(
+        ltp,
+        Number.isFinite(dayHigh) && dayHigh > alert.armRefHigh ? dayHigh : ltp,
+      );
+      const entryHit = buy
+        ? entryLow <= alert.alertPrice
+        : entryHigh >= alert.alertPrice;
       if (entryHit) {
-        this.#enterAlert(alert, ltp);
+        // Fill at the alert (limit) price when the touch was a wick the sampling missed; use the
+        // current lastPrice only when it has already reached/passed the entry (a real gap-through).
+        const entryPrice = buy
+          ? ltp <= alert.alertPrice
+            ? ltp
+            : alert.alertPrice
+          : ltp >= alert.alertPrice
+            ? ltp
+            : alert.alertPrice;
+        this.#enterAlert(alert, entryPrice, dayHigh, dayLow);
         mutated = true;
         continue;
       }

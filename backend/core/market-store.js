@@ -222,22 +222,24 @@ class MarketStore {
 
   // One normalized WS tick: { index, kind:'stock'|'level', symbol?, patch }.
   // Merges into the existing snapshot, preserving REST-only enrichment fields.
+  // Returns the applied tick (for a per-message SSE delta push) or null if it merged nothing.
   applyTick(t) {
-    if (!t || !t.index || !this.snapshot[t.index]) return;
+    if (!t || !t.index || !this.snapshot[t.index]) return null;
     const entry = this.snapshot[t.index];
     if (t.kind === "stock" && t.symbol) {
       const rows = entry.data || (entry.data = []);
       const row = rows.find((r) => r.symbol === t.symbol);
-      if (!row) return; // unknown symbol - constituent list is REST-owned
+      if (!row) return null; // unknown symbol - constituent list is REST-owned
       Object.assign(row, t.patch);
       this.bySymbol.set(t.symbol, row);
     } else if (t.kind === "level") {
       entry.level = Object.assign(entry.level || {}, t.patch);
     } else {
-      return;
+      return null;
     }
     entry.timestamp = Date.now();
     this.stampMs = Date.now();
+    return t;
   }
 
   // ---- reads ----
