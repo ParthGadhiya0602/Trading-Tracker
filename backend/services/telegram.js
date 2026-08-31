@@ -64,7 +64,6 @@ class TelegramService {
     this.polling = false;
     this.logError = () => {};
     this.onUserChange = () => {};
-    this.isMarketOpen = () => true; // gate getUpdates polling to market hours (set in load)
     this.pollBackoffMs = 1000; // grows on repeated poll errors (e.g. bad token), caps at 60s
     this.outbox = new DurableOutbox(OUTBOX_FILE, {
       logError: (scope, error) => this.logError(scope, error),
@@ -179,7 +178,6 @@ class TelegramService {
     this.auth = options.auth;
     this.logError = options.logError || this.logError;
     this.onUserChange = options.onUserChange || this.onUserChange;
-    this.isMarketOpen = options.isMarketOpen || this.isMarketOpen;
     this.config = readConfig();
     this.store = this.#readStore();
     if (!this.config || !this.config.botToken) return "disabled";
@@ -380,12 +378,6 @@ class TelegramService {
 
   async #pollUpdates() {
     if (!this.configured() || this.polling) return;
-    // Only poll for inbound updates during market hours; recheck every 30s otherwise.
-    if (!this.isMarketOpen()) {
-      this.pollTimer = setTimeout(() => this.#pollUpdates(), 30_000);
-      if (this.pollTimer.unref) this.pollTimer.unref();
-      return;
-    }
     this.polling = true;
     let ok = false;
     try {

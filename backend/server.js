@@ -225,10 +225,6 @@ async function main() {
     telegram.load({
       auth,
       logError: alerts.logError,
-      isMarketOpen: () => {
-        const state = marketState();
-        return state === "open" || state === "pre-open";
-      },
       onUserChange: (userId) => {
         sse.broadcastState({ kind: "telegram", userId });
         sse.broadcastState({ kind: "users" });
