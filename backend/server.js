@@ -77,6 +77,8 @@ function createDerivativesRuntime({ nseSession, sse }) {
     sourceStatus: () => nseSession.sourceTraffic.status(),
     onUpdate: (snapshot, type) =>
       sse.scheduleDerivativeFanout(snapshot.key, type),
+    onDelta: (delta) => sse.emitDerivativeDelta(delta), // per-message option-strike push
+
     config: {
       refreshMs:
         Math.max(3, Number(process.env.DERIVATIVES_POLL_SECONDS) || 5) * 1000,
@@ -326,8 +328,8 @@ async function main() {
       stream.start({
         feed: feedConfig.FEED,
         onTick: (tick) => {
-          live.applyTick(tick);
-          sse.scheduleFanout();
+          const applied = live.applyTick(tick);
+          if (applied) sse.emitCashDelta(applied); // push this one tick immediately
         },
         isOpen: () => marketState() === "open",
         log: (message) => console.log(`  ${message}`),

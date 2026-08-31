@@ -12,8 +12,11 @@ anti-bot layer blocks any request without a warmed session), hence the local pro
 
 `.env`, `logs/`, and `package.json`/lockfile live at the **repo root**; alert + user
 data (`alerts.json`, `users.json`) live in **`store/`**; backend modules reach them via `..`.
-**Config is environment-only — there is no `config.json`** (feed/secrets come from `FEED_JSON`,
-`MONGO_URI`, `AUTH_PASSWORD_PEPPER`, `TELEGRAM_*`, `LLM_*`, flags; see `.env.sample`).
+**Config is environment-only — there is no `config.json` or `FEED_JSON` blob.** The market
+source comes from grouped **`MARKET_*`** vars (base/stream URLs + REST/stream/derivative/
+commodity paths, assembled into the internal feed object by `config/nse.config.js` →
+`loadFeedConfig`); secrets/flags come from `MONGO_URI`, `AUTH_PASSWORD_PEPPER`, `TELEGRAM_*`,
+`LLM_*`, etc. See `.env.sample`.
 
 **`backend/` is foldered** (Node, **zero runtime deps** — built-in `fetch`; `mongodb` optional,
 lazy): `server.js` (thin bootstrap: builds a shared `ctx`, then `http.createServer(router(ctx))`
@@ -165,10 +168,10 @@ alert evaluation (serves UI + APIs only) — for local testing without firing/wr
 
 ## Data source (`fetchAllIndices()` → `fetchIndexNext()`)
 
-Endpoints are **not hardcoded or in the repo** — the base host, index endpoint, referer,
-and warmup paths are read from the **`FEED_JSON`** env var's **`feed`** shape (`config/feed.js`
-→ `loadFeedConfig()`; see `.env.sample`; `.env` is gitignored). Startup errors clearly if it's
-missing.
+Endpoints are **not hardcoded or in the repo** — the base host, index endpoint, referer, and
+per-index/derivative stream paths are read from the grouped **`MARKET_*`** env vars and
+assembled into the internal feed object by `config/nse.config.js` → `loadFeedConfig()` (see
+`.env.sample`; `.env` is gitignored). Startup errors clearly if a required var is missing.
 
 One call per index, in parallel - no fallback, no merging, no derived fields. The response
 gives the index row (`priority:1`) + **all** constituents (full 100 for NIFTY MIDCAP 100)
@@ -245,4 +248,4 @@ Single-responsibility roster. **Opus** (reason/R&D/design/review, high effort) �
 
 Both workflows are anchored to the explorer's real `file:line` map, use structured phase
 outputs, require read-before-edit and honest verification, have the reviewer re-check claims,
-never use destructive git, and keep endpoints only in the `FEED_JSON` env `feed` block.
+never use destructive git, and keep endpoints only in the `MARKET_*` env vars.

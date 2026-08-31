@@ -40,8 +40,9 @@ to any module you convert:
 - READ the file (and its neighbours) before editing; match the existing style/conventions.
 - **Zero runtime deps** (Node built-ins; `mongodb` is the only optional dep, required lazily).
 - **Config is environment-only — there is no `config.json`.** Read endpoints/secrets from env
-  (`FEED_JSON` via `loadFeedConfig`, `MONGO_URI`, `AUTH_PASSWORD_PEPPER`, `TELEGRAM_*`,
-  `LLM_*`, flags via `envFlag()` in `utils.js`). Never hardcode a data-source endpoint, name
+  (grouped `MARKET_*` vars via `config/nse.config.js` `loadFeedConfig`, `MONGO_URI`,
+  `AUTH_PASSWORD_PEPPER`, `TELEGRAM_*`, `LLM_*`, flags via `envFlag()` in `core/utils.js`).
+  Never hardcode a data-source endpoint, name
   the source in code, or print/log secret env values. New switches are env vars + a line in
   `.env.sample`.
 - **Read prices/snapshots from `market-store.js` (the single source of truth)** — use

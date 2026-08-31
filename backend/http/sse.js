@@ -39,6 +39,15 @@ function createSse({
     for (const client of sseClients) sseWrite(client, chunk);
   }
 
+  // Per-message delta push: one WSS tick -> one tiny SSE `delta` event, no coalescing wait.
+  // The client merges it into its cached snapshot; the periodic full `patch` (reseed) resyncs.
+  function emitCashDelta(tick) {
+    if (!tick || !(streamWs && marketState() === "open" && sseClients.size > 0))
+      return;
+    const chunk = `event: delta\ndata: ${JSON.stringify(tick)}\n\n`;
+    for (const client of sseClients) sseWrite(client, chunk);
+  }
+
   function scheduleFanout() {
     if (fanoutTimer) return;
     const since = Date.now() - lastFanoutMs;
@@ -71,6 +80,20 @@ function createSse({
       ? `id: ${snapshot.sequence}\n`
       : "";
     return `event: ${event}\n${id}data: ${JSON.stringify(snapshot)}\n\n`;
+  }
+
+  // Per-message option-chain delta: one WSS strike frame -> one tiny SSE `delta` event to that
+  // key's clients, immediately. The client merges it by strike; the ~5s REST snapshot resyncs.
+  function emitDerivativeDelta(delta) {
+    if (!derivativesEnabled || !delta || !delta.key) return;
+    const clients = derivativeSseClients.get(delta.key);
+    if (!clients || !clients.size) return;
+    const id = Number.isFinite(delta.sequence) ? `id: ${delta.sequence}\n` : "";
+    const chunk = `event: delta\n${id}data: ${JSON.stringify(delta)}\n\n`;
+    for (const client of [...clients]) {
+      if (!derivativeSseWrite(client, chunk))
+        removeDerivativeClient(delta.key, client);
+    }
   }
 
   function fanoutDerivativeNow() {
@@ -137,11 +160,13 @@ function createSse({
     sseWrite,
     fanoutNow,
     scheduleFanout,
+    emitCashDelta,
     derivativeSseWrite,
     removeDerivativeClient,
     derivativeEvent,
     fanoutDerivativeNow,
     scheduleDerivativeFanout,
+    emitDerivativeDelta,
     stateSseWrite,
     broadcastState,
     close,

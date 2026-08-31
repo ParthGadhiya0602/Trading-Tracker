@@ -11,7 +11,7 @@ asks you to implement a specified fix.
 
 ## Scope
 
-- Trace the full path: `feed.stream` (from the `FEED_JSON` env block) → `backend/market/stream.js`
+- Trace the full path: `feed.stream` (assembled from `MARKET_*` env vars by `config/nse.config.js`) → `backend/market/stream.js`
   (WSS ingest + normalize) → `backend/core/market-store.js` (`applyTick`/`ingestSnapshot`, the
   single source of truth) → `backend/http/sse.js` fan-out (`scheduleFanout`, 150 ms coalesce,
   wired by `backend/market/live.js`) → `frontend/js/dashboard.js` (`EventSource`, cache,

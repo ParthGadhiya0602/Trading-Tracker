@@ -130,6 +130,31 @@
       // ---------- live stream (SSE) state ----------
       let streamLive = false, // true once a snapshot/patch has been applied
         es = null; // EventSource handle
+      // Per-message delta merge: fold one WSS tick into the cached snapshot in place. The whole
+      // stock/index list no longer waits to be batched - each tick lands the instant it arrives.
+      function applyDelta(t) {
+        if (!cache || !t || !t.index) return;
+        const idx = cache[t.index];
+        if (!idx) return; // this index isn't cached yet - the next full snapshot fills it
+        if (t.kind === "stock" && t.symbol && Array.isArray(idx.data)) {
+          const row = idx.data.find((r) => r.symbol === t.symbol);
+          if (row) Object.assign(row, t.patch);
+        } else if (t.kind === "level") {
+          idx.level = Object.assign(idx.level || {}, t.patch);
+        }
+      }
+      // Coalesce rendering to one animation frame: many deltas in the same ~16ms frame => one
+      // paint (never a per-tick re-render storm), while the cache is already current for reads.
+      let liveRenderRAF = 0;
+      function scheduleLiveRender() {
+        if (liveRenderRAF) return;
+        liveRenderRAF = requestAnimationFrame(() => {
+          liveRenderRAF = 0;
+          renderIndexCards();
+          renderBody(); // renderBody() calls emitLive() -> alert-list Current cells tick too
+          renderMeta();
+        });
+      }
       const SLOW_REFRESH_MS = 45000; // top-up poll while streaming (52W/1Y/adv-dec, other index cards)
 
       // tab filter: high = at day high (green), low = at day low (red), neutral = rest.
@@ -325,14 +350,16 @@
       }
 
       let modalSymbol = null; // symbol currently shown in the stock detail modal
+      let modalIndex = null; // index that supplied the modal row
       let stockModalReturnFocus = null;
       const stockAlertsById = new Map();
-      function openStockModal(r) {
+      function openStockModal(r, index = activeIndex) {
         const stockModal = document.getElementById("stockModal");
         if (!stockModal.classList.contains("show")) {
           stockModalReturnFocus = document.activeElement;
         }
         modalSymbol = r.symbol;
+        modalIndex = index;
         document.getElementById("sm-sym").textContent = r.symbol;
         document.getElementById("sm-name").textContent = r.companyName || "";
         document.getElementById("sm-ltp").textContent = rs(r.lastPrice);
@@ -550,7 +577,7 @@
       // "Add alert" → close this modal, open the create-alert modal prefilled
       document.getElementById("sm-addalert").onclick = () => {
         closeStockModal(false);
-        if (window.openCreateAlert) window.openCreateAlert(activeIndex, modalSymbol);
+        if (window.openCreateAlert) window.openCreateAlert(modalIndex, modalSymbol);
       };
       document.getElementById("stockModal").addEventListener("click", (e) => {
         if (e.target.id === "stockModal") closeStockModal();
@@ -1082,6 +1109,21 @@
             renderIndexCards();
             renderBody();
             renderMeta();
+            setStreamStatus("live");
+          } catch (_) {
+            /* malformed frame - ignore, next frame will retry */
+          }
+        });
+        es.addEventListener("delta", (e) => {
+          try {
+            const t = JSON.parse(e.data);
+            applyDelta(t);
+            streamLive = true;
+            esOpened = true;
+            esErrs = 0;
+            lastGoodAt = Date.now();
+            document.getElementById("staleMsg").textContent = "";
+            scheduleLiveRender(); // rAF-coalesced paint
             setStreamStatus("live");
           } catch (_) {
             /* malformed frame - ignore, next frame will retry */

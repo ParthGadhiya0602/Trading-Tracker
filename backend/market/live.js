@@ -21,7 +21,7 @@ function createMarketLive({
   }
 
   function applyTick(tick) {
-    store.applyTick(tick);
+    return store.applyTick(tick);
   }
 
   async function reseedLiveCache() {
