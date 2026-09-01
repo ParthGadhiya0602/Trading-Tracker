@@ -29,14 +29,24 @@ const OUTBOX_FILE = path.join(STORE_DIR, "alert-outbox.json");
 const OFFSET_PCT = 10; // default trigger offset (fallback if a timeframe is unmapped)
 const STEP_PCT = 2; // default re-alert step (fallback for legacy alerts)
 const STEP_DIVISOR = 5; // re-alert step = trigger offset / 5 (keeps the 10%->2% ratio)
-// The indices used across the dashboard AND alerts (single source of truth). Add one
-// here and it appears in both the dashboard tabs and the alert index picker; its stock
-// list is then cached/refreshed automatically on every market tick.
-const INDICES = [
+// Cash-market indices share the dashboard's cached constituent lists. Stock futures use a
+// separate alert grouping because their prices are resolved from derivatives snapshots.
+const CASH_INDICES = [
   "NIFTY 50",
   "NIFTY NEXT 50",
   "NIFTY MIDCAP 50",
   "NIFTY MIDCAP 100",
+];
+const STOCK_FUTURES_INDEX = "STOCK FUTURES";
+const INDEX_FUTURES_INDEX = "INDEX FUTURES";
+const INDEX_OPTIONS_INDEX = "INDEX OPTIONS";
+const STOCK_OPTIONS_INDEX = "STOCK OPTIONS";
+const ALERT_GROUPS = [
+  ...CASH_INDICES,
+  STOCK_FUTURES_INDEX,
+  INDEX_FUTURES_INDEX,
+  INDEX_OPTIONS_INDEX,
+  STOCK_OPTIONS_INDEX,
 ];
 // Trigger offset (%) per time frame - the pre-alert band scales with the timeframe.
 // 1s-15m are tuned tight; 30m+ were retuned down to match realistic price travel
@@ -218,8 +228,12 @@ function markEnteredIfPastEntry(alert, currentPrice) {
 }
 function applyDefinitionUpdate(alert, clean) {
   const preserveEnteredState = alert.entered === true;
+  alert.market = clean.market;
   alert.index = clean.index;
   alert.symbol = clean.symbol;
+  alert.contractExpiry = clean.contractExpiry;
+  alert.strike = clean.strike;
+  alert.optionType = clean.optionType;
   alert.side = clean.side;
   alert.alertPrice = round2(clean.alertPrice);
   alert.stopLoss = round2(clean.stopLoss);
@@ -258,7 +272,7 @@ function messageFor(alert, type, ltp) {
   const head = EVENT_HEAD[type] || "🔔 Alert";
   const side = alert.side === "BUY" ? "Buy" : "Sell";
   return [
-    `${head} — ${alert.symbol} (${alert.index})`,
+    `${head} — ${alert.symbol} (${contractLabel(alert)})`,
     `Side: ${side}`,
     `Current: ${fmt(ltp)}`,
     `Entry: ${fmt(alert.alertPrice)}`,
@@ -270,13 +284,23 @@ function messageFor(alert, type, ltp) {
     `Reviewed by: ${alert.reviewer || "-"}`,
   ].join("\n");
 }
+function contractLabel(alert) {
+  if (alert.market === "stock-future")
+    return `Stock future · ${alert.contractExpiry}`;
+  if (alert.market === "index-future")
+    return `Index future · ${alert.contractExpiry}`;
+  if (alert.market === "index-option" || alert.market === "stock-option")
+    return `${alert.optionType} ${alert.strike} · ${alert.contractExpiry}`;
+  return alert.index;
+}
 // per-timeframe trigger offsets, for the create-form preview (single source of truth)
 function config() {
   return {
     offsets: OFFSETS,
     defaultOffset: OFFSET_PCT,
     stepDivisor: STEP_DIVISOR,
-    indices: INDICES,
+    indices: ALERT_GROUPS,
+    cashIndices: CASH_INDICES,
   };
 }
 
@@ -394,6 +418,7 @@ class AlertEngine {
       resetTransientNotifications: () => {
         this.transientNotifications.length = 0;
       },
+      validate: (input) => this.#validate(input),
     };
   }
 
@@ -403,10 +428,12 @@ class AlertEngine {
     if (!Array.isArray(this.store.events)) this.store.events = [];
     if (!Array.isArray(this.store.notifications)) this.store.notifications = [];
     for (const a of this.store.archived) {
+      if (!a.market) a.market = "cash";
       migrateReview(a);
       migrateIdentity(a, users);
     }
     for (const a of this.store.alerts) {
+      if (!a.market) a.market = "cash";
       if (a.reanchorChecked === undefined) a.reanchorChecked = false;
       migrateReview(a);
       migrateIdentity(a, users);
@@ -881,6 +908,10 @@ class AlertEngine {
       metadata: {
         symbol: alert.symbol,
         index: alert.index,
+        market: alert.market || "cash",
+        contractExpiry: alert.contractExpiry || "",
+        strike: alert.strike || null,
+        optionType: alert.optionType || "",
         side: alert.side,
         transient: true,
       },
@@ -966,8 +997,12 @@ class AlertEngine {
   #validate(input, opts = {}) {
     const errors = [];
     const requireZoneCreator = opts.requireZoneCreator !== false;
+    const market = String(input.market || "cash");
     const index = String(input.index || "");
     const symbol = String(input.symbol || "").toUpperCase();
+    const contractExpiry = String(input.contractExpiry || "").trim();
+    const strike = Number(input.strike);
+    const optionType = String(input.optionType || "").toUpperCase();
     const side = String(input.side || "").toUpperCase();
     const alertPrice = Number(input.alertPrice);
     const timeframe = String(input.timeframe || "");
@@ -978,15 +1013,32 @@ class AlertEngine {
     const candleDate = String(input.candleDate || "").trim();
     const candleTime = String(input.candleTime || "").trim();
     const tm = candleTime.match(/^(\d{1,2}):(\d{2})$/);
-    if (!INDICES.includes(index))
+    if (!["cash", "stock-future", "index-future", "index-option", "stock-option"].includes(market))
+      errors.push("market must be cash, stock-future, index-future, index-option, or stock-option");
+    if (market === "cash" && !CASH_INDICES.includes(index))
       errors.push("index must be NIFTY 50 or NIFTY NEXT 50");
+    if (market === "stock-future" && index !== STOCK_FUTURES_INDEX)
+      errors.push("stock-future alerts must use STOCK FUTURES");
+    if (market === "index-future" && index !== INDEX_FUTURES_INDEX)
+      errors.push("index-future alerts must use INDEX FUTURES");
+    if (market === "index-option" && index !== INDEX_OPTIONS_INDEX)
+      errors.push("index-option alerts must use INDEX OPTIONS");
+    if (market === "stock-option" && index !== STOCK_OPTIONS_INDEX)
+      errors.push("stock-option alerts must use STOCK OPTIONS");
     if (!symbol) errors.push("symbol is required");
     else if (
+      market === "cash" &&
       Array.isArray(this.store.symbols[index]) &&
       this.store.symbols[index].length &&
       !this.store.symbols[index].includes(symbol)
     )
       errors.push(`${symbol} is not in ${index}`);
+    if (["stock-future", "index-future", "index-option", "stock-option"].includes(market) && !/^\d{4}-\d{2}-\d{2}$/.test(contractExpiry))
+      errors.push("derivative contract expiry must be YYYY-MM-DD");
+    if (["index-option", "stock-option"].includes(market) && !(strike > 0))
+      errors.push("option strike must be a positive number");
+    if (["index-option", "stock-option"].includes(market) && !["CE", "PE"].includes(optionType))
+      errors.push("option type must be CE or PE");
     if (side !== "BUY" && side !== "SELL")
       errors.push("side must be BUY or SELL");
     if (!(alertPrice > 0)) errors.push("alertPrice must be a positive number");
@@ -1011,8 +1063,12 @@ class AlertEngine {
     return {
       errors,
       clean: {
+        market,
         index,
         symbol,
+        contractExpiry: market === "cash" ? "" : contractExpiry,
+        strike: ["index-option", "stock-option"].includes(market) ? strike : null,
+        optionType: ["index-option", "stock-option"].includes(market) ? optionType : "",
         side,
         alertPrice,
         timeframe,
@@ -1038,8 +1094,12 @@ class AlertEngine {
     const t = targetsFor(clean.side, alertPrice, stopLoss);
     const alert = freshState({
       id: crypto.randomUUID(),
+      market: clean.market,
       index: clean.index,
       symbol: clean.symbol,
+      contractExpiry: clean.contractExpiry,
+      strike: clean.strike,
+      optionType: clean.optionType,
       side: clean.side,
       alertPrice, // the target; stays as typed
       stopLoss,
@@ -1253,7 +1313,7 @@ class AlertEngine {
   // ---------- symbol cache (keeps the create-form dropdown working off-hours) ----------
   updateSymbols(payload) {
     let changed = false;
-    for (const index of INDICES) {
+    for (const index of CASH_INDICES) {
       const rows = (payload[index] && payload[index].data) || [];
       if (rows.length) {
         this.store.symbols[index] = rows.map((r) => r.symbol).sort();
@@ -1287,6 +1347,10 @@ class AlertEngine {
       metadata: {
         symbol: alert.symbol,
         index: alert.index,
+        market: alert.market || "cash",
+        contractExpiry: alert.contractExpiry || "",
+        strike: alert.strike || null,
+        optionType: alert.optionType || "",
         side: alert.side,
       },
     });
@@ -1386,25 +1450,27 @@ class AlertEngine {
   // The zone machine (3×/5×/SL) runs ONLY once entered, so it can't fire before the price
   // reaches the alert price. Entry = price touches the alert price (detected in armed OR
   // triggered). Terminal zone outcomes mark the alert closed (archiving lands in Phase 2).
-  evaluate(payload) {
+  evaluate(payload, priceResolver = null) {
     let mutated = false;
     const toArchive = []; // ids closed this pass; moved after the loop (no mutation mid-loop)
     for (const alert of this.store.alerts) {
       if (alert.reviewState !== "approved") continue;
+      const quote = priceResolver ? priceResolver(alert, payload) : null;
       const rows = (payload[alert.index] && payload[alert.index].data) || [];
       const row = rows.find((r) => r.symbol === alert.symbol);
-      const ltp = row && Number(row.lastPrice);
+      const ltp = quote ? Number(quote.lastPrice) : row && Number(row.lastPrice);
       if (!(ltp > 0)) continue; // no live price (market closed / not trading) -> skip
       // Intraday extremes catch fast wicks the ~5s lastPrice sampling steps over (the zone
       // machine uses these so an SL/target pierced between samples still resolves).
-      const dayHigh = row && Number(row.dayHigh);
-      const dayLow = row && Number(row.dayLow);
+      const dayHigh = quote ? Number(quote.dayHigh) : row && Number(row.dayHigh);
+      const dayLow = quote ? Number(quote.dayLow) : row && Number(row.dayLow);
       if (alert.status === "closed") continue;
       const buy = alert.side === "BUY";
       // During pre-open (09:00-09:15) the price is the INDICATIVE equilibrium (IEP) - a
       // provisional, volatile number set by early order-book discovery, NOT a real trade.
-      const preopen =
-        (payload[alert.index] && payload[alert.index].marketStatus) === "Pre-open";
+      const preopen = quote
+        ? quote.preopen === true
+        : (payload[alert.index] && payload[alert.index].marketStatus) === "Pre-open";
 
       // ENTERED: gate is open - run the target/stop-loss machine only here
       if (alert.status === "active") {
@@ -1515,7 +1581,7 @@ const alerts = new AlertEngine();
 alerts.AlertEngine = AlertEngine;
 alerts.logError = logError;
 alerts.config = config;
-alerts.INDICES = INDICES;
+alerts.INDICES = CASH_INDICES;
 alerts.OFFSET_PCT = OFFSET_PCT;
 alerts.STEP_PCT = STEP_PCT;
 module.exports = alerts;

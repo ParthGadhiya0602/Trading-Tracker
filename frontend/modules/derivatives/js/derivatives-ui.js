@@ -354,7 +354,9 @@
     body.innerHTML = rows.map((row, index) => {
       const strikeKey = String(row.strike), isAtm = Number(row.strike) === Number(atm), id = `fo-detail-${index}`;
       const expanded = expandedStrikes.has(strikeKey);
-      return `<tr class="fo-data-row${isAtm ? " fo-atm" : ""}${expanded ? " is-expanded" : ""}" data-strike="${esc(strikeKey)}" data-detail="${id}" tabindex="0" aria-expanded="${expanded}" aria-controls="${id}">${cells(row.call, true)}<td class="fo-strike">${numeric(row.strike)}${isAtm ? ' <span class="fo-atm-badge">ATM</span>' : ""}</td>${cells(row.put, false)}</tr><tr id="${id}" class="fo-detail-row"${expanded ? "" : " hidden"}><td colspan="15"><dl><div><dt>Call ΔOI</dt><dd>${numeric(row.call && row.call.changeInOpenInterest)}</dd></div><div><dt>Put ΔOI</dt><dd>${numeric(row.put && row.put.changeInOpenInterest)}</dd></div><div><dt>Call volume</dt><dd>${numeric(row.call && row.call.volume)}</dd></div><div><dt>Put volume</dt><dd>${numeric(row.put && row.put.volume)}</dd></div><div><dt>Call IV</dt><dd>${percent(row.call && row.call.impliedVolatility)}</dd></div><div><dt>Put IV</dt><dd>${percent(row.put && row.put.impliedVolatility)}</dd></div><div><dt>Call bid / ask</dt><dd>${price(row.call && row.call.bidPrice)} / ${price(row.call && row.call.askPrice)}</dd></div><div><dt>Put bid / ask</dt><dd>${price(row.put && row.put.bidPrice)} / ${price(row.put && row.put.askPrice)}</dd></div></dl></td></tr>`;
+      const alertMarket = optionMarket === "index" ? "index-option" : optionMarket === "equity" ? "stock-option" : "";
+      const alertButton = (leg, optionType) => !alertMarket || !leg ? "" : `<button type="button" class="btn-sm needs-editor" data-option-alert data-market="${alertMarket}" data-symbol="${esc(symbol)}" data-expiry="${esc(expiry)}" data-strike="${esc(row.strike)}" data-option-type="${optionType}" data-price="${esc(leg.lastPrice)}">Set ${optionType} alert</button>`;
+      return `<tr class="fo-data-row${isAtm ? " fo-atm" : ""}${expanded ? " is-expanded" : ""}" data-strike="${esc(strikeKey)}" data-detail="${id}" tabindex="0" aria-expanded="${expanded}" aria-controls="${id}">${cells(row.call, true)}<td class="fo-strike">${numeric(row.strike)}${isAtm ? ' <span class="fo-atm-badge">ATM</span>' : ""}</td>${cells(row.put, false)}</tr><tr id="${id}" class="fo-detail-row"${expanded ? "" : " hidden"}><td colspan="15"><dl><div><dt>Call ΔOI</dt><dd>${numeric(row.call && row.call.changeInOpenInterest)}</dd></div><div><dt>Put ΔOI</dt><dd>${numeric(row.put && row.put.changeInOpenInterest)}</dd></div><div><dt>Call volume</dt><dd>${numeric(row.call && row.call.volume)}</dd></div><div><dt>Put volume</dt><dd>${numeric(row.put && row.put.volume)}</dd></div><div><dt>Call IV</dt><dd>${percent(row.call && row.call.impliedVolatility)}</dd></div><div><dt>Put IV</dt><dd>${percent(row.put && row.put.impliedVolatility)}</dd></div><div><dt>Call bid / ask</dt><dd>${price(row.call && row.call.bidPrice)} / ${price(row.call && row.call.askPrice)}</dd></div><div><dt>Put bid / ask</dt><dd>${price(row.put && row.put.bidPrice)} / ${price(row.put && row.put.askPrice)}</dd></div></dl><div class="fo-option-alerts">${alertButton(row.call, "CE")}${alertButton(row.put, "PE")}</div></td></tr>`;
     }).join("");
     if (wrap && preservedScroll != null) wrap.scrollTop = preservedScroll;
   }
@@ -362,13 +364,13 @@
     const body = $("#foFutureBody"), meta = $("#foChainMeta"), wrap = $("#foFuturesTableWrap");
     const preservedScroll = wrap ? wrap.scrollTop : 0;
     const rows = snapshot && snapshot.data && Array.isArray(snapshot.data.rows) ? snapshot.data.rows : [];
-    if (!rows.length) { body.innerHTML = '<tr><td colspan="11" class="fo-empty">Loading index futures…</td></tr>'; meta.textContent = ""; return; }
+    if (!rows.length) { body.innerHTML = '<tr><td colspan="12" class="fo-empty">Loading index futures…</td></tr>'; meta.textContent = ""; return; }
     meta.textContent = `${rows.length} contracts · nearest expiry first`;
     body.innerHTML = rows.map((row) => {
       const futuresPrice = finite(row.lastPrice), underlying = finite(row.underlyingValue);
       const basis = futuresPrice == null || underlying == null ? null : futuresPrice - underlying;
       const change = finite(row.change), changeClass = change > 0 ? "up" : change < 0 ? "down" : "";
-      return `<tr><td>${esc(row.expiry)}</td><td class="num">${price(row.lastPrice)}</td><td class="num ${changeClass}">${price(row.change)}</td><td class="num ${changeClass}">${percent(row.percentChange)}</td><td class="num fo-future-ohl">${price(row.openPrice)}</td><td class="num fo-future-ohl">${price(row.highPrice)}</td><td class="num fo-future-ohl">${price(row.lowPrice)}</td><td class="num">${price(row.underlyingValue)}</td><td class="num">${basis == null ? "—" : price(basis)}</td><td class="num fo-future-activity">${numeric(row.openInterest)}</td><td class="num fo-future-activity">${numeric(row.volume)}</td></tr>`;
+      return `<tr><td>${esc(row.expiry)}</td><td class="num">${price(row.lastPrice)}</td><td class="num ${changeClass}">${price(row.change)}</td><td class="num ${changeClass}">${percent(row.percentChange)}</td><td class="num fo-future-ohl">${price(row.openPrice)}</td><td class="num fo-future-ohl">${price(row.highPrice)}</td><td class="num fo-future-ohl">${price(row.lowPrice)}</td><td class="num">${price(row.underlyingValue)}</td><td class="num">${basis == null ? "—" : price(basis)}</td><td class="num fo-future-activity">${numeric(row.openInterest)}</td><td class="num fo-future-activity">${numeric(row.volume)}</td><td><button type="button" class="btn-sm needs-editor" data-index-future-alert data-symbol="${esc(symbol)}" data-expiry="${esc(row.expiry)}" data-price="${esc(row.lastPrice)}">Set alert</button></td></tr>`;
     }).join("");
     wrap.scrollTop = preservedScroll;
   }
@@ -416,11 +418,11 @@
     const preservedScroll = wrap ? wrap.scrollTop : 0;
     // Each snapshot is one stock's full expiry strip (the dropdown is populated from the equity list).
     const rows = snapshot && snapshot.data && Array.isArray(snapshot.data.rows) ? snapshot.data.rows : [];
-    if (!rows.length) { body.innerHTML = '<tr><td colspan="7" class="fo-empty">Loading stock futures…</td></tr>'; meta.textContent = ""; return; }
+    if (!rows.length) { body.innerHTML = '<tr><td colspan="8" class="fo-empty">Loading stock futures…</td></tr>'; meta.textContent = ""; return; }
     meta.textContent = `${activeFuturesSymbol()} · ${rows.length} expir${rows.length === 1 ? "y" : "ies"}`;
     body.innerHTML = rows.map((row) => {
       const change = finite(row.change), changeClass = change > 0 ? "up" : change < 0 ? "down" : "";
-      return `<tr><td>${esc(row.symbol)}</td><td>${esc(row.expiry)}</td><td class="num">${price(row.lastPrice)}</td><td class="num ${changeClass}">${price(row.change)}</td><td class="num ${changeClass}">${percent(row.percentChange)}</td><td class="num fo-future-activity">${numeric(row.openInterest)}</td><td class="num fo-future-activity">${numeric(row.volume)}</td></tr>`;
+      return `<tr><td>${esc(row.symbol)}</td><td>${esc(row.expiry)}</td><td class="num">${price(row.lastPrice)}</td><td class="num ${changeClass}">${price(row.change)}</td><td class="num ${changeClass}">${percent(row.percentChange)}</td><td class="num fo-future-activity">${numeric(row.openInterest)}</td><td class="num fo-future-activity">${numeric(row.volume)}</td><td><button type="button" class="btn-sm needs-editor" data-stock-future-alert data-symbol="${esc(row.symbol)}" data-expiry="${esc(row.expiry)}" data-price="${esc(row.lastPrice)}">Set alert</button></td></tr>`;
     }).join("");
     wrap.scrollTop = preservedScroll;
   }
@@ -448,6 +450,36 @@
     $("#foCommodity").addEventListener("change", (event) => { const value = event.target.value.trim().toUpperCase(); event.target.value = value; if (!commoditySymbols.has(value)) { commodityOptionSymbol = ""; symbol = ""; resetSelection(); clearExpiry("Select a commodity first"); setState({ state: "error" }, "Select a commodity from the list."); return; } if (value === commodityOptionSymbol) return; commodityOptionSymbol = value; symbol = value; loadSelected(); });
     $("#foExpiry").addEventListener("change", (event) => { expiry = event.target.value; resetSelection(); openStream(); });
     $("#foCenter").addEventListener("click", centerAtm);
+    $("#foStockFutureBody").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-stock-future-alert]");
+      if (!button || !window.openCreateStockFutureAlert) return;
+      window.openCreateStockFutureAlert({
+        symbol: button.dataset.symbol,
+        expiry: button.dataset.expiry,
+        lastPrice: Number(button.dataset.price),
+      });
+    });
+    $("#foFutureBody").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-index-future-alert]");
+      if (!button || !window.openCreateIndexFutureAlert) return;
+      window.openCreateIndexFutureAlert({
+        symbol: button.dataset.symbol,
+        expiry: button.dataset.expiry,
+        lastPrice: Number(button.dataset.price),
+      });
+    });
+    $("#foBody").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-option-alert]");
+      if (!button || !window.openCreateOptionAlert) return;
+      window.openCreateOptionAlert({
+        market: button.dataset.market,
+        symbol: button.dataset.symbol,
+        expiry: button.dataset.expiry,
+        strike: Number(button.dataset.strike),
+        optionType: button.dataset.optionType,
+        lastPrice: Number(button.dataset.price),
+      });
+    });
     $("#foBody").addEventListener("click", (event) => { const row = event.target.closest(".fo-data-row"); if (row) toggleRow(row); });
     $("#foBody").addEventListener("keydown", (event) => { const row = event.target.closest(".fo-data-row"); if (!row || (event.key !== "Enter" && event.key !== " ")) return; event.preventDefault(); toggleRow(row); });
     window.addEventListener("online", () => { if (active) openStream(); }); window.addEventListener("offline", () => { closeStream(); setState(snapshot || { state: "error" }, "Offline; last available snapshot retained."); });

@@ -296,6 +296,14 @@
       }
 
       /* ---- create/edit alert modal ---- */
+      .form-contract {
+        margin: -2px 0 2px;
+        padding: 9px 10px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        color: var(--text-muted);
+        font-size: 12px;
+      }
       #alertModal {
         position: fixed;
         inset: 0;

@@ -10,8 +10,17 @@
           "NIFTY MIDCAP 50",
           "NIFTY MIDCAP 100",
         ];
+        let CASH_ALERT_INDICES = [...ALERT_INDICES];
         const niceLabel = (n) =>
           n.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+        const alertMarketLabel = (alert) =>
+          alert.market === "stock-future"
+            ? `Stock future · ${alert.contractExpiry || "Expiry unavailable"}`
+            : alert.market === "index-future"
+              ? `Index future · ${alert.contractExpiry || "Expiry unavailable"}`
+            : alert.market === "index-option" || alert.market === "stock-option"
+              ? `${alert.optionType || "Option"} ${alert.strike || ""} · ${alert.contractExpiry || "Expiry unavailable"}`
+            : alert.index;
         let editId = null;
         let editVersion = null;
         let SYMS = {};
@@ -381,6 +390,9 @@
             DEFAULT_OFFSET = c.defaultOffset || 10;
             if (Array.isArray(c.indices) && c.indices.length) {
               ALERT_INDICES = c.indices;
+              CASH_ALERT_INDICES = Array.isArray(c.cashIndices) && c.cashIndices.length
+                ? c.cashIndices
+                : c.indices.filter((index) => index !== "STOCK FUTURES");
               buildIndexUI();
             }
           } catch (_) {}
@@ -419,9 +431,9 @@
         // build the create-form index dropdown from the server's index list; also
         // rebuild the filters so the Index filter reflects the loaded indices
         function buildIndexUI() {
-          if (!ALERT_INDICES.includes(alertIndex))
-            alertIndex = ALERT_INDICES[0];
-          $("#al-index").innerHTML = ALERT_INDICES.map(
+          if (!CASH_ALERT_INDICES.includes(alertIndex))
+            alertIndex = CASH_ALERT_INDICES[0];
+          $("#al-index").innerHTML = CASH_ALERT_INDICES.map(
             (n) => `<option value="${n}">${n}</option>`,
           ).join("");
           if (!editId) $("#al-index").value = alertIndex;
@@ -435,17 +447,77 @@
             return;
           }
           try {
-            const r = await api(
-              "/api/price?index=" +
-                encodeURIComponent($("#al-index").value) +
-                "&symbol=" +
-                encodeURIComponent(sym),
-            );
+            const params = new URLSearchParams({
+              market: $("#al-market").value || "cash",
+              symbol: sym,
+            });
+            if (["stock-future", "index-future"].includes($("#al-market").value))
+              params.set("contractExpiry", $("#al-future-expiry").value);
+            if (["index-option", "stock-option"].includes($("#al-market").value)) {
+              params.set("contractExpiry", $("#al-future-expiry").value);
+              params.set("strike", $("#al-option-strike").value);
+              params.set("optionType", $("#al-option-type").value);
+            }
+            const r = await api("/api/price?" + params.toString());
             curPrice = r.price || 0;
           } catch (_) {
             curPrice = 0;
           }
           updatePreview();
+        }
+        function setFutureContract(market, symbol, expiry, currentPrice) {
+          const isIndexFuture = market === "index-future";
+          $("#al-market").value = isIndexFuture ? "index-future" : "stock-future";
+          $("#al-future-expiry").value = expiry || "";
+          setDerivativeIndex(isIndexFuture ? "INDEX FUTURES" : "STOCK FUTURES");
+          $("#al-index").disabled = true;
+          $("#al-symbol").value = String(symbol || "").toUpperCase();
+          $("#al-symbol").readOnly = true;
+          $("#al-symbol").removeAttribute("list");
+          const contract = $("#al-contract");
+          contract.hidden = false;
+          contract.textContent = `${isIndexFuture ? "Index" : "Stock"} future · ${$("#al-symbol").value} · ${expiry || "Expiry unavailable"}`;
+          curPrice = Number(currentPrice) || 0;
+        }
+        function setOptionContract(market, symbol, expiry, strike, optionType, currentPrice) {
+          $("#al-market").value = market;
+          $("#al-future-expiry").value = expiry || "";
+          $("#al-option-strike").value = strike || "";
+          $("#al-option-type").value = optionType || "";
+          setDerivativeIndex(market === "index-option" ? "INDEX OPTIONS" : "STOCK OPTIONS");
+          $("#al-index").disabled = true;
+          $("#al-symbol").value = String(symbol || "").toUpperCase();
+          $("#al-symbol").readOnly = true;
+          $("#al-symbol").removeAttribute("list");
+          const contract = $("#al-contract");
+          contract.hidden = false;
+          contract.textContent = `${optionType} ${strike} · ${$("#al-symbol").value} · ${expiry || "Expiry unavailable"}`;
+          curPrice = Number(currentPrice) || 0;
+        }
+        function setDerivativeIndex(index) {
+          const select = $("#al-index");
+          if (!Array.from(select.options).some((option) => option.value === index)) {
+            const option = document.createElement("option");
+            option.value = index;
+            option.textContent = index;
+            option.dataset.derivative = "true";
+            select.appendChild(option);
+          }
+          select.value = index;
+        }
+        function clearFutureContract() {
+          $("#al-market").value = "cash";
+          $("#al-future-expiry").value = "";
+          $("#al-option-strike").value = "";
+          $("#al-option-type").value = "";
+          $("#al-index").disabled = false;
+          Array.from($("#al-index").options)
+            .filter((option) => option.dataset.derivative === "true")
+            .forEach((option) => option.remove());
+          $("#al-symbol").readOnly = false;
+          $("#al-symbol").setAttribute("list", "symList");
+          $("#al-contract").hidden = true;
+          $("#al-contract").textContent = "";
         }
         function updatePreview() {
           const p = parseFloat($("#al-price").value);
@@ -576,7 +648,7 @@
           viewReturnFocus = document.activeElement;
           $("#av-sym").textContent = a.symbol;
           $("#av-badges").innerHTML =
-            `<span class="ai-index">${a.index}</span>` +
+            `<span class="ai-index">${esc(alertMarketLabel(a))}</span>` +
             `<span class="ai-side ${a.side === "BUY" ? "buy" : "sell"}">${a.side}</span>` +
             `<span class="ai-status ${a.status}">${a.status}</span>` +
             reviewBadgeHtml(a) +
@@ -595,6 +667,14 @@
               : "-";
           $("#av-grid").innerHTML = [
             cell("Entry price", fmtRs(a.alertPrice)),
+            ...(["stock-future", "index-future"].includes(a.market)
+              ? [cell("Contract expiry", esc(a.contractExpiry) || "-")]
+              : ["index-option", "stock-option"].includes(a.market)
+                ? [
+                    cell("Contract expiry", esc(a.contractExpiry) || "-"),
+                    cell("Option contract", `${esc(a.optionType) || "-"} ${esc(a.strike) || "-"}`),
+                  ]
+              : []),
             cell("Alert price", fmtRs(a.triggerPrice)),
             cell("Stop loss", fmtRs(a.stopLoss)),
             cell("Time frame", a.timeframe || "-"),
@@ -803,12 +883,49 @@
           loadPrice();
           openAlertModal();
         };
+        window.openCreateStockFutureAlert = function (contract) {
+          if (!canCreate() || !contract || !contract.symbol || !contract.expiry)
+            return;
+          const btn = document.querySelector('.viewnav .tab[data-view="alerts"]');
+          if (btn) btn.click();
+          alertIndex = "STOCK FUTURES";
+          resetForm();
+          setFutureContract("stock-future", contract.symbol, contract.expiry, contract.lastPrice);
+          updatePreview();
+          updateTargets();
+          openAlertModal();
+        };
+        window.openCreateIndexFutureAlert = function (contract) {
+          if (!canCreate() || !contract || !contract.symbol || !contract.expiry)
+            return;
+          const btn = document.querySelector('.viewnav .tab[data-view="alerts"]');
+          if (btn) btn.click();
+          alertIndex = "INDEX FUTURES";
+          resetForm();
+          setFutureContract("index-future", contract.symbol, contract.expiry, contract.lastPrice);
+          updatePreview();
+          updateTargets();
+          openAlertModal();
+        };
+        window.openCreateOptionAlert = function (contract) {
+          if (!canCreate() || !contract || !contract.market || !contract.symbol || !contract.expiry || !(Number(contract.strike) > 0) || !contract.optionType)
+            return;
+          const btn = document.querySelector('.viewnav .tab[data-view="alerts"]');
+          if (btn) btn.click();
+          alertIndex = contract.market === "index-option" ? "INDEX OPTIONS" : "STOCK OPTIONS";
+          resetForm();
+          setOptionContract(contract.market, contract.symbol, contract.expiry, contract.strike, contract.optionType, contract.lastPrice);
+          updatePreview();
+          updateTargets();
+          openAlertModal();
+        };
         function resetForm() {
           editId = null;
           editVersion = null;
           $("#formTitle").textContent = "Create alert";
           $("#al-submit-text").textContent = "Create alert";
           $("#alertForm").reset();
+          clearFutureContract();
           $("#al-index").value = alertIndex;
           // side, time frame, candle date/time start empty (no premature trigger)
           $("#al-side").value = "";
@@ -831,9 +948,14 @@
           editVersion = a.version;
           $("#formTitle").textContent = "Edit alert";
           $("#al-submit-text").textContent = "Save changes";
+          clearFutureContract();
           $("#al-index").value = a.index;
           fillDatalist();
           $("#al-symbol").value = a.symbol;
+          if (["stock-future", "index-future"].includes(a.market))
+            setFutureContract(a.market, a.symbol, a.contractExpiry, a.currentPrice);
+          else if (a.market === "index-option" || a.market === "stock-option")
+            setOptionContract(a.market, a.symbol, a.contractExpiry, a.strike, a.optionType, a.currentPrice);
           $("#al-side").value = a.side;
           $("#al-price").value = a.alertPrice;
           $("#al-stop").value = a.stopLoss != null ? a.stopLoss : "";
@@ -850,7 +972,8 @@
           $("#al-hour").value = hh || "";
           $("#al-min").value = mm || "";
           $("#al-err").textContent = "";
-          loadPrice();
+          if (["stock-future", "index-future", "index-option", "stock-option"].includes(a.market)) updatePreview();
+          else loadPrice();
           updateTargets();
           openAlertModal();
         }
@@ -859,6 +982,7 @@
           const hh = $("#al-hour").value,
             mm = $("#al-min").value;
           const body = {
+            market: $("#al-market").value || "cash",
             index: $("#al-index").value,
             symbol: $("#al-symbol").value.trim().toUpperCase(),
             side: $("#al-side").value,
@@ -869,6 +993,13 @@
             candleDate: $("#al-date").value || "",
             candleTime: hh && mm ? `${hh}:${mm}` : "",
           };
+          if (["stock-future", "index-future"].includes(body.market))
+            body.contractExpiry = $("#al-future-expiry").value;
+          if (["index-option", "stock-option"].includes(body.market)) {
+            body.contractExpiry = $("#al-future-expiry").value;
+            body.strike = Number($("#al-option-strike").value);
+            body.optionType = $("#al-option-type").value;
+          }
           if (!editId) body.creatorUserId = $("#al-creator").value;
           // Anchor the Alert (trigger) price to the price the form already had once
           // side + entry + time frame were set (what the preview used) - NOT a fresh
@@ -880,9 +1011,18 @@
           // created already "entered" (targets/stop-loss track immediately).
           if (body.side && body.alertPrice > 0 && body.symbol) {
             try {
-              const { price } = await api(
-                "/api/price?symbol=" + encodeURIComponent(body.symbol),
-              );
+              const params = new URLSearchParams({
+                market: body.market,
+                symbol: body.symbol,
+              });
+              if (["stock-future", "index-future"].includes(body.market))
+                params.set("contractExpiry", body.contractExpiry);
+              if (["index-option", "stock-option"].includes(body.market)) {
+                params.set("contractExpiry", body.contractExpiry);
+                params.set("strike", String(body.strike));
+                params.set("optionType", body.optionType);
+              }
+              const { price } = await api("/api/price?" + params.toString());
               const past =
                 price > 0 &&
                 (body.side === "BUY"
@@ -969,7 +1109,7 @@
               `<div class="ai-body">` +
               `<div class="ai-identity">` +
               `<div class="ai-line1"><span class="ai-sym">${esc(a.symbol)}</span>` +
-              `<span class="ai-index">${esc(a.index)}</span></div>` +
+              `<span class="ai-index">${esc(alertMarketLabel(a))}</span></div>` +
               `<div class="ai-state-row">` +
               `<span class="ai-status ${a.status}">${esc(a.status)}</span>` +
               `<span class="ai-side ${a.side === "BUY" ? "buy" : "sell"}">${esc(a.side)}</span>` +
@@ -980,7 +1120,7 @@
               `</div>` +
               `<div class="ai-levels">` +
               `<span class="ai-metric"><small>Entry</small><strong>${fmtRs(a.alertPrice)}</strong></span>` +
-              `<span class="ai-metric current"><small>Current</small><strong data-cur="${esc(a.symbol)}">${fmtRs(a.currentPrice)}</strong></span>` +
+              `<span class="ai-metric current"><small>Current</small><strong${a.market !== "cash" ? "" : ` data-cur="${esc(a.symbol)}"`}>${fmtRs(a.currentPrice)}</strong></span>` +
               `<span class="ai-metric trigger"><small>Alert</small><strong>${fmtRs(a.triggerPrice)}</strong></span>` +
               `<span class="ai-metric stop"><small>Stop loss</small><strong>${fmtRs(a.stopLoss)}</strong></span>` +
               `</div>` +
@@ -1092,9 +1232,18 @@
         // if the live price is already past the entry (it'll re-arm already-entered).
         async function rearmAlert(a) {
           try {
-            const { price } = await api(
-              "/api/price?symbol=" + encodeURIComponent(a.symbol),
-            );
+            const params = new URLSearchParams({
+              market: a.market || "cash",
+              symbol: a.symbol,
+            });
+            if (["stock-future", "index-future"].includes(a.market))
+              params.set("contractExpiry", a.contractExpiry || "");
+            if (["index-option", "stock-option"].includes(a.market)) {
+              params.set("contractExpiry", a.contractExpiry || "");
+              params.set("strike", String(a.strike || ""));
+              params.set("optionType", a.optionType || "");
+            }
+            const { price } = await api("/api/price?" + params.toString());
             const past =
               price > 0 &&
               (a.side === "BUY" ? price <= a.alertPrice : price >= a.alertPrice);
@@ -1285,6 +1434,10 @@
                 id: item.event.alertId,
                 symbol: metadata.symbol || "Alert",
                 index: metadata.index || "",
+                market: metadata.market || "cash",
+                contractExpiry: metadata.contractExpiry || "",
+                strike: metadata.strike || null,
+                optionType: metadata.optionType || "",
                 side: metadata.side || "",
                 status: "closed",
                 version: item.event.stateVersion,

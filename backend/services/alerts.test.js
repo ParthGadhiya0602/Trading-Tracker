@@ -129,3 +129,76 @@ test("cross-user edit notice is creator-only and does not enter the outbox", () 
   );
   alerts._test.resetTransientNotifications();
 });
+
+test("accepts a stock-futures alert only with an exact ISO expiry", () => {
+  const valid = alerts._test.validate(
+    definition({
+      market: "stock-future",
+      index: "STOCK FUTURES",
+      symbol: "RELIANCE",
+      contractExpiry: "2026-09-24",
+    }),
+  );
+  assert.deepEqual(valid.errors, []);
+  assert.equal(valid.clean.market, "stock-future");
+  assert.equal(valid.clean.contractExpiry, "2026-09-24");
+
+  const invalid = alerts._test.validate(
+    definition({
+      market: "stock-future",
+      index: "STOCK FUTURES",
+      contractExpiry: "24-Sep-2026",
+    }),
+  );
+  assert.match(invalid.errors.join("; "), /contract expiry/);
+});
+
+test("accepts an index-futures alert only for the index-futures group", () => {
+  const valid = alerts._test.validate(
+    definition({
+      market: "index-future",
+      index: "INDEX FUTURES",
+      symbol: "NIFTY",
+      contractExpiry: "2026-09-24",
+    }),
+  );
+  assert.deepEqual(valid.errors, []);
+  assert.equal(valid.clean.market, "index-future");
+
+  const invalid = alerts._test.validate(
+    definition({
+      market: "index-future",
+      index: "STOCK FUTURES",
+      symbol: "NIFTY",
+      contractExpiry: "2026-09-24",
+    }),
+  );
+  assert.match(invalid.errors.join("; "), /INDEX FUTURES/);
+});
+
+test("accepts an exact option contract and rejects a missing option side", () => {
+  const valid = alerts._test.validate(
+    definition({
+      market: "index-option",
+      index: "INDEX OPTIONS",
+      symbol: "NIFTY",
+      contractExpiry: "2026-09-24",
+      strike: 25000,
+      optionType: "CE",
+    }),
+  );
+  assert.deepEqual(valid.errors, []);
+  assert.equal(valid.clean.strike, 25000);
+  assert.equal(valid.clean.optionType, "CE");
+
+  const invalid = alerts._test.validate(
+    definition({
+      market: "stock-option",
+      index: "STOCK OPTIONS",
+      contractExpiry: "2026-09-24",
+      strike: 1450,
+      optionType: "",
+    }),
+  );
+  assert.match(invalid.errors.join("; "), /option type/);
+});

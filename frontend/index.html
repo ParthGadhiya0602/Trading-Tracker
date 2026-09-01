@@ -548,18 +548,18 @@
           <table id="foFuturesTable">
             <caption>Selected index futures contracts ordered by expiry.</caption>
             <thead>
-              <tr><th scope="col">Expiry</th><th scope="col" class="num">LTP</th><th scope="col" class="num">Change</th><th scope="col" class="num">Change %</th><th scope="col" class="num fo-future-ohl">Open</th><th scope="col" class="num fo-future-ohl">High</th><th scope="col" class="num fo-future-ohl">Low</th><th scope="col" class="num">Underlying</th><th scope="col" class="num">Basis</th><th scope="col" class="num fo-future-activity">OI</th><th scope="col" class="num fo-future-activity">Volume</th></tr>
+              <tr><th scope="col">Expiry</th><th scope="col" class="num">LTP</th><th scope="col" class="num">Change</th><th scope="col" class="num">Change %</th><th scope="col" class="num fo-future-ohl">Open</th><th scope="col" class="num fo-future-ohl">High</th><th scope="col" class="num fo-future-ohl">Low</th><th scope="col" class="num">Underlying</th><th scope="col" class="num">Basis</th><th scope="col" class="num fo-future-activity">OI</th><th scope="col" class="num fo-future-activity">Volume</th><th scope="col">Alert</th></tr>
             </thead>
-            <tbody id="foFutureBody"><tr><td colspan="11" class="fo-empty">Loading index futures…</td></tr></tbody>
+            <tbody id="foFutureBody"><tr><td colspan="12" class="fo-empty">Loading index futures…</td></tr></tbody>
           </table>
         </div>
         <div class="fo-tablewrap" id="foStockFuturesTableWrap" hidden>
           <table id="foStockFuturesTable">
             <caption>Stock futures market watch (FUTSTK contracts across underlyings).</caption>
             <thead>
-              <tr><th scope="col">Symbol</th><th scope="col">Expiry</th><th scope="col" class="num">LTP</th><th scope="col" class="num">Change</th><th scope="col" class="num">Change %</th><th scope="col" class="num fo-future-activity">OI</th><th scope="col" class="num fo-future-activity">Volume</th></tr>
+              <tr><th scope="col">Symbol</th><th scope="col">Expiry</th><th scope="col" class="num">LTP</th><th scope="col" class="num">Change</th><th scope="col" class="num">Change %</th><th scope="col" class="num fo-future-activity">OI</th><th scope="col" class="num fo-future-activity">Volume</th><th scope="col"><span class="sr-only">Alert</span></th></tr>
             </thead>
-            <tbody id="foStockFutureBody"><tr><td colspan="7" class="fo-empty">Loading stock futures…</td></tr></tbody>
+            <tbody id="foStockFutureBody"><tr><td colspan="8" class="fo-empty">Loading stock futures…</td></tr></tbody>
           </table>
         </div>
       </section>
@@ -605,6 +605,10 @@
           </div>
           <form class="alert-form" id="alertForm" autocomplete="off">
             <input type="hidden" id="al-id" />
+            <input type="hidden" id="al-market" value="cash" />
+            <input type="hidden" id="al-future-expiry" value="" />
+            <input type="hidden" id="al-option-strike" value="" />
+            <input type="hidden" id="al-option-type" value="" />
             <label>
               Index
               <select id="al-index" required></select>
@@ -619,6 +623,7 @@
               />
               <datalist id="symList"></datalist>
             </label>
+            <p class="form-contract" id="al-contract" hidden></p>
             <div class="form-grid">
               <label>
                 Side

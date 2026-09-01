@@ -2,6 +2,7 @@
 
 function createMarketLive({
   alertPollMs,
+  alertPriceResolver,
   alerts,
   fetchAllIndices,
   fetchMarketData,
@@ -82,7 +83,9 @@ function createMarketLive({
     try {
       const payload = await getMarketData();
       if (state === "open") alerts.updateSymbols(payload);
-      alerts.evaluate(payload);
+      alerts.evaluate(payload, (alert, cashPayload) =>
+        alertPriceResolver.resolve(alert, cashPayload),
+      );
       if (state === "pre-open" && llm.configured())
         llm.analyze(payload).catch(() => {});
     } catch (_) {

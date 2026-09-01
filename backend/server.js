@@ -15,6 +15,7 @@ const stream = require("./market/stream");
 const telegram = require("./services/telegram");
 const llm = require("./services/llm");
 const trades = require("./services/trades");
+const { AlertPriceResolver } = require("./services/alert-price-resolver");
 const store = require("./core/market-store");
 const { createNseDerivatives } = require("./derivatives/nse-derivatives");
 const {
@@ -24,6 +25,7 @@ const {
 const {
   DerivativesOptionStream,
 } = require("./derivatives/derivatives-stream");
+const { DerivativeAlertDemands } = require("./derivatives/future-alert-demands");
 const { logInfo, logWarn } = require("./core/logger");
 const { istNow } = require("./core/utils");
 const config = require("./config/env");
@@ -161,8 +163,10 @@ async function main() {
     marketStatusStr: marketFeed.marketStatusStr,
     srcJson: nseSession.srcJson,
   });
+  const alertPriceResolver = new AlertPriceResolver({ store });
   const live = createMarketLive({
     alertPollMs: config.ALERT_POLL_MS,
+    alertPriceResolver,
     alerts,
     fetchAllIndices: marketFeed.fetchAllIndices,
     fetchMarketData: marketFeed.fetchMarketData,
@@ -175,6 +179,14 @@ async function main() {
     streamWs: config.STREAM_WS,
   });
   const derivativesService = createDerivativesRuntime({ nseSession, sse });
+  const derivativeAlertDemands =
+    derivativesService
+      ? new DerivativeAlertDemands({
+          alerts,
+          derivativesService,
+          logWarn,
+        })
+      : null;
   console.log(
     derivativesService
       ? `  Derivatives: enabled · futures: ${config.DERIVATIVES_FUTURES_ENABLED ? "on" : "off"} · stock options: ${config.DERIVATIVES_STOCK_OPTIONS_ENABLED ? "on" : "off"} · commodity: ${config.DERIVATIVES_COMMODITY_ENABLED ? "on" : "off"} · closed-hours review: ${config.DERIVATIVES_ALLOW_CLOSED_REVIEW ? "on" : "off"} (idle until demand)`
@@ -185,6 +197,7 @@ async function main() {
     ACTION,
     DerivativesError,
     alerts,
+    alertPriceResolver,
     auth,
     config,
     derivativesService,
@@ -204,6 +217,7 @@ async function main() {
   const server = http.createServer(createRouter(ctx));
   server.on("close", () => {
     sse.close();
+    if (derivativeAlertDemands) derivativeAlertDemands.close();
     if (derivativesService) derivativesService.close();
     nseSession.sourceTraffic.close();
   });
@@ -232,7 +246,12 @@ async function main() {
     }),
   ]);
   alerts.setEventSink((event) => telegram.enqueue(event));
-  alerts.setChangeSink((change) => sse.broadcastState(change));
+  alerts.setChangeSink((change) => {
+    sse.broadcastState(change);
+    if (change.kind === "alert" && derivativeAlertDemands)
+      queueMicrotask(() => derivativeAlertDemands.sync());
+  });
+  if (derivativeAlertDemands) derivativeAlertDemands.sync();
   console.log(
     `  Alerts: ${alerts.list().length} saved · store: ${alerts.backendName()} · eval every ${config.ALERT_POLL_MS / 1000}s in market hours`,
   );

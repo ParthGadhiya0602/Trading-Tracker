@@ -4,14 +4,34 @@ module.exports = function createAlertsHandler(ctx) {
   const {
     ACTION,
     alerts,
+    alertPriceResolver,
     auth,
     config,
+    derivativesService,
     eligibleAlertCreators,
     resolveAlertCreator,
     respond,
-    store,
   } = ctx;
   const { finishAlert, num, permit, readJson, sendJson } = respond;
+
+  function priceFor(input) {
+    const quote = alertPriceResolver.resolveInput(input);
+    return Number.isFinite(quote.lastPrice) ? quote.lastPrice : null;
+  }
+
+  function validateDerivativeContract(input) {
+    const market = String(input.market || "cash");
+    if (market === "cash") return null;
+    if (!derivativesService) return "derivatives are unavailable";
+    if (["stock-future", "index-future"].includes(market) && !config.DERIVATIVES_FUTURES_ENABLED)
+      return "futures are unavailable";
+    if (market === "stock-option" && !config.DERIVATIVES_STOCK_OPTIONS_ENABLED)
+      return "stock options are unavailable";
+    const quote = alertPriceResolver.resolveInput(input);
+    if (["stock-future", "index-future"].includes(market))
+      return quote.row ? null : "selected futures contract is unavailable";
+    return quote.leg ? null : "selected option contract is unavailable";
+  }
 
   return async function handleAlertsApi(req, res, url, method, user) {
     if (url === "/api/alert-creators" && method === "GET") {
@@ -32,15 +52,19 @@ module.exports = function createAlertsHandler(ctx) {
     if (url === "/api/price" && method === "GET") {
       const query = new URL(req.url, `http://${config.HOST}`);
       const symbol = (query.searchParams.get("symbol") || "").toUpperCase();
+      const market = query.searchParams.get("market") || "cash";
+      const contractExpiry = query.searchParams.get("contractExpiry") || "";
+      const strike = query.searchParams.get("strike") || "";
+      const optionType = query.searchParams.get("optionType") || "";
       sendJson(res, 200, {
         symbol,
-        price: store.getPrice(symbol) ?? null,
+        price: priceFor({ market, symbol, contractExpiry, strike, optionType }),
       });
       return true;
     }
     if (url === "/api/alerts/active" && method === "GET") {
       sendJson(res, 200, {
-        alerts: store.enrichAlerts(alerts.active(user.id)),
+        alerts: alertPriceResolver.enrich(alerts.active(user.id)),
       });
       return true;
     }
@@ -48,15 +72,15 @@ module.exports = function createAlertsHandler(ctx) {
       const query = new URL(req.url, `http://${config.HOST}`);
       const index = query.searchParams.get("index") || undefined;
       sendJson(res, 200, {
-        alerts: store.enrichAlerts(alerts.list(index)),
-        archived: store.enrichAlerts(alerts.listArchived(index)),
+        alerts: alertPriceResolver.enrich(alerts.list(index)),
+        archived: alertPriceResolver.enrich(alerts.listArchived(index)),
       });
       return true;
     }
     if (url === "/api/alerts/archived" && method === "GET") {
       const query = new URL(req.url, `http://${config.HOST}`);
       sendJson(res, 200, {
-        alerts: store.enrichAlerts(
+        alerts: alertPriceResolver.enrich(
           alerts.listArchived(query.searchParams.get("index") || undefined),
         ),
       });
@@ -65,7 +89,7 @@ module.exports = function createAlertsHandler(ctx) {
     if (url === "/api/alerts" && method === "GET") {
       const query = new URL(req.url, `http://${config.HOST}`);
       sendJson(res, 200, {
-        alerts: store.enrichAlerts(
+        alerts: alertPriceResolver.enrich(
           alerts.list(query.searchParams.get("index") || undefined),
         ),
       });
@@ -89,10 +113,12 @@ module.exports = function createAlertsHandler(ctx) {
       body.zoneCreator = creator.username;
       const formPrice = num(body.formPrice);
       delete body.formPrice;
-      const currentPrice =
-        formPrice > 0
-          ? formPrice
-          : store.getPrice(String(body.symbol || "").toUpperCase());
+      const contractError = validateDerivativeContract(body);
+      if (contractError) {
+        sendJson(res, 400, { error: contractError });
+        return true;
+      }
+      const currentPrice = formPrice > 0 ? formPrice : priceFor(body);
       const result = alerts.create(body, currentPrice, creator, user);
       if (result.error) sendJson(res, 400, { error: result.error });
       else
@@ -152,9 +178,7 @@ module.exports = function createAlertsHandler(ctx) {
         }
         if (!permit(res, user, ACTION.REARM, alert)) return true;
         const body = await readJson(req);
-        const currentPrice = alert
-          ? store.getPrice(alert.symbol)
-          : undefined;
+        const currentPrice = alert ? priceFor(alert) : undefined;
         finishAlert(
           res,
           alerts.rearm(id, currentPrice, user, body.expectedVersion),
@@ -191,12 +215,26 @@ module.exports = function createAlertsHandler(ctx) {
         const body = await readJson(req);
         delete body.zoneCreator;
         delete body.creatorUserId;
+        const next = { ...alert, ...body };
+        if (
+          alert.market !== "cash" &&
+          (next.market !== alert.market ||
+            next.symbol !== alert.symbol ||
+            next.contractExpiry !== alert.contractExpiry ||
+            next.strike !== alert.strike ||
+            next.optionType !== alert.optionType)
+        ) {
+          sendJson(res, 400, { error: "derivative contract cannot be changed" });
+          return true;
+        }
         const formPrice = num(body.formPrice);
         delete body.formPrice;
-        const currentPrice =
-          formPrice > 0
-            ? formPrice
-            : store.getPrice(String(body.symbol || "").toUpperCase());
+        const contractError = validateDerivativeContract(next);
+        if (contractError) {
+          sendJson(res, 400, { error: contractError });
+          return true;
+        }
+        const currentPrice = formPrice > 0 ? formPrice : priceFor(next);
         finishAlert(
           res,
           alerts.update(id, body, currentPrice, user, body.expectedVersion),
