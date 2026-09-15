@@ -908,25 +908,19 @@
               ? lv.variation
               : Math.abs(lv.variation);
           const sign = lv.variation > 0 ? "+" : lv.variation < 0 ? "−" : "";
-          const stats = [
-            ["Open", pts(lv.open)],
-            ["High", pts(lv.high)],
-            ["Low", pts(lv.low)],
-            ["Prev", pts(lv.prevClose)],
-            ["52W H", pts(lv.yearHigh)],
-            ["52W L", pts(lv.yearLow)],
-            ["1Y", pct(lv.perChange365d)],
-          ]
-            .map(([k, v]) => `<span>${k}<b>${v}</b></span>`)
-            .join("");
           return (
             `<div class="idxcard${activeCls}" data-index="${name}" role="button" tabindex="0" aria-label="Show ${name}">` +
-            `<span class="idxcard-name">${name}</span>` +
-            `<span class="idxcard-row">` +
+            `<div class="idxcard-head"><span class="idxcard-name">${name}</span>${activeCls ? '<span class="idxcard-selected">Selected</span>' : ""}</div>` +
+            `<div class="idxcard-quote">` +
             `<span class="idxcard-pts num">${pts(lv.last)}</span>` +
             `<span class="delta ${c}">${sign + pts(absPts)}<span class="pc">${pct(lv.pChange)}</span></span>` +
-            `</span>` +
-            `<span class="idxcard-stats">${stats}</span>` +
+            `</div>` +
+            `<div class="idxcard-session">` +
+            `<span><small>Open</small><b class="num">${pts(lv.open)}</b></span>` +
+            `<span><small>Prev close</small><b class="num">${pts(lv.prevClose)}</b></span>` +
+            `<span class="idxcard-range"><small>Day range</small><b class="num">${pts(lv.low)} — ${pts(lv.high)}</b></span>` +
+            `</div>` +
+            `<div class="idxcard-context"><span>52W <b class="num">${pts(lv.yearLow)} — ${pts(lv.yearHigh)}</b></span><span class="${cls(lv.perChange365d)}">1Y ${pct(lv.perChange365d)}</span></div>` +
             `</div>`
           );
         }).join("");
@@ -1373,8 +1367,11 @@
       async function init() {
         try {
           const cfg = await (await fetch("/api/alert-config")).json();
-          if (Array.isArray(cfg.indices) && cfg.indices.length)
-            INDEX_NAMES = cfg.indices;
+          // Alert configuration includes derivative-only groups for alert creation.
+          // The dashboard renders cash-market index snapshots only, so retain its
+          // dedicated cash list and never create empty derivative cards here.
+          if (Array.isArray(cfg.cashIndices) && cfg.cashIndices.length)
+            INDEX_NAMES = cfg.cashIndices;
         } catch (_) {
           /* keep default INDEX_NAMES */
         }

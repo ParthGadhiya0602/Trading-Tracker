@@ -14,6 +14,7 @@
     <link rel="stylesheet" href="modules/reports/index.css" />
     <link rel="stylesheet" href="modules/market/index.css" />
     <link rel="stylesheet" href="modules/derivatives/index.css" />
+    <link rel="stylesheet" href="modules/us-stocks/index.css" />
     <link rel="stylesheet" href="modules/auth/index.css" />
   </head>
   <body>
@@ -143,6 +144,17 @@
             tabindex="-1"
           >
             <i data-lucide="bar-chart-3" aria-hidden="true"></i>Reports
+          </button>
+          <button
+            class="tab"
+            id="view-tab-usstocks"
+            data-view="usstocks"
+            role="tab"
+            aria-controls="usstocksView"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            <i data-lucide="globe" aria-hidden="true"></i>US Stocks
           </button>
           <button
             class="tab"
@@ -605,16 +617,22 @@
           </div>
           <form class="alert-form" id="alertForm" autocomplete="off">
             <input type="hidden" id="al-id" />
-            <input type="hidden" id="al-market" value="cash" />
-            <input type="hidden" id="al-future-expiry" value="" />
-            <input type="hidden" id="al-option-strike" value="" />
-            <input type="hidden" id="al-option-type" value="" />
             <label>
+              Instrument
+              <select id="al-market" required>
+                <option value="cash">Cash equity</option>
+                <option value="index-future">Index future</option>
+                <option value="stock-future">Stock future</option>
+                <option value="index-option">Index option</option>
+                <option value="stock-option">Stock option</option>
+              </select>
+            </label>
+            <label id="al-index-wrap">
               Index
               <select id="al-index" required></select>
             </label>
             <label>
-              Stock
+              <span id="al-symbol-label">Stock</span>
               <input
                 id="al-symbol"
                 list="symList"
@@ -623,6 +641,28 @@
               />
               <datalist id="symList"></datalist>
             </label>
+            <div id="al-contract-picker" hidden>
+              <label>
+                Expiry
+                <select id="al-future-expiry" disabled required>
+                  <option value="">Select a symbol first…</option>
+                </select>
+              </label>
+              <div class="form-grid" id="al-option-picker" hidden>
+                <label>
+                  Strike
+                  <select id="al-option-strike" disabled required>
+                    <option value="">Select an expiry first…</option>
+                  </select>
+                </label>
+                <label>
+                  Contract side
+                  <select id="al-option-type" disabled required>
+                    <option value="">Select a strike first…</option>
+                  </select>
+                </label>
+              </div>
+            </div>
             <p class="form-contract" id="al-contract" hidden></p>
             <div class="form-grid">
               <label>
@@ -1244,6 +1284,45 @@
       </div>
     </div>
     <!-- /#reportsView -->
+
+    <section
+      id="usstocksView"
+      role="tabpanel"
+      aria-labelledby="view-tab-usstocks"
+      hidden
+    >
+      <div class="alerts-bar">
+        <div class="alerts-head">
+          <h2 class="alerts-title">
+            <i data-lucide="globe" aria-hidden="true"></i> US Stocks
+          </h2>
+          <p class="alerts-sub">
+            Large-cap US stocks by sector. Opens the chart on TradingView in a new tab.
+          </p>
+        </div>
+        <div class="alerts-bar-right">
+          <span class="meta" id="usAsOf"></span>
+          <select id="usSectorFilter" class="us-select" aria-label="Filter by sector">
+            <option value="">All sectors</option>
+          </select>
+          <select id="usExchFilter" class="us-select" aria-label="Filter by exchange">
+            <option value="">All exchanges</option>
+            <option value="NASDAQ">NASDAQ</option>
+            <option value="NYSE">NYSE</option>
+          </select>
+          <input
+            id="usSearch"
+            class="us-search"
+            type="search"
+            placeholder="Filter symbol or name…"
+            autocomplete="off"
+            aria-label="Filter US stocks"
+          />
+        </div>
+      </div>
+      <div id="usSectors" class="us-sectors"></div>
+    </section>
+    <!-- /#usstocksView -->
 
     <section
       id="usersView"

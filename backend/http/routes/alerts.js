@@ -11,6 +11,7 @@ module.exports = function createAlertsHandler(ctx) {
     eligibleAlertCreators,
     resolveAlertCreator,
     respond,
+    store,
   } = ctx;
   const { finishAlert, num, permit, readJson, sendJson } = respond;
 
@@ -33,6 +34,71 @@ module.exports = function createAlertsHandler(ctx) {
     return quote.leg ? null : "selected option contract is unavailable";
   }
 
+  async function loadContractChoices(input) {
+    const market = String(input.market || "");
+    const symbol = String(input.symbol || "").trim().toUpperCase();
+    const expiry = String(input.expiry || "").trim();
+    if (!derivativesService) throw new Error("derivatives are unavailable");
+    if (!symbol) throw new Error("select a symbol first");
+    const isFuture = ["index-future", "stock-future"].includes(market);
+    const isOption = ["index-option", "stock-option"].includes(market);
+    if (!isFuture && !isOption) throw new Error("invalid instrument");
+    if (isFuture && !config.DERIVATIVES_FUTURES_ENABLED)
+      throw new Error("futures are unavailable");
+    if (market === "stock-option" && !config.DERIVATIVES_STOCK_OPTIONS_ENABLED)
+      throw new Error("stock options are unavailable");
+
+    if (isOption && !expiry) {
+      const contracts = await derivativesService.getContracts({
+        market: market === "index-option" ? "index" : "equity",
+        symbol,
+      });
+      return { kind: "option-expiries", symbol, expiries: contracts.expiries || [] };
+    }
+
+    let demand;
+    if (market === "index-future")
+      demand = derivativesService.addFuturesDemand({ market: "index", symbol });
+    else if (market === "stock-future")
+      demand = derivativesService.addStockFuturesDemand({ symbol });
+    else
+      demand = derivativesService.addDemand({
+        market: market === "index-option" ? "index" : "equity",
+        symbol,
+        expiry,
+      });
+    try {
+      const snapshot = (await derivativesService.refresh(demand.key)) ||
+        store.derivatives.getSnapshot(demand.key);
+      const rows = snapshot && snapshot.data && Array.isArray(snapshot.data.rows)
+        ? snapshot.data.rows
+        : [];
+      if (isFuture) {
+        return {
+          kind: "futures",
+          symbol,
+          contracts: rows.map((row) => ({
+            expiry: row.expiry,
+            lastPrice: Number(row.lastPrice) || null,
+          })).filter((row) => row.expiry),
+        };
+      }
+      return {
+        kind: "option-chain",
+        symbol,
+        expiry,
+        underlyingValue: Number(snapshot && snapshot.data && snapshot.data.underlyingValue) || null,
+        contracts: rows.map((row) => ({
+          strike: Number(row.strike),
+          callPrice: row.call && Number(row.call.lastPrice),
+          putPrice: row.put && Number(row.put.lastPrice),
+        })).filter((row) => Number.isFinite(row.strike)),
+      };
+    } finally {
+      demand.release();
+    }
+  }
+
   return async function handleAlertsApi(req, res, url, method, user) {
     if (url === "/api/alert-creators" && method === "GET") {
       if (!permit(res, user, ACTION.CREATE)) return true;
@@ -46,7 +112,34 @@ module.exports = function createAlertsHandler(ctx) {
       return true;
     }
     if (url === "/api/alert-config" && method === "GET") {
-      sendJson(res, 200, alerts.config());
+      sendJson(res, 200, {
+        ...alerts.config(),
+        instruments: {
+          indexFuture: Boolean(derivativesService && config.DERIVATIVES_FUTURES_ENABLED),
+          stockFuture: Boolean(derivativesService && config.DERIVATIVES_FUTURES_ENABLED),
+          indexOption: Boolean(derivativesService),
+          stockOption: Boolean(derivativesService && config.DERIVATIVES_STOCK_OPTIONS_ENABLED),
+        },
+      });
+      return true;
+    }
+    if (url === "/api/alert-contracts" && method === "GET") {
+      if (!permit(res, user, ACTION.CREATE)) return true;
+      const query = new URL(req.url, `http://${config.HOST}`).searchParams;
+      const market = query.get("market") || "";
+      const symbol = query.get("symbol") || "";
+      const expiry = query.get("expiry") || "";
+      if ([...query.keys()].some((key) =>
+        !["market", "symbol", "expiry"].includes(key) || query.getAll(key).length !== 1,
+      )) {
+        sendJson(res, 400, { error: "invalid contract query" });
+        return true;
+      }
+      try {
+        sendJson(res, 200, await loadContractChoices({ market, symbol, expiry }));
+      } catch (error) {
+        sendJson(res, 400, { error: (error && error.message) || "contract lookup failed" });
+      }
       return true;
     }
     if (url === "/api/price" && method === "GET") {

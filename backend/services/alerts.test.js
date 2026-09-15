@@ -20,6 +20,21 @@ function definition(overrides = {}) {
   };
 }
 
+test("identifies the final re-alert before BUY and SELL entry", () => {
+  assert.equal(
+    alerts._test.isFinalRealert({ side: "BUY", alertPrice: 100, stepPct: 0.5 }, 100.4),
+    true,
+  );
+  assert.equal(
+    alerts._test.isFinalRealert({ side: "BUY", alertPrice: 100, stepPct: 0.5 }, 101), false);
+  assert.equal(
+    alerts._test.isFinalRealert({ side: "SELL", alertPrice: 100, stepPct: 0.5 }, 99.6),
+    true,
+  );
+  assert.equal(
+    alerts._test.isFinalRealert({ side: "SELL", alertPrice: 100, stepPct: 0.5 }, 99), false);
+});
+
 test("editing an entered alert preserves lifecycle and metadata", () => {
   const lastEvent = { id: "event-1", type: "PARTIAL", at: "2026-08-12T10:00:00.000Z" };
   const alert = {

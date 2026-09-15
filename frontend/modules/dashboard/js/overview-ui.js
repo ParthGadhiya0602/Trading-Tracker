@@ -54,9 +54,15 @@
 
   let bound = false;
 
-  function kpiCard(label, value, valClass, sub, icon, hero) {
+  function kpiCard(label, value, valClass, sub, icon, hero, alertStatus, alertSignal) {
+    const filterKey = alertSignal ? "signal" : alertStatus ? "status" : "";
+    const filterValue = alertSignal || alertStatus;
+    const interactive = filterKey ? " is-interactive" : "";
+    const action = filterKey
+      ? ' data-alert-filter-key="' + filterKey + '" data-alert-filter-value="' + filterValue + '" role="button" tabindex="0" aria-label="Show ' + esc(label) + ' in Alerts"'
+      : "";
     return (
-      '<div class="kpi-card' + (hero ? " hero" : "") + '">' +
+      '<div class="kpi-card' + (hero ? " hero" : "") + interactive + '"' + action + ">" +
       '<div class="kpi-head"><span class="kpi-chip"><i data-lucide="' + icon + '"></i></span>' +
       '<span class="label">' + esc(label) + "</span></div>" +
       '<span class="value ' + (valClass || "") + '">' + value + "</span>" +
@@ -83,10 +89,13 @@
   const HOSTID = { alerts: "#dashAlerts", notifs: "#dashNotifs", trades: "#dashTrades" };
   const EMPTYMSG = { alerts: "No active alerts.", notifs: "No notifications yet.", trades: "No trades logged yet." };
   function alertRow(a) {
+    const entryNext = a.lastEvent && a.lastEvent.type === "FINAL_REALERT";
     return (
       '<div class="mini-row"><div class="mr-main"><strong>' + esc(a.symbol) +
       '</strong><span class="mr-sub">' + esc(a.index || "") + " · " + rs(a.alertPrice) +
-      '</span></div><div style="display:flex;gap:6px;align-items:center">' + sidePill(a.side) + statusPill(a.status) + "</div></div>"
+      '</span></div><div style="display:flex;gap:6px;align-items:center">' +
+      (entryNext ? '<span class="pill accent">Entry next</span>' : "") +
+      sidePill(a.side) + statusPill(a.status) + "</div></div>"
     );
   }
   function notifRow(n) {
@@ -112,15 +121,17 @@
     const host = $(HOSTID[key]);
     if (!host) return;
     const items = listData[key] || [];
+    const panel = host.closest(".report-panel");
+    panel?.classList.toggle("is-expanded", Boolean(expanded[key] && items.length > PREVIEW));
     if (!items.length) {
       host.innerHTML = empty(EMPTYMSG[key]);
       return;
     }
     const show = expanded[key] ? items : items.slice(0, PREVIEW);
-    let html = show.map(ROWFN[key]).join("");
+    let html = '<div class="mini-scroll">' + show.map(ROWFN[key]).join("") + "</div>";
     if (items.length > PREVIEW) {
       html +=
-        '<button type="button" class="mini-more" data-more="' + key + '">' +
+        '<button type="button" class="mini-more" data-more="' + key + '" aria-controls="' + host.id + '" aria-expanded="' + String(Boolean(expanded[key])) + '">' +
         (expanded[key] ? "Show less" : "See all (" + items.length + ")") +
         "</button>";
     }
@@ -132,7 +143,9 @@
     if (!(window.APP_AUTH && window.APP_AUTH.user)) return;
     const [summary, activeAlerts, notifs, trades] = await Promise.all([
       api("/api/trades/summary").catch(() => null),
-      api("/api/alerts/active").catch(() => null),
+      // `/active` is the transient ringing-toast queue. Dashboard totals need
+      // every non-closed alert, including an alert that has entered its trade.
+      api("/api/alerts").catch(() => null),
       api("/api/notifications").catch(() => null),
       api("/api/trades").catch(() => null),
     ]);
@@ -142,6 +155,13 @@
     const closed = sc.closed || { netPnl: 0, count: 0 };
     const open = sc.open || { count: 0 };
     const alertsArr = (activeAlerts && activeAlerts.alerts) || [];
+    const triggeredAlerts = alertsArr.filter((alert) => alert.status === "triggered");
+    const entryNextAlerts = triggeredAlerts.filter(
+      (alert) => alert.lastEvent && alert.lastEvent.type === "FINAL_REALERT",
+    );
+    const enteredAlerts = alertsArr.filter(
+      (alert) => alert.status === "active" || alert.entered === true,
+    );
     const notifArr = (notifs && notifs.notifications) || [];
     const unread = notifArr.filter((n) => !n.readAt).length;
     const kpis = $("#dashUserKpis");
@@ -149,7 +169,9 @@
       kpis.innerHTML =
         kpiCard("Net P&L (closed)", closed.count ? signed(closed.netPnl) : "-", cls(closed.netPnl), closed.count + " closed", "trending-up", true) +
         kpiCard("Open trades", String(open.count), "", "logged positions", "circle-dot") +
-        kpiCard("Active alerts", String(alertsArr.length), "", "armed / triggered", "bell-ring") +
+        kpiCard("Triggered alerts", String(triggeredAlerts.length), "", "awaiting entry", "bell-ring", false, "triggered") +
+        kpiCard("Entry next", String(entryNextAlerts.length), "accent", "final re-alert", "circle-alert", false, "", "FINAL_REALERT") +
+        kpiCard("Entered alerts", String(enteredAlerts.length), "", "SL / target tracking", "crosshair", false, "active") +
         kpiCard("Unread", String(unread), unread ? "accent" : "", "notifications", "bell");
     }
 
@@ -187,6 +209,23 @@
           if (tab) tab.click();
         }
       });
+    const kpis = $("#dashUserKpis");
+    const openAlertFilter = (card) => {
+      const key = card && card.dataset.alertFilterKey;
+      const value = card && card.dataset.alertFilterValue;
+      if (key && value && window.__openAlertsByFilter)
+        window.__openAlertsByFilter(key, value);
+    };
+    if (kpis) {
+      kpis.addEventListener("click", (e) => openAlertFilter(e.target.closest("[data-alert-filter-key]")));
+      kpis.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        const card = e.target.closest("[data-alert-filter-key]");
+        if (!card) return;
+        e.preventDefault();
+        openAlertFilter(card);
+      });
+    }
   }
 
   window.__initOverview = function () {

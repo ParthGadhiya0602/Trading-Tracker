@@ -129,6 +129,7 @@ module.exports = function createRouter(ctx) {
         if (
           url === "/api/symbols" ||
           url === "/api/alert-config" ||
+          url === "/api/alert-contracts" ||
           url === "/api/alert-creators" ||
           url === "/api/price" ||
           url.startsWith("/api/alerts")

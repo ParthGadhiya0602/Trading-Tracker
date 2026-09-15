@@ -65,6 +65,18 @@
   max-height: 90vh;
   overflow: auto;
 }
+#tradeModal .alert-form {
+  padding: 16px 18px 18px;
+}
+
+/* A fieldset has browser-default margins and padding. Reset those defaults so
+   the exit controls follow the same grid rhythm as the rest of the form. */
+#tradeModal #tr-exit-group {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
 #tradeViewModal .sm-card {
   margin: auto;
 }
@@ -76,6 +88,12 @@
   border-radius: var(--radius-sm);
   padding: 10px;
   background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+@media (max-width: 480px) {
+  #tradeModal .alert-form {
+    padding: 14px;
+  }
 }
 
 /* dim separator inside entry/exit cells */

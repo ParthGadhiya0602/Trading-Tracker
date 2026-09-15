@@ -4,10 +4,10 @@
  *
  * Lifecycle per alert (BUY example, alert=1000 -> trigger=1100):
  *   armed     -> LTP reaches trigger (alert +10%)        => fire TRIGGER,  status=triggered
- *   triggered -> LTP rises +2% above the last fired peak => fire RE-ALERT  (monotonic)
- *   triggered -> LTP falls back below the alert price    => fire FINAL,    status=closed
- * SELL mirrors it: trigger = alert -10%; re-alert every -2% below the trough;
- * final + close when LTP rises back above the alert price.
+ *   triggered -> LTP falls by each re-alert step          => fire RE-ALERT
+ *   final re-alert -> its next step would reach entry     => fire FINAL_REALERT
+ *   triggered -> LTP reaches the alert price              => fire ENTRY, status=active
+ * SELL mirrors it: trigger = alert -10%; re-alerts rise toward the entry.
  *
  * Fires create durable per-user Telegram deliveries + are marked "ringing" for the
  * in-page popup/sound. Snooze clears the current ring (re-rings on the next fire);
@@ -28,6 +28,10 @@ const OUTBOX_FILE = path.join(STORE_DIR, "alert-outbox.json");
 
 const OFFSET_PCT = 10; // default trigger offset (fallback if a timeframe is unmapped)
 const STEP_PCT = 2; // default re-alert step (fallback for legacy alerts)
+// Reject a create/edit whose stop loss sits more than this % away from the entry price. A stop
+// that far is almost always a typo (e.g. a transposed digit: 207.1 entered as 270.1 = ~30% away).
+// Applies to both sides (BUY stop below, SELL stop above). Env-tunable via ALERT_MAX_SL_PCT.
+const MAX_SL_PCT = Math.max(1, Number(process.env.ALERT_MAX_SL_PCT) || 25);
 const STEP_DIVISOR = 5; // re-alert step = trigger offset / 5 (keeps the 10%->2% ratio)
 // Cash-market indices share the dashboard's cached constituent lists. Stock futures use a
 // separate alert grouping because their prices are resolved from derivatives snapshots.
@@ -255,9 +259,20 @@ function applyDefinitionUpdate(alert, clean) {
   alert.triggerPrice = rawTrigger;
   return preserveEnteredState;
 }
+// A final re-alert is the last price checkpoint before entry: applying one more
+// configured re-alert step would reach or cross the entry price. The entry itself
+// still owns the state transition on a later tick.
+function isFinalRealert(alert, ltp) {
+  const step = Number(alert.stepPct) / 100;
+  if (!(ltp > 0) || !(alert.alertPrice > 0) || !(step > 0)) return false;
+  return alert.side === "BUY"
+    ? ltp * (1 - step) <= alert.alertPrice
+    : ltp * (1 + step) >= alert.alertPrice;
+}
 const EVENT_HEAD = {
   TRIGGER: "🔔 Alert",
   REALERT: "🔁 Re-alert",
+  FINAL_REALERT: "⏳ Final re-alert — entry next",
   ENTRY: "🎯 Entry (entry price reached)",
   PARTIAL: "🟡 Partial (3× hit)",
   SUCCESS: "✅ Success (5× hit)",
@@ -266,7 +281,7 @@ const EVENT_HEAD = {
 };
 // Only approach events ring (persistent toast + Snooze/Close). Entry/Partial/Success/Fail
 // notify silently (Telegram + notification center) but never prompt for an action.
-const RINGS = new Set(["TRIGGER", "REALERT"]);
+const RINGS = new Set(["TRIGGER", "REALERT", "FINAL_REALERT"]);
 // One uniform labeled schema for every alert (Telegram + in-page toast).
 function messageFor(alert, type, ltp) {
   const head = EVENT_HEAD[type] || "🔔 Alert";
@@ -415,6 +430,7 @@ class AlertEngine {
       applyDefinitionUpdate,
       createTransientEditNotification: (alert, actor) =>
         this.#createTransientEditNotification(alert, actor),
+      isFinalRealert,
       resetTransientNotifications: () => {
         this.transientNotifications.length = 0;
       },
@@ -1048,6 +1064,15 @@ class AlertEngine {
       errors.push("stop loss must be below entry price for BUY");
     else if (side === "SELL" && alertPrice > 0 && stopLoss <= alertPrice)
       errors.push("stop loss must be above entry price for SELL");
+    // Guard against an implausibly far stop (typically a mistyped stop-loss). Independent of the
+    // side check above so a correct-side-but-too-far stop is still rejected.
+    if (stopLoss > 0 && alertPrice > 0) {
+      const slPct = (Math.abs(alertPrice - stopLoss) / alertPrice) * 100;
+      if (slPct > MAX_SL_PCT)
+        errors.push(
+          `stop loss is ${slPct.toFixed(1)}% from entry price (max ${MAX_SL_PCT}%) — verify the value`,
+        );
+    }
     if (!note) errors.push("note is required");
     // on create the caller must supply a creator (set server-side from the session);
     // on edit a blank/legacy stored value shouldn't block an otherwise-valid update.
@@ -1565,7 +1590,11 @@ class AlertEngine {
           : ltp >= alert.peak * (1 + sp);
         if (step) {
           alert.peak = round2(ltp);
-          this.#fire(alert, "REALERT", round2(ltp));
+          this.#fire(
+            alert,
+            isFinalRealert(alert, ltp) ? "FINAL_REALERT" : "REALERT",
+            round2(ltp),
+          );
           mutated = true;
         }
       }

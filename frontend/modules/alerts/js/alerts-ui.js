@@ -28,6 +28,9 @@
         let OFFSETS = {}; // { timeframe: pct } from the server
         let DEFAULT_OFFSET = 10;
         let curPrice = 0; // live price of the selected symbol (for the trigger preview)
+        let DERIVATIVE_STOCKS = null;
+        let CONTRACT_CHOICES = [];
+        let contractRequest = 0;
         let allAlerts = []; // active alerts (pre-filter)
         let allArchived = []; // archived (closed) alerts
         let alertView = "active"; // "active" | "closed" (segmented toggle)
@@ -90,6 +93,11 @@
               ["success", "Success"],
             ],
           },
+          {
+            key: "signal",
+            label: "Signal",
+            opts: [["FINAL_REALERT", "Entry next"]],
+          },
         ];
         const sel = {
           index: new Set(),
@@ -98,6 +106,7 @@
           tf: new Set(),
           review: new Set(),
           outcome: new Set(),
+          signal: new Set(),
         };
         const optsOf = (def) =>
           typeof def.opts === "function" ? def.opts() : def.opts;
@@ -116,7 +125,7 @@
         function buildFilters() {
           const host = $("#alertFilters");
           host.innerHTML = "";
-          const advancedKeys = new Set(["tf", "review", "outcome"]);
+          const advancedKeys = new Set(["tf", "review", "outcome", "signal"]);
           const advanced = document.createElement("div");
           advanced.className = "ms-advanced";
           advanced.id = "advancedFilters";
@@ -193,7 +202,7 @@
             wrap.querySelector(".ms-count").textContent = c ? `(${c})` : "";
             wrap.querySelector(".ms-btn").classList.toggle("active", c > 0);
           });
-          const advancedCount = ["tf", "review", "outcome"].reduce(
+          const advancedCount = ["tf", "review", "outcome", "signal"].reduce(
             (sum, key) => sum + sel[key].size,
             0,
           );
@@ -371,9 +380,164 @@
         // ---------- form ----------
         function fillDatalist() {
           const list = SYMS[$("#al-index").value] || [];
-          $("#symList").innerHTML = list
+          setSymbolChoices(list);
+        }
+        function setSymbolChoices(symbols) {
+          $("#symList").innerHTML = (symbols || [])
             .map((s) => `<option value="${s}"></option>`)
             .join("");
+        }
+        function isFutureMarket(market = $("#al-market").value) {
+          return ["index-future", "stock-future"].includes(market);
+        }
+        function isOptionMarket(market = $("#al-market").value) {
+          return ["index-option", "stock-option"].includes(market);
+        }
+        function isDerivativeMarket(market = $("#al-market").value) {
+          return isFutureMarket(market) || isOptionMarket(market);
+        }
+        function derivativeIndexGroup(market = $("#al-market").value) {
+          return market === "index-future" ? "INDEX FUTURES"
+            : market === "stock-future" ? "STOCK FUTURES"
+              : market === "index-option" ? "INDEX OPTIONS" : "STOCK OPTIONS";
+        }
+        async function loadDerivativeStocks() {
+          if (DERIVATIVE_STOCKS) return DERIVATIVE_STOCKS;
+          const result = await api("/api/derivatives/equities");
+          DERIVATIVE_STOCKS = Array.isArray(result.symbols) ? result.symbols : Array.isArray(result) ? result : [];
+          return DERIVATIVE_STOCKS;
+        }
+        function resetContractPicker() {
+          CONTRACT_CHOICES = [];
+          $("#al-future-expiry").innerHTML = '<option value="">Select a symbol first…</option>';
+          $("#al-future-expiry").disabled = true;
+          $("#al-option-strike").innerHTML = '<option value="">Select an expiry first…</option>';
+          $("#al-option-strike").disabled = true;
+          $("#al-option-type").innerHTML = '<option value="">Select a strike first…</option>';
+          $("#al-option-type").disabled = true;
+          $("#al-future-expiry").value = "";
+          $("#al-option-strike").value = "";
+          $("#al-option-type").value = "";
+        }
+        async function configureInstrument({ locked = false } = {}) {
+          const market = $("#al-market").value;
+          const derivative = isDerivativeMarket(market);
+          const indexDerivative = market === "index-future" || market === "index-option";
+          $("#al-index-wrap").hidden = derivative;
+          $("#al-contract-picker").hidden = !derivative;
+          $("#al-option-picker").hidden = !isOptionMarket(market);
+          $("#al-index").disabled = derivative || locked;
+          $("#al-market").disabled = locked;
+          $("#al-symbol-label").textContent = derivative ? (indexDerivative ? "F&O index" : "F&O stock") : "Stock";
+          $("#al-symbol").readOnly = locked;
+          $("#al-symbol").setAttribute("list", "symList");
+          if (!derivative) {
+            fillDatalist();
+            return;
+          }
+          setDerivativeIndex(derivativeIndexGroup(market));
+          try {
+            setSymbolChoices(indexDerivative
+              ? ["NIFTY", "NIFTYNXT50", "FINNIFTY", "BANKNIFTY", "MIDCPNIFTY", "NIFTYFPI"]
+              : await loadDerivativeStocks());
+          } catch (error) {
+            setSymbolChoices([]);
+            $("#al-err").textContent = `Could not load F&O symbols. ${error.message}`;
+          }
+        }
+        function selectCurrentContract(price, label) {
+          curPrice = Number(price) || 0;
+          if (curPrice > 0) $("#al-price").value = curPrice;
+          const contract = $("#al-contract");
+          contract.hidden = !label;
+          contract.textContent = label || "";
+          updatePreview();
+          updateTargets();
+        }
+        async function loadContractChoices() {
+          const market = $("#al-market").value;
+          const symbol = $("#al-symbol").value.trim().toUpperCase();
+          if (!isDerivativeMarket(market) || !symbol) return;
+          const request = ++contractRequest;
+          resetContractPicker();
+          $("#al-contract").hidden = false;
+          $("#al-contract").textContent = "Loading available contracts…";
+          try {
+            const base = new URLSearchParams({ market, symbol });
+            const initial = await api("/api/alert-contracts?" + base);
+            if (request !== contractRequest) return;
+            if (initial.kind === "futures") {
+              CONTRACT_CHOICES = initial.contracts || [];
+              const expiry = $("#al-future-expiry");
+              expiry.innerHTML = '<option value="" disabled>Select expiry…</option>' + CONTRACT_CHOICES.map((entry) => `<option value="${entry.expiry}">${entry.expiry}</option>`).join("");
+              expiry.disabled = !CONTRACT_CHOICES.length;
+              if (CONTRACT_CHOICES.length) {
+                expiry.value = CONTRACT_CHOICES[0].expiry;
+                const selected = CONTRACT_CHOICES[0];
+                selectCurrentContract(selected.lastPrice, `${market === "index-future" ? "Index" : "Stock"} future · ${symbol} · ${selected.expiry}`);
+              } else selectCurrentContract(null, "No active futures contracts are available.");
+              return;
+            }
+            const expiries = initial.expiries || [];
+            const expiry = $("#al-future-expiry");
+            expiry.innerHTML = '<option value="" disabled>Select expiry…</option>' + expiries.map((entry) => `<option value="${entry.expiry}">${entry.expiry}</option>`).join("");
+            expiry.disabled = !expiries.length;
+            if (!expiries.length) {
+              selectCurrentContract(null, "No option expiries are available.");
+              return;
+            }
+            expiry.value = expiries[0].expiry;
+            await loadOptionContracts(request);
+          } catch (error) {
+            if (request !== contractRequest) return;
+            selectCurrentContract(null, `Could not load contracts. ${error.message}`);
+          }
+        }
+        async function loadOptionContracts(request = ++contractRequest) {
+          const market = $("#al-market").value;
+          const symbol = $("#al-symbol").value.trim().toUpperCase();
+          const expiry = $("#al-future-expiry").value;
+          if (!isOptionMarket(market) || !symbol || !expiry) return;
+          $("#al-option-strike").disabled = true;
+          $("#al-option-type").disabled = true;
+          try {
+            const params = new URLSearchParams({ market, symbol, expiry });
+            const result = await api("/api/alert-contracts?" + params);
+            if (request !== contractRequest) return;
+            CONTRACT_CHOICES = result.contracts || [];
+            const strike = $("#al-option-strike");
+            const nearest = CONTRACT_CHOICES.reduce((best, entry) => !best || Math.abs(entry.strike - (result.underlyingValue || entry.strike)) < Math.abs(best.strike - (result.underlyingValue || best.strike)) ? entry : best, null);
+            strike.innerHTML = '<option value="" disabled>Select strike…</option>' + CONTRACT_CHOICES.map((entry) => `<option value="${entry.strike}">${entry.strike}</option>`).join("");
+            strike.disabled = !nearest;
+            if (!nearest) {
+              selectCurrentContract(null, "No option contracts are available.");
+              return;
+            }
+            strike.value = String(nearest.strike);
+            selectOptionLeg();
+          } catch (error) {
+            if (request !== contractRequest) return;
+            selectCurrentContract(null, `Could not load option contracts. ${error.message}`);
+          }
+        }
+        function selectOptionLeg(keepType = false) {
+          const selected = CONTRACT_CHOICES.find((entry) => String(entry.strike) === $("#al-option-strike").value);
+          const type = $("#al-option-type");
+          if (!selected) return;
+          const previousType = type.value;
+          const choices = [];
+          if (Number.isFinite(selected.callPrice)) choices.push(["CE", selected.callPrice]);
+          if (Number.isFinite(selected.putPrice)) choices.push(["PE", selected.putPrice]);
+          type.innerHTML = choices.map(([value]) => `<option value="${value}">${value}</option>`).join("");
+          type.disabled = !choices.length;
+          if (!choices.length) return;
+          const selectedType = keepType && choices.some(([value]) => value === previousType)
+            ? previousType
+            : choices[0][0];
+          type.value = selectedType;
+          const [, price] = choices.find(([value]) => value === selectedType);
+          const optionType = selectedType;
+          selectCurrentContract(price, `${optionType} ${selected.strike} · ${$("#al-symbol").value.trim().toUpperCase()} · ${$("#al-future-expiry").value}`);
         }
         async function loadSymbols() {
           try {
@@ -388,6 +552,11 @@
             const c = await api("/api/alert-config");
             OFFSETS = c.offsets || {};
             DEFAULT_OFFSET = c.defaultOffset || 10;
+            const instruments = c.instruments || {};
+            $("#al-market option[value='index-future']").disabled = !instruments.indexFuture;
+            $("#al-market option[value='stock-future']").disabled = !instruments.stockFuture;
+            $("#al-market option[value='index-option']").disabled = !instruments.indexOption;
+            $("#al-market option[value='stock-option']").disabled = !instruments.stockOption;
             if (Array.isArray(c.indices) && c.indices.length) {
               ALERT_INDICES = c.indices;
               CASH_ALERT_INDICES = Array.isArray(c.cashIndices) && c.cashIndices.length
@@ -460,6 +629,8 @@
             }
             const r = await api("/api/price?" + params.toString());
             curPrice = r.price || 0;
+            if (curPrice > 0 && !editId && !$("#al-price").value)
+              $("#al-price").value = curPrice;
           } catch (_) {
             curPrice = 0;
           }
@@ -468,31 +639,29 @@
         function setFutureContract(market, symbol, expiry, currentPrice) {
           const isIndexFuture = market === "index-future";
           $("#al-market").value = isIndexFuture ? "index-future" : "stock-future";
+          void configureInstrument({ locked: true });
+          $("#al-future-expiry").innerHTML = `<option value="${expiry || ""}">${expiry || "Expiry unavailable"}</option>`;
           $("#al-future-expiry").value = expiry || "";
+          $("#al-future-expiry").disabled = true;
           setDerivativeIndex(isIndexFuture ? "INDEX FUTURES" : "STOCK FUTURES");
-          $("#al-index").disabled = true;
           $("#al-symbol").value = String(symbol || "").toUpperCase();
-          $("#al-symbol").readOnly = true;
-          $("#al-symbol").removeAttribute("list");
-          const contract = $("#al-contract");
-          contract.hidden = false;
-          contract.textContent = `${isIndexFuture ? "Index" : "Stock"} future · ${$("#al-symbol").value} · ${expiry || "Expiry unavailable"}`;
-          curPrice = Number(currentPrice) || 0;
+          selectCurrentContract(currentPrice, `${isIndexFuture ? "Index" : "Stock"} future · ${$("#al-symbol").value} · ${expiry || "Expiry unavailable"}`);
         }
         function setOptionContract(market, symbol, expiry, strike, optionType, currentPrice) {
           $("#al-market").value = market;
+          void configureInstrument({ locked: true });
+          $("#al-future-expiry").innerHTML = `<option value="${expiry || ""}">${expiry || "Expiry unavailable"}</option>`;
           $("#al-future-expiry").value = expiry || "";
+          $("#al-future-expiry").disabled = true;
+          $("#al-option-strike").innerHTML = `<option value="${strike || ""}">${strike || "Strike unavailable"}</option>`;
           $("#al-option-strike").value = strike || "";
+          $("#al-option-strike").disabled = true;
+          $("#al-option-type").innerHTML = `<option value="${optionType || ""}">${optionType || "Option unavailable"}</option>`;
           $("#al-option-type").value = optionType || "";
+          $("#al-option-type").disabled = true;
           setDerivativeIndex(market === "index-option" ? "INDEX OPTIONS" : "STOCK OPTIONS");
-          $("#al-index").disabled = true;
           $("#al-symbol").value = String(symbol || "").toUpperCase();
-          $("#al-symbol").readOnly = true;
-          $("#al-symbol").removeAttribute("list");
-          const contract = $("#al-contract");
-          contract.hidden = false;
-          contract.textContent = `${optionType} ${strike} · ${$("#al-symbol").value} · ${expiry || "Expiry unavailable"}`;
-          curPrice = Number(currentPrice) || 0;
+          selectCurrentContract(currentPrice, `${optionType} ${strike} · ${$("#al-symbol").value} · ${expiry || "Expiry unavailable"}`);
         }
         function setDerivativeIndex(index) {
           const select = $("#al-index");
@@ -507,15 +676,18 @@
         }
         function clearFutureContract() {
           $("#al-market").value = "cash";
-          $("#al-future-expiry").value = "";
-          $("#al-option-strike").value = "";
-          $("#al-option-type").value = "";
+          $("#al-market").disabled = false;
+          resetContractPicker();
+          $("#al-index-wrap").hidden = false;
+          $("#al-contract-picker").hidden = true;
+          $("#al-option-picker").hidden = true;
           $("#al-index").disabled = false;
           Array.from($("#al-index").options)
             .filter((option) => option.dataset.derivative === "true")
             .forEach((option) => option.remove());
           $("#al-symbol").readOnly = false;
           $("#al-symbol").setAttribute("list", "symList");
+          $("#al-symbol-label").textContent = "Stock";
           $("#al-contract").hidden = true;
           $("#al-contract").textContent = "";
         }
@@ -659,7 +831,7 @@
             ? a.candleDate + (a.candleTime ? " " + a.candleTime : "")
             : "-";
           const lastEv = a.lastEvent
-            ? `${a.lastEvent.type} @ ${fmtRs(a.lastEvent.price)}`
+            ? `${a.lastEvent.type === "FINAL_REALERT" ? "Final re-alert · entry next" : a.lastEvent.type} @ ${fmtRs(a.lastEvent.price)}`
             : "-";
           const reward =
             a.profit3 != null
@@ -1067,7 +1239,8 @@
                   (!sel.side.size || sel.side.has(a.side)) &&
                   (!sel.tf.size || sel.tf.has(a.timeframe)) &&
                   (!sel.review.size || sel.review.has(a.reviewState || "pending")) &&
-                  (!sel.outcome.size || sel.outcome.has(a.zoneOutcome || "pending")),
+                  (!sel.outcome.size || sel.outcome.has(a.zoneOutcome || "pending")) &&
+                  (!sel.signal.size || sel.signal.has(a.lastEvent && a.lastEvent.type)),
               )
             : source;
           renderList(list);
@@ -1113,6 +1286,9 @@
               `<div class="ai-state-row">` +
               `<span class="ai-status ${a.status}">${esc(a.status)}</span>` +
               `<span class="ai-side ${a.side === "BUY" ? "buy" : "sell"}">${esc(a.side)}</span>` +
+              (a.lastEvent && a.lastEvent.type === "FINAL_REALERT"
+                ? `<span class="ai-final-realert">Entry next</span>`
+                : "") +
               reviewBadgeHtml(a) +
               `<span class="ai-zone ${a.zoneOutcome || "pending"}">${zoneText(a.zoneOutcome)} outcome</span>` +
               (isArch ? `<span class="ai-archived">Archived</span>` : "") +
@@ -1286,6 +1462,7 @@
               FINAL: "🎯",
               TRIGGER: "🔔",
               REALERT: "🔁",
+              FINAL_REALERT: "⏳",
               PARTIAL: "🟡",
               SUCCESS: "✅",
               FAIL: "❌",
@@ -1377,6 +1554,7 @@
           ENTRY: "🎯",
           TRIGGER: "🔔",
           REALERT: "🔁",
+          FINAL_REALERT: "⏳",
           PARTIAL: "🟡",
           SUCCESS: "✅",
           FAIL: "❌",
@@ -1637,13 +1815,14 @@
           const reportsOn = view === "reports";
           const marketOn = view === "market";
           const derivativesOn = view === "derivatives";
+          const usstocksOn = view === "usstocks";
           $$(".viewnav .tab").forEach((x) => {
             const on = x.dataset.view === view;
             x.classList.toggle("active", on);
             x.setAttribute("aria-selected", String(on));
             x.tabIndex = on ? 0 : -1;
           });
-          $("#dashView").hidden = alertsOn || usersOn || tradesOn || reportsOn || marketOn || derivativesOn;
+          $("#dashView").hidden = alertsOn || usersOn || tradesOn || reportsOn || marketOn || derivativesOn || usstocksOn;
           $("#alertsView").hidden = !alertsOn;
           const tradesView = $("#tradesView");
           if (tradesView) tradesView.hidden = !tradesOn;
@@ -1653,6 +1832,8 @@
           if (marketView) marketView.hidden = !marketOn;
           const derivativesView = $("#derivativesView");
           if (derivativesView) derivativesView.hidden = !derivativesOn;
+          const usstocksView = $("#usstocksView");
+          if (usstocksView) usstocksView.hidden = !usstocksOn;
           $("#usersView").hidden = !usersOn;
           const dashOn = view === "dash";
           if (dashOn && window.__initOverview) window.__initOverview();
@@ -1666,6 +1847,7 @@
           if (!marketOn && window.__stopMarket) window.__stopMarket();
           if (derivativesOn && window.__initDerivatives) window.__initDerivatives();
           if (!derivativesOn && window.__stopDerivatives) window.__stopDerivatives();
+          if (usstocksOn && window.__initUsStocks) window.__initUsStocks();
           if (usersOn && window.__openUsersView) window.__openUsersView();
         }
         $$(".viewnav .tab").forEach((b) => {
@@ -1691,7 +1873,33 @@
           fillDatalist();
           loadPrice();
         });
-        $("#al-symbol").addEventListener("change", loadPrice);
+        $("#al-market").addEventListener("change", async () => {
+          contractRequest += 1;
+          $("#al-symbol").value = "";
+          $("#al-price").value = "";
+          curPrice = 0;
+          resetContractPicker();
+          $("#al-contract").hidden = true;
+          $("#al-contract").textContent = "";
+          $("#al-err").textContent = "";
+          await configureInstrument();
+          updatePreview();
+          updateTargets();
+        });
+        $("#al-symbol").addEventListener("change", () => {
+          if (isDerivativeMarket()) loadContractChoices();
+          else loadPrice();
+        });
+        $("#al-future-expiry").addEventListener("change", () => {
+          if (isFutureMarket()) {
+            const selected = CONTRACT_CHOICES.find((entry) => entry.expiry === $("#al-future-expiry").value);
+            if (selected) selectCurrentContract(selected.lastPrice, `${$("#al-market").value === "index-future" ? "Index" : "Stock"} future · ${$("#al-symbol").value.trim().toUpperCase()} · ${selected.expiry}`);
+          } else if (isOptionMarket()) {
+            loadOptionContracts();
+          }
+        });
+        $("#al-option-strike").addEventListener("change", () => selectOptionLeg());
+        $("#al-option-type").addEventListener("change", () => selectOptionLeg(true));
         $("#al-price").addEventListener("input", () => {
           updatePreview();
           updateTargets();
@@ -1808,6 +2016,22 @@
           activateView("alerts");
           openAlertView(a);
         };
+        // Dashboard state cards use the same public filter path as the Alerts view,
+        // avoiding a second list or a one-off status interpretation.
+        window.__openAlertsByFilter = function (key, value) {
+          const definition = FILTER_DEFS.find((item) => item.key === key);
+          if (!definition || !optsOf(definition).some(([option]) => option === value)) return;
+          alertView = "active";
+          for (const values of Object.values(sel)) values.clear();
+          sel[key].add(value);
+          syncFilterChecks();
+          updateFilterUI();
+          syncViewToggle();
+          activateView("alerts");
+          applyFilters();
+        };
+        window.__openAlertsByStatus = (status) =>
+          window.__openAlertsByFilter("status", status);
 
         let alertsPollStarted = false;
         async function pollAlertChanges() {

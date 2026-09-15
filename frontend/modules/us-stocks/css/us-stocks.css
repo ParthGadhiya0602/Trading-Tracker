@@ -1,0 +1,154 @@
+/* US Stocks view — sector-grouped directory of large-cap US names linking out to TradingView.
+   Static content; styling reuses the shared design tokens (no new colour literals). */
+
+.us-search {
+  font: inherit;
+  font-size: var(--fs-td);
+  color: inherit;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  padding: 6px 12px;
+  min-width: 220px;
+  max-width: 100%;
+  outline: none;
+  transition: border-color 0.15s var(--ease);
+}
+.us-search:focus {
+  border-color: var(--accent);
+}
+
+.us-select {
+  font: inherit;
+  font-size: var(--fs-td);
+  color: inherit;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  padding: 6px 10px;
+  max-width: 100%;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.15s var(--ease);
+}
+.us-select:focus {
+  border-color: var(--accent);
+}
+
+.us-sectors {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-section, 20px);
+  padding: 16px;
+}
+
+.us-sector-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: var(--fs-title, 15px);
+  font-weight: var(--fw-semibold);
+}
+.us-count {
+  font-size: var(--fs-caption, 11px);
+  font-weight: var(--fw-semibold);
+  color: var(--muted-ink);
+  background: var(--chip, var(--panel2));
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  padding: 1px 8px;
+}
+
+.us-chips {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 8px;
+}
+
+.us-chip {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas:
+    "sym exch"
+    "name name";
+  align-items: baseline;
+  gap: 2px 8px;
+  text-decoration: none;
+  color: inherit;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  transition:
+    border-color 0.15s var(--ease),
+    background 0.15s var(--ease),
+    transform 0.1s var(--ease);
+}
+.us-chip:hover {
+  border-color: var(--accent);
+  background: var(--accent-tint, var(--panel2));
+}
+.us-chip:active {
+  transform: translateY(1px);
+}
+.us-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.us-sym {
+  grid-area: sym;
+  font-weight: var(--fw-bold);
+  color: var(--accent);
+  letter-spacing: 0.02em;
+}
+.us-name {
+  grid-area: name;
+  font-size: var(--fs-caption, 12px);
+  color: var(--muted-ink);
+  white-space: normal; /* show the entire company name; wrap as needed */
+  overflow-wrap: anywhere;
+  line-height: 1.3;
+}
+.us-exch {
+  grid-area: exch;
+  justify-self: end;
+  align-self: center;
+  font-size: 10px;
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs, 4px);
+  padding: 0 5px;
+  white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .us-sectors {
+    padding: 12px;
+  }
+  .us-chips {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* >=820: body is viewport-locked (height:100vh; overflow:hidden), so the view must
+   scroll its own content instead of clipping. Matches the reports/alerts pattern. */
+@media (min-width: 820px) {
+  #usstocksView:not([hidden]) {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  #usstocksView .alerts-bar {
+    flex: none;
+  }
+  #usstocksView .us-sectors {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+}

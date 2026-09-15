@@ -100,6 +100,17 @@
         grid-template-columns: 1fr 1fr;
         gap: 12px;
       }
+      #al-contract-picker {
+        display: grid;
+        gap: 12px;
+        padding: 12px;
+        background: color-mix(in srgb, var(--accent) 5%, var(--panel2));
+        border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
+        border-radius: var(--radius-sm);
+      }
+      #al-contract-picker[hidden] {
+        display: none;
+      }
       @media (max-width: 440px) {
         .form-grid {
           grid-template-columns: 1fr;
@@ -309,13 +320,13 @@
         inset: 0;
         z-index: 260;
         display: none;
-        align-items: flex-start;
+        align-items: center;
         justify-content: center;
-        padding: 24px 16px;
+        padding: 16px;
         background: color-mix(in srgb, #05070c 55%, transparent);
         -webkit-backdrop-filter: blur(3px);
         backdrop-filter: blur(3px);
-        overflow-y: auto;
+        overflow: hidden;
       }
       #alertModal.show {
         display: flex;
@@ -327,6 +338,14 @@
         box-shadow: var(--shadow-lg);
         width: min(580px, 96vw);
         margin: 0 auto auto;
+      }
+      #alertModal .am-card {
+        width: min(580px, 100%);
+        max-height: calc(100dvh - 32px);
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
       }
       .am-head {
         display: flex;
@@ -360,6 +379,21 @@
       }
       #alertModal .alert-form {
         padding: 16px 18px;
+        min-height: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        scrollbar-color: var(--line-strong) var(--panel-raised);
+      }
+      #alertModal .alert-form::-webkit-scrollbar {
+        width: 10px;
+      }
+      #alertModal .alert-form::-webkit-scrollbar-track {
+        background: var(--panel-raised);
+      }
+      #alertModal .alert-form::-webkit-scrollbar-thumb {
+        background: var(--line-strong);
+        border: 3px solid var(--panel-raised);
+        border-radius: var(--radius-pill);
       }
 
       /* ---- approve/reject review modal (reuses .am-card/.am-head chrome) ---- */
@@ -582,6 +616,17 @@
       .alert-item .ai-review.pending {
         color: var(--warn);
         background: var(--warn-tint);
+      }
+      .alert-item .ai-final-realert {
+        padding: 3px 9px;
+        border: 1px solid color-mix(in srgb, var(--warn) 48%, var(--line));
+        border-radius: var(--radius-pill);
+        background: var(--warn-tint);
+        color: var(--warn);
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.35px;
+        text-transform: uppercase;
       }
       .alert-item .ai-levels,
       .alert-item .ai-plan {

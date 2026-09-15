@@ -5,5 +5,6 @@ import "./modules/trades/index.js";
 import "./modules/reports/index.js";
 import "./modules/market/index.js";
 import "./modules/derivatives/index.js";
+import "./modules/us-stocks/index.js";
 import "./modules/shell/index.js";
 import "./modules/auth/index.js";

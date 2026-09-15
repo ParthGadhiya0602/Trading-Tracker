@@ -296,10 +296,13 @@ function legValue(leg, names) {
 function normalizeLeg(leg, side, symbol, expiry, strike, underlyingValue) {
   validateIdentity(leg.underlying, symbol, expiry, "underlying");
   validateIdentity(leg.expiryDate, symbol, expiry, "expiry");
-  if (leg.strikePrice != null && leg.strikePrice !== "") {
-    const legStrike = numberOrNull(leg.strikePrice);
-    if (legStrike == null || legStrike !== strike) throw identityError("NSE leg strike does not match its row", { field: "strikePrice" });
-  }
+  // Some indices (e.g. NIFTYNXT50, illiquid/newly-listed chains) return placeholder legs with
+  // strikePrice:0 and null underlying/expiry. A zero leg strike is "not provided" - trust the
+  // row-level strike (authoritative) instead of throwing and discarding the whole chain. Only a
+  // real, non-zero leg strike that disagrees with its row is a genuine identity mismatch.
+  const legStrike = numberOrNull(leg.strikePrice);
+  if (legStrike != null && legStrike > 0 && legStrike !== strike)
+    throw identityError("NSE leg strike does not match its row", { field: "strikePrice" });
   const legUnderlyingValue = numberOrNull(leg.underlyingValue);
   return {
     providerContractId: stringOrNull(legValue(leg, ["identifier", "contractId", "instrumentKey"])),
